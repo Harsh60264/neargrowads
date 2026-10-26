@@ -1,0 +1,910 @@
+[
+  {
+    "articleId": "legacy-720ec900baec4842da773d2da07f748b",
+    "slug": "google-business-profile-optimization-for-local-growth",
+    "sourceRevision": "69ecc3bade54736fbd8ff4f5fd16c73818ff958448a042b494194b34042ed342",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 97,
+    "coverage": 95,
+    "provisional": true,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “How to Make Your Business Visible on  Google”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "All first-party uploaded image files referenced by the article exist."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "warning",
+        "evidence": "Featured image; Article image 1"
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_checked",
+        "evidence": "Intrinsic dimensions were not measured; image dimension attributes and layout-shift risk are not asserted."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/google-business-profile-optimization-for-local-growth as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "passed",
+        "evidence": "At least one article-specific social-sharing value is configured."
+      }
+    ],
+    "findings": [
+      {
+        "id": "image-alt-1",
+        "checkId": "image-alt",
+        "severity": "warning",
+        "title": "Image alternative text is missing",
+        "field": "Featured image",
+        "evidence": "Featured image has an empty effective alt value and is not marked decorative.",
+        "suggestion": "Add concise alt text for an informative image, or mark it decorative if it conveys no content.",
+        "editorAnchor": "featured-image"
+      },
+      {
+        "id": "image-alt-2",
+        "checkId": "image-alt",
+        "severity": "warning",
+        "title": "Image alternative text is missing",
+        "field": "Article image 1",
+        "evidence": "Article image 1 has an empty effective alt value and is not marked decorative.",
+        "suggestion": "Add concise alt text for an informative image, or mark it decorative if it conveys no content.",
+        "editorAnchor": "image-7ac93eb2-e34f-4b38-bc5c-37914274fe27"
+      }
+    ],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-3237dddc0295c91a3af55aeb4c754850",
+    "slug": "wew",
+    "sourceRevision": "4347ca9d8076013daba5d3770e5b5058f196bc587d60947153f1a1468888f6ba",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 100,
+    "coverage": 100,
+    "provisional": false,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “wew”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description fallback excerpt."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "not_applicable",
+        "evidence": "No article image sources are configured."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/wew as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "passed",
+        "evidence": "At least one article-specific social-sharing value is configured."
+      }
+    ],
+    "findings": [],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-e1fa9567524692b93b21f7993c5e28d4",
+    "slug": "ha",
+    "sourceRevision": "e149b0cdec8991b9ff4287986a31c0386d0f538f41ad7d2b1e635d32531a25fc",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 100,
+    "coverage": 100,
+    "provisional": false,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “ha”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description fallback excerpt."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "not_applicable",
+        "evidence": "No article image sources are configured."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/ha as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "passed",
+        "evidence": "At least one article-specific social-sharing value is configured."
+      }
+    ],
+    "findings": [],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-95f8d22d8a3c6545bae09b07a6f11a03",
+    "slug": "google-business-profile-optimization-guide",
+    "sourceRevision": "9dcf5999e4d94f835a64b73acb57ecaef82ff84be817a1fd02f8024ef2a67ba8",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 96,
+    "coverage": 95,
+    "provisional": true,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “The Google Business Profile Optimization Playbook for Growing Brands”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "All first-party uploaded image files referenced by the article exist."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "warning",
+        "evidence": "Featured image"
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_checked",
+        "evidence": "Intrinsic dimensions were not measured; image dimension attributes and layout-shift risk are not asserted."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/google-business-profile-optimization-guide as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "warning",
+        "evidence": "No article-specific social title or image is configured; the renderer may fall back to site defaults."
+      }
+    ],
+    "findings": [
+      {
+        "id": "image-alt-1",
+        "checkId": "image-alt",
+        "severity": "warning",
+        "title": "Image alternative text is missing",
+        "field": "Featured image",
+        "evidence": "Featured image has an empty effective alt value and is not marked decorative.",
+        "suggestion": "Add concise alt text for an informative image, or mark it decorative if it conveys no content.",
+        "editorAnchor": "featured-image"
+      },
+      {
+        "id": "social-2",
+        "checkId": "social",
+        "severity": "warning",
+        "title": "Social-sharing metadata could be more specific",
+        "field": "Social sharing",
+        "evidence": "No article-specific social title or image is configured.",
+        "suggestion": "Optionally add a social title or image to improve how this article is presented when shared.",
+        "editorAnchor": "social-metadata"
+      }
+    ],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-530c9257c3e1544ccc040ec9facb3a40",
+    "slug": "local-seo-vs-google-ads-guide",
+    "sourceRevision": "13bf8216876caba863dcfcb920f80571bef58cb3bdca695c670791ec2cdcd5f9",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 99,
+    "coverage": 100,
+    "provisional": false,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “Local SEO vs. Google Ads: Which Strategy Should Your Business Prioritize?”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "not_applicable",
+        "evidence": "No article image sources are configured."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/local-seo-vs-google-ads-guide as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "warning",
+        "evidence": "No article-specific social title or image is configured; the renderer may fall back to site defaults."
+      }
+    ],
+    "findings": [
+      {
+        "id": "social-1",
+        "checkId": "social",
+        "severity": "warning",
+        "title": "Social-sharing metadata could be more specific",
+        "field": "Social sharing",
+        "evidence": "No article-specific social title or image is configured.",
+        "suggestion": "Optionally add a social title or image to improve how this article is presented when shared.",
+        "editorAnchor": "social-metadata"
+      }
+    ],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-69b7ba36a096fd4dc5c0c4f09e3023ae",
+    "slug": "mobile-website-conversion-mistakes",
+    "sourceRevision": "1b6b07c5ca947e5a8cca78b8d9a8856aaebe0db01cd2ef3a17c3a56e3d2b59e9",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 99,
+    "coverage": 100,
+    "provisional": false,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “5 Subtle Website Flaws That Silently Kill Inquiries on Mobile Devices”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "not_applicable",
+        "evidence": "No article image sources are configured."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/mobile-website-conversion-mistakes as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "warning",
+        "evidence": "No article-specific social title or image is configured; the renderer may fall back to site defaults."
+      }
+    ],
+    "findings": [
+      {
+        "id": "social-1",
+        "checkId": "social",
+        "severity": "warning",
+        "title": "Social-sharing metadata could be more specific",
+        "field": "Social sharing",
+        "evidence": "No article-specific social title or image is configured.",
+        "suggestion": "Optionally add a social title or image to improve how this article is presented when shared.",
+        "editorAnchor": "social-metadata"
+      }
+    ],
+    "status": "published"
+  },
+  {
+    "articleId": "legacy-297896808378c834b1d4fd54859e9836",
+    "slug": "practical-ai-automation-for-small-business",
+    "sourceRevision": "8ae4d91a49a98eadf5fcb235eb7b2ebf28fb04514ca436ccd4db13ac96eeb4da",
+    "analyzerVersion": 1,
+    "scannedAt": "2026-10-26T19:05:15.236Z",
+    "score": 99,
+    "coverage": 100,
+    "provisional": false,
+    "checks": [
+      {
+        "id": "title",
+        "label": "Effective page title",
+        "weight": 12,
+        "status": "passed",
+        "evidence": "The public renderer uses “Pragmatic AI Automation for Small Businesses: What Actually Works Today”."
+      },
+      {
+        "id": "description",
+        "label": "Effective meta description",
+        "weight": 11,
+        "status": "passed",
+        "evidence": "The public renderer uses the saved description."
+      },
+      {
+        "id": "duplicate-title",
+        "label": "Duplicate title",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective title."
+      },
+      {
+        "id": "duplicate-description",
+        "label": "Duplicate description",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "No other saved blog has the same effective description."
+      },
+      {
+        "id": "body",
+        "label": "Article body",
+        "weight": 10,
+        "status": "passed",
+        "evidence": "Readable text exists in the saved article body."
+      },
+      {
+        "id": "headings",
+        "label": "Heading structure",
+        "weight": 6,
+        "status": "passed",
+        "evidence": "Saved section headings are present and contain no recognized placeholder text."
+      },
+      {
+        "id": "author",
+        "label": "Author information",
+        "weight": 4,
+        "status": "passed",
+        "evidence": "The rendered article has an author name and role."
+      },
+      {
+        "id": "internal-links",
+        "label": "Internal links",
+        "weight": 8,
+        "status": "passed",
+        "evidence": "All detected same-site links match a known site route."
+      },
+      {
+        "id": "image-sources",
+        "label": "Image sources",
+        "weight": 10,
+        "status": "not_applicable",
+        "evidence": "No article image sources are configured."
+      },
+      {
+        "id": "image-alt",
+        "label": "Image alternative text",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "image-dimensions",
+        "label": "Image dimensions / layout shift",
+        "weight": 5,
+        "status": "not_applicable",
+        "evidence": "No article images are configured."
+      },
+      {
+        "id": "canonical",
+        "label": "Canonical URL",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The server renderer emits https://neargrowads.in/blog/practical-ai-automation-for-small-business as the canonical URL for this article route."
+      },
+      {
+        "id": "robots",
+        "label": "Indexing directives",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The public renderer marks a published article indexable; indexing by search engines is unknown."
+      },
+      {
+        "id": "sitemap",
+        "label": "Sitemap inclusion",
+        "weight": 5,
+        "status": "passed",
+        "evidence": "The generated sitemap includes all saved articles whose status is published."
+      },
+      {
+        "id": "social",
+        "label": "Social-sharing metadata",
+        "weight": 2,
+        "status": "warning",
+        "evidence": "No article-specific social title or image is configured; the renderer may fall back to site defaults."
+      }
+    ],
+    "findings": [
+      {
+        "id": "social-1",
+        "checkId": "social",
+        "severity": "warning",
+        "title": "Social-sharing metadata could be more specific",
+        "field": "Social sharing",
+        "evidence": "No article-specific social title or image is configured.",
+        "suggestion": "Optionally add a social title or image to improve how this article is presented when shared.",
+        "editorAnchor": "social-metadata"
+      }
+    ],
+    "status": "published"
+  }
+]

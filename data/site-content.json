@@ -1,0 +1,96 @@
+{
+  "seo": {
+    "home": {
+      "title": "NearGrow Ads — Digital Growth & Marketing Agency",
+      "description": "NearGrow Ads helps ambitious businesses grow across markets with international and multi-location SEO, performance advertising, scalable web engineering, and practical AI automation.",
+      "ogImage": ""
+    },
+    "services": {
+      "title": "Digital Growth Services | NearGrow Ads",
+      "description": "Explore international SEO, Google Ads, social media marketing, web development, content, AI automation, and growth strategy services.",
+      "ogImage": ""
+    },
+    "work": {
+      "title": "Work & Case Studies | NearGrow Ads",
+      "description": "Explore documented NearGrow Ads client outcomes across retail, B2B, healthcare, search visibility, paid acquisition, and web engineering.",
+      "ogImage": ""
+    },
+    "about": {
+      "title": "About NearGrow Ads | A Practical Growth Partner",
+      "description": "Meet NearGrow Ads, a digital growth agency combining international SEO, performance advertising, web engineering, and reliable automation.",
+      "ogImage": ""
+    },
+    "contact": {
+      "title": "Contact NearGrow Ads | Start a Growth Conversation",
+      "description": "Contact NearGrow Ads about international SEO, multi-location discovery, performance advertising, and web engineering.",
+      "ogImage": ""
+    }
+  },
+  "hero": {
+    "eyebrow": "India-based · Built for global growth",
+    "headlineBefore": "Grow Your Business With",
+    "headlineHighlight": "Smarter",
+    "headlineAfter": "Digital Marketing.",
+    "description": "NearGrow Ads helps ambitious businesses grow across markets through international SEO, multi-location search, performance advertising, scalable web engineering, and practical AI-powered automation.",
+    "primaryCta": "Get a Free Consultation",
+    "secondaryCta": "Explore Our Services",
+    "videoUrl": ""
+  },
+  "philosophy": {
+    "eyebrow": "PEOPLE · IDEAS · GROWTH",
+    "title": "A Growth Partner Built on Honest Fundamentals",
+    "description": "We combine people who understand business realities, ideas that solve real customer problems, and technology that produces measurable growth.",
+    "peopleTitle": "PEOPLE",
+    "peopleDescription": "We take the time to understand your unique business, profit margins, competitors, and the exact kind of customers you want to attract. Real human strategists, not automated churn.",
+    "ideasTitle": "IDEAS",
+    "ideasDescription": "Rather than copying generic templates, we formulate custom acquisition strategies: pinpointing high-intent search terms, crafting compelling ad angles, and removing friction from your sales pathways.",
+    "growthTitle": "GROWTH",
+    "growthDescription": "Every marketing initiative is measured by real business outcomes: phone calls, WhatsApp messages, store visits, and qualified sales leads, rather than hollow vanity metrics."
+  },
+  "missionVision": {
+    "eyebrow": "Our Purpose",
+    "title": "Our Mission / Our Vision",
+    "missionTitle": "Our Mission",
+    "missionDescription": "To empower ambitious businesses with high-visibility digital marketing, international and multi-location search, and measurable customer acquisition—through creative, practical, data-driven strategies tailored to their growth goals.",
+    "visionTitle": "Our Vision",
+    "visionDescription": "To be a trusted digital growth partner, helping businesses turn their digital presence into qualified demand across markets through practical results and transparent execution."
+  },
+  "services": {
+    "eyebrow": "Capabilities",
+    "title": "Our Core Marketing Services",
+    "description": "Eight connected services to strengthen your digital foundation, reach the right audiences across markets, and earn more qualified inquiries.",
+    "cta": "Explore all services"
+  },
+  "methodology": {
+    "eyebrow": "Our Process",
+    "title": "How NearGrow Ads Works",
+    "description": "A structured, transparent five-stage methodology ensuring you always understand what is being built, why, and what it achieves."
+  },
+  "servicesPage": {
+    "eyebrow": "PEOPLE · IDEAS · GROWTH",
+    "headlineBefore": "Digital growth, built around",
+    "headlineHighlight": "what moves your business.",
+    "description": "From international search and performance advertising to conversion-ready websites and smarter systems, bring your growth channels together with one accountable team.",
+    "primaryCta": "Request a custom audit",
+    "supportingText": "A clear, practical plan for your next stage of growth."
+  },
+  "aboutPage": {
+    "eyebrow": "About NearGrow Ads",
+    "title": "A Practical Growth Partner for Real Businesses.",
+    "description": "We started NearGrow Ads to offer growing businesses a refreshingly honest alternative to bloated, opaque agencies. We combine international and multi-location SEO, performance advertising, scalable web engineering, and reliable automation to help you attract qualified demand across markets.",
+    "primaryCta": "Schedule Discovery Call",
+    "secondaryCta": "Contact Our Team"
+  },
+  "workPage": {
+    "eyebrow": "Portfolio & Selected Work",
+    "title": "Documented Client Outcomes & Case Studies",
+    "description": "Explore documented outcomes across retail, B2B, and healthcare—from search visibility and paid acquisition to scalable websites and more efficient customer acquisition.",
+    "primaryCta": "Get a Free Consultation"
+  },
+  "contactPage": {
+    "eyebrow": "Contact & Inquiries",
+    "title": "Get in Touch With NearGrow Ads",
+    "description": "Have a question about international SEO, multi-location discovery, performance advertising, or web engineering? Reach our team directly via phone, WhatsApp, or form submission.",
+    "primaryCta": "Schedule Discovery Consultation"
+  }
+}

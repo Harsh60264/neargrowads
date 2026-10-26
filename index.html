@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      try {
+        const sessionTheme = sessionStorage.getItem('neargrow-theme');
+        document.documentElement.dataset.theme = sessionTheme === 'dark' ? 'dark' : 'light';
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
+    <title>NearGrow Ads — Digital Growth & Marketing Agency</title>
+    <meta
+      name="description"
+      content="NearGrow Ads helps ambitious businesses grow across markets with international and multi-location SEO, performance advertising, scalable web engineering, and practical AI automation. Based in India, partnering globally."
+    />
+    <meta name="author" content="NearGrow Ads" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="__SITE_ORIGIN__/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="__SITE_ORIGIN__/" />
+    <meta property="og:title" content="NearGrow Ads — Digital Growth & Marketing Agency" />
+    <meta
+      property="og:description"
+      content="Build visibility, acquire customers, and scale across markets with transparent, data-driven digital growth. People · Ideas · Growth."
+    />
+    <meta property="og:site_name" content="NearGrow Ads" />
+    <meta property="og:image" content="__SITE_ORIGIN__/neargrow-mark.jpg" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NearGrow Ads — Digital Growth & Marketing Agency" />
+    <meta
+      name="twitter:description"
+      content="Building Brands Together: People · Ideas · Growth. International SEO, performance advertising, scalable web engineering, and practical AI workflows."
+    />
+    <meta name="twitter:image" content="__SITE_ORIGIN__/neargrow-mark.jpg" />
+
+    <!-- Google tag (gtag.js) from verified neargrowads.in configuration -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-4VFEZPY7JW"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', 'G-4VFEZPY7JW');
+    </script>
+
+    <!-- Google Fonts: Plus Jakarta Sans for clean geometric modern agency brand -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="icon" type="image/jpeg" href="/neargrow-mark.jpg" />
+    <link rel="preload" as="image" href="/images/brand/neargrow-mark.png" />
+    <link rel="preload" as="image" href="/images/brand/neargrow-leaf-center.png" />
+    <link rel="preload" as="image" href="/images/brand/neargrow-leaf-left.png" />
+    <link rel="preload" as="image" href="/images/brand/neargrow-leaf-orange.png" />
+
+    <!-- Schema.org Structured Data with verified details -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "__SITE_ORIGIN__/#organization",
+          "name": "NearGrow Ads",
+          "url": "__SITE_ORIGIN__",
+          "logo": "__SITE_ORIGIN__/neargrow-mark.jpg",
+          "slogan": "Building Brands Together",
+          "description": "Digital growth and marketing agency providing international and multi-location SEO, Google Business Profile management, performance advertising, scalable website engineering, and practical AI automation.",
+          "telephone": "+91 92898 10149",
+          "email": "info@neargrowads.in",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "New Delhi",
+            "addressRegion": "Delhi",
+            "addressCountry": "IN"
+          },
+          "openingHours": "Mo-Fr 09:00-18:00",
+          "sameAs": [
+            "https://instagram.com/neargrowads",
+            "https://facebook.com/neargrowads",
+            "https://linkedin.com/company/neargrowads/"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "__SITE_ORIGIN__/#website",
+          "url": "__SITE_ORIGIN__",
+          "name": "NearGrow Ads",
+          "publisher": {
+            "@id": "__SITE_ORIGIN__/#organization"
+          }
+        }
+      ]
+    }
+    </script>
+  </head>
+  <body class="bg-white text-[#171A17] antialiased selection:bg-[#48A868]/20 selection:text-[#171A17]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

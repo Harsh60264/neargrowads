@@ -1,0 +1,77 @@
+{
+  "name": "NearGrow Ads - Service Lead Routing Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "neargrow-lead-routing",
+        "options": {}
+      },
+      "name": "Routing Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.body.serviceInterest }}",
+                    "operation": "contains",
+                    "value2": "google-ads"
+                  }
+                ]
+              },
+              "outputKey": "PaidAdsTeam"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.body.serviceInterest }}",
+                    "operation": "contains",
+                    "value2": "google-business-profile"
+                  }
+                ]
+              },
+              "outputKey": "LocalSeoTeam"
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.body.serviceInterest }}",
+                    "operation": "contains",
+                    "value2": "website"
+                  }
+                ]
+              },
+              "outputKey": "WebEngineeringTeam"
+            }
+          ]
+        }
+      },
+      "name": "Route By Requested Service",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Routing Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route By Requested Service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
