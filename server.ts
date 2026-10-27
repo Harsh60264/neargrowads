@@ -6876,9 +6876,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   });
 
   app.get('/api/blogs', async (_req: Request, res: Response): Promise<void> => {
-    const posts = await readBlogPosts();
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ posts: posts.filter((post) => post.status === 'published') });
+    try {
+      const posts = await readBlogPosts();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ posts: posts.filter((post) => post.status === 'published') });
+    } catch (error) {
+      console.error('[NearGrow Ads] Published blog API query failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'Published blog data is temporarily unavailable.' });
+    }
   });
 
   app.get('/api/case-study-images/:filename', async (req: Request, res: Response): Promise<void> => {

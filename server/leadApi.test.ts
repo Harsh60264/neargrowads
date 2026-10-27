@@ -25,6 +25,7 @@ async function reservePort(): Promise<number> {
 async function startLocalServer(
   mode: 'development' | 'test' | 'production',
   notificationWebhookUrl = '',
+  cmsStorage?: { supabaseUrl: string; serviceRoleKey: string },
 ): Promise<{
   baseUrl: string;
   stop: () => Promise<void>;
@@ -46,6 +47,11 @@ async function startLocalServer(
       SUPABASE_URL: '',
       SUPABASE_ANON_KEY: '',
       SUPABASE_SERVICE_ROLE_KEY: '',
+      ...(cmsStorage ? {
+        VERCEL: '1',
+        SUPABASE_URL: cmsStorage.supabaseUrl,
+        SUPABASE_SERVICE_ROLE_KEY: cmsStorage.serviceRoleKey,
+      } : {}),
       ADMIN_OWNER_USER_ID: '',
       ADMIN_SESSION_SECRET: '',
       SITE_URL: mode === 'production' ? 'https://localhost' : '',
@@ -177,6 +183,45 @@ test('nested API routes resolve through the Express application', async () => {
     assert.equal(loginResponse.status, 503);
   } finally {
     await server.stop();
+  }
+});
+
+test('public blogs API returns 503 JSON when serverless CMS storage is unavailable', async () => {
+  let cmsDocumentRequests = 0;
+  const supabaseServer = createHttpServer((req, res) => {
+    cmsDocumentRequests += 1;
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      code: 'PGRST205',
+      message: 'The serverless CMS document relation is not available in the schema cache.',
+    }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    supabaseServer.once('error', reject);
+    supabaseServer.listen(0, '127.0.0.1', resolve);
+  });
+  const supabaseAddress = supabaseServer.address();
+  if (!supabaseAddress || typeof supabaseAddress === 'string') {
+    await new Promise<void>((resolve) => supabaseServer.close(() => resolve()));
+    throw new Error('Could not start the synthetic Supabase schema test server.');
+  }
+
+  const server = await startLocalServer('test', '', {
+    supabaseUrl: `http://127.0.0.1:${supabaseAddress.port}`,
+    serviceRoleKey: 'synthetic-test-key',
+  });
+  try {
+    const response = await fetch(`${server.baseUrl}/api/blogs`);
+    assert.equal(response.status, 503);
+    assert.match(response.headers.get('content-type') || '', /application\/json/);
+    const result = await response.json() as { message: string };
+    assert.equal(result.message, 'Published blog data is temporarily unavailable.');
+    assert.equal(cmsDocumentRequests, 1);
+  } finally {
+    await server.stop();
+    await new Promise<void>((resolve, reject) => {
+      supabaseServer.close((error) => error ? reject(error) : resolve());
+    });
   }
 });
 
