@@ -4,8 +4,12 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "/api/handler?__vercel_original_api_path=/api/:path*"
+    },
+    {
       "source": "/uploads/:folder/:filename",
-      "destination": "/api/uploads/:folder/:filename"
+      "destination": "/api/handler?__vercel_original_api_path=/api/uploads/:folder/:filename"
     },
     {
       "source": "/admin",
