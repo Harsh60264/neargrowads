@@ -125,7 +125,7 @@ async function responseMessage(response: Response): Promise<string> {
 async function adminSessionFromResponse(response: Response): Promise<AdminSession> {
   const contentType = response.headers.get('content-type')?.toLowerCase() || '';
   if (!contentType.includes('application/json')) {
-    throw new Error('The admin API is not connected to this Netlify site. The frontend is deployed, but the Express API must also be hosted and configured to handle /api/* requests.');
+    throw new Error('The admin API is not connected to this site. The frontend is deployed, but the Express API must also be hosted and configured to handle /api/* requests.');
   }
   if (!response.ok) throw new Error(await responseMessage(response));
   return await response.json() as AdminSession;
