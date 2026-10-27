@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { createVercelApplication } from '../server.ts';
+import { createVercelApplication } from '../serverless-build/serverless-app.mjs';
 
 let applicationPromise: Promise<Express> | undefined;
 

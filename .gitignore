@@ -10,3 +10,4 @@ coverage/
 *.zip
 data/uploads/
 data/super-admins.json
+serverless-build/*.mjs
