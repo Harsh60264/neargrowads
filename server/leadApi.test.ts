@@ -186,7 +186,7 @@ test('nested API routes resolve through the Express application', async () => {
   }
 });
 
-test('public blogs API returns 503 JSON when serverless CMS storage is unavailable', async () => {
+test('public blog and team APIs return 503 JSON when serverless CMS storage is unavailable', async () => {
   let cmsDocumentRequests = 0;
   const supabaseServer = createHttpServer((req, res) => {
     cmsDocumentRequests += 1;
@@ -211,12 +211,22 @@ test('public blogs API returns 503 JSON when serverless CMS storage is unavailab
     serviceRoleKey: 'synthetic-test-key',
   });
   try {
-    const response = await fetch(`${server.baseUrl}/api/blogs`);
-    assert.equal(response.status, 503);
-    assert.match(response.headers.get('content-type') || '', /application\/json/);
-    const result = await response.json() as { message: string };
-    assert.equal(result.message, 'Published blog data is temporarily unavailable.');
-    assert.equal(cmsDocumentRequests, 1);
+    const blogsResponse = await fetch(`${server.baseUrl}/api/blogs`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(blogsResponse.status, 503);
+    assert.match(blogsResponse.headers.get('content-type') || '', /application\/json/);
+    const blogsResult = await blogsResponse.json() as { message: string };
+    assert.equal(blogsResult.message, 'Published blog data is temporarily unavailable.');
+
+    const teamResponse = await fetch(`${server.baseUrl}/api/team`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(teamResponse.status, 503);
+    assert.match(teamResponse.headers.get('content-type') || '', /application\/json/);
+    const teamResult = await teamResponse.json() as { message: string };
+    assert.equal(teamResult.message, 'Team data is temporarily unavailable.');
+    assert.equal(cmsDocumentRequests, 2);
   } finally {
     await server.stop();
     await new Promise<void>((resolve, reject) => {

@@ -65,6 +65,7 @@ import {
   type SecurityRuleSettings,
   type SecuritySourceEvent,
 } from './server/securityMonitoring';
+import { resolveSiteContentState } from './server/siteContentFallback';
 import { blogSeoAdminPermission } from './server/blogSeoPermissions';
 import {
   isWebsiteVisitorId,
@@ -2638,12 +2639,12 @@ async function readAdminSiteContent(): Promise<{
   draftUpdatedBy: string | null;
 }> {
   const row = await readSiteContentRecord();
-  const legacy = await readLegacySiteContent();
   const published = row?.published_content ? validateSiteContent(row.published_content) : undefined;
   const draft = row?.draft_content ? validateSiteContent(row.draft_content) : undefined;
+  const content = await resolveSiteContentState(draft, published, readLegacySiteContent);
   return {
-    draft: draft || published || legacy,
-    published: published || legacy,
+    draft: content.draft,
+    published: content.published,
     publishedAt: row?.published_at || null,
     draftUpdatedAt: row?.updated_at || null,
     draftUpdatedBy: row?.updated_by || null,
@@ -7713,9 +7714,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   // --- Leadership & Team ---
   app.get('/api/team', async (_req: Request, res: Response): Promise<void> => {
-    const members = (await readTeam()).filter((m) => m.visible);
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ members });
+    try {
+      const members = (await readTeam()).filter((m) => m.visible);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ members });
+    } catch (error) {
+      console.error('[NearGrow Ads] Public team API query failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'Team data is temporarily unavailable.' });
+    }
   });
 
   app.get('/api/admin/team', async (req: Request, res: Response): Promise<void> => {
