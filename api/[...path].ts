@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { createVercelApplication } from '../server';
+import { createVercelApplication } from '../server.ts';
 
 let applicationPromise: Promise<Express> | undefined;
 
