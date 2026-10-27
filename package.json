@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "node --import tsx --test",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "migrate:cms": "tsx scripts/migrate-cms-data-to-supabase.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

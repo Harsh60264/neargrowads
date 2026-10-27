@@ -3,6 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Check, Eye, EyeOff, ImagePlus, LoaderCir
 import { TEAM_SEED, initials, sortTeam, type TeamGroup, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
 import { isSupportedTeamPhotoReference } from '../../data/teamPhoto';
+import { uploadAdminMedia } from './uploadAdminMedia';
 
 interface Props {
   onBack: () => void;
@@ -228,16 +229,12 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
       const blob = await prepareImage(file);
       if (uploadSequenceRef.current.get(id) !== sequence) return;
       if (blob.size < 1 || blob.size > MAX_UPLOAD_BYTES) throw new Error('Image must be larger than 0 bytes and no larger than 15 MB after resizing.');
-      const formData = new FormData();
-      formData.append('image', blob, file.name);
-      const response = await fetch('/api/admin/team/upload', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData,
+      const { url } = await uploadAdminMedia({
+        purpose: 'team',
+        file: blob,
+        fileName: file.name,
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(await apiMessage(response));
-      const { url } = await apiData<{ url: string }>(response);
       if (uploadSequenceRef.current.get(id) !== sequence) return;
       if (!isSupportedTeamPhotoReference(url) || !url) {
         throw new Error('The upload service returned an unsupported photo reference. The previous photo was kept.');

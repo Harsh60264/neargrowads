@@ -11,6 +11,7 @@ import {
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSafePublicDestination } from '../../data/publicLinks';
+import { uploadAdminMedia } from './uploadAdminMedia';
 import storefrontImage from '../../assets/images/local_business_storefront_1792080226091.jpg';
 import workspaceImage from '../../assets/images/hero_agency_workspace_1792080209028.jpg';
 import bundledHeroVideo from '../../assets/media/neargrow_ads_kinetic_4x3.mp4';
@@ -529,17 +530,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
     setError('');
     setNotice('');
     try {
-      const body = new FormData();
-      body.set('assetId', id);
-      body.set('media', file);
-      const response = await fetch('/api/admin/site-content/media/upload', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body,
-      });
-      const data = await readResponse(response);
-      if (!response.ok) throw new Error(data.message || `Could not upload media (${response.status}).`);
-      if (!data.url) throw new Error('The server stored no media URL.');
+      const data = await uploadAdminMedia({ purpose: 'site-media', file, assetId: id });
       updateMedia(id, { url: data.url }, theme);
       setNotice('Media uploaded. Save the draft and publish to make it live.');
     } catch (reason) {

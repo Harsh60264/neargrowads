@@ -5,6 +5,7 @@ import {
 import type { CaseStudy } from '../../data/caseStudiesData';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { CaseStudyImage } from '../work/CaseStudyImage';
+import { uploadAdminMedia } from './uploadAdminMedia';
 
 type StudyStatus = 'draft' | 'published' | 'archived';
 type Metric = { label: string; value: string; period: string; evidence: string };
@@ -352,12 +353,10 @@ export function AdminCaseStudies({ canCreate, canEdit, canDelete, canPublish, th
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
     if (!file || !editing) return;
-    const formData = new FormData();
-    formData.append('image', file);
     setBusy(true);
     setError('');
     try {
-      const result = await api<{ url: string }>('/api/admin/case-studies/upload', { method: 'POST', body: formData });
+      const result = await uploadAdminMedia({ purpose: 'case-study', file, fileName: file.name });
       updateDraft('imageUrl', result.url);
       setNotice('Transparent image uploaded.');
     } catch (reason) {

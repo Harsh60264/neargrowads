@@ -2,23 +2,26 @@
 
 ## 1. Prerequisites
 
-- Node.js 20+
-- npm or bun
-- Node.js host with an Express process and a durable writable volume (for example, Cloud Run with a persistent volume, Render with a persistent disk, or a VPS)
+- Node.js 20+ and npm
+- Supabase project with the reviewed migrations applied
+- Vercel project connected to this repository for a complete serverless deployment, or a Node.js host with a durable writable volume for the standalone Express deployment
 
 ## 2. Environment Variables
 
-Create `.env` using `.env.example`:
+For local development, create `.env` using `.env.example`. For Vercel, add these names in Project Settings → Environment Variables. Do not put secret values in `VITE_*` variables:
 
 ```bash
-PORT=3000
-NODE_ENV=production
 SITE_URL=https://your-production-domain.example
-TRUST_PROXY_HOPS=0
-PERSISTENT_DATA_DIR=/var/lib/neargrow-ads
-WHATSAPP_NUMBER=
-CONTACT_NOTIFICATION_EMAIL=
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ADMIN_OWNER_USER_ID=
+ADMIN_SESSION_SECRET=
 ```
+
+`SITE_URL` must be the canonical HTTPS origin selected for the deployment. The five Supabase/admin variables above are required for admin access; the service role key and session secret must be server-only. Add optional `N8N_LEAD_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `CONTACT_NOTIFICATION_EMAIL`, `ADMIN_NOTIFICATION_EMAIL`, and Razorpay Test variables only when those features are configured. `PORT`, `NODE_ENV`, `PERSISTENT_DATA_DIR`, and `TRUST_PROXY_HOPS` are for the standalone Express host; Vercel manages its function runtime and proxy configuration.
+
+Vercel Function initialization does not create or repair the Primary Owner record. Confirm `ADMIN_OWNER_USER_ID` identifies the already verified Owner account and that its active `admin_users` row exists before deployment; setup must be reviewed and completed through the normal Supabase administration process.
 
 ## 3. Local Development
 
@@ -44,9 +47,11 @@ Keep `.env` and all deployment secrets outside source archives. A shareable expo
 
 ### Durable blog, team and upload storage
 
-The current blog posts/categories, team records, legacy site-content fallback, and blog/team/service-store uploads are filesystem-backed. Production now requires `PERSISTENT_DATA_DIR` and uses it instead of the source tree's `data` folder. Mount a durable writable volume at that path and keep a single application writer instance; do not assume local disk is shared across replicas. The Supabase-backed Page Content Manager media bucket does not migrate these separate file stores.
+For a standalone Express host, blog posts/categories, team records, legacy site-content fallback, and blog/team/service-store uploads are filesystem-backed. Production requires `PERSISTENT_DATA_DIR`; mount a durable writable volume there and use a single writer instance.
 
-For an existing deployment, stop CMS writes, back up the current `data` directory, copy `blog-posts.json`, `blog-categories.json`, `team.json`, `site-content.json` (if present), and the complete `uploads` directory to the root of the mounted volume, configure `PERSISTENT_DATA_DIR`, then start one instance and verify public and admin media URLs. Keep the backup until restart/redeploy and restore checks pass. This is an operator-run migration; the application does not overwrite or move production data automatically.
+Vercel Functions instead persist those five CMS JSON documents in `serverless_cms_documents` and media in the Supabase `cms-uploads` bucket. Apply `supabase/migrations/20261027150000_create_serverless_cms_documents.sql` before the first Vercel deployment that uses these stores. Review the current repository `data` documents and uploads, then run `npm run migrate:cms` locally with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set in a protected environment. The importer inserts only missing documents and uploads only missing assets; it does not overwrite or delete existing Supabase rows or objects. Back up the files and review the command output before proceeding. No migration has been run by this code change.
+
+Vercel admin media uploads use short-lived Supabase signed upload URLs so file bytes go directly from the browser to Storage instead of exceeding Vercel Function request limits. The server verifies object size, MIME metadata, and file signature before returning a media URL. The browser never receives a Supabase service-role credential.
 
 ## 5. Supabase Database Setup
 
@@ -60,7 +65,7 @@ Before deploying this repair, review and apply `supabase/migrations/202610251800
 
 Apply `supabase/migrations/20261021130000_create_site_content_cms.sql` to enable the Page Content Manager's private draft and published content records. The server accesses this table with the server-only Supabase service role; browser clients cannot read or write it directly. Existing file-based website content remains the initial fallback until a new draft is published.
 
-Apply `supabase/migrations/20261021170000_create_site_media_storage_bucket.sql` to provision the public-read `site-media` bucket used by Page Content Manager uploads. Media uploads are authorized by the Express admin permission checks and written with the server-only Supabase service role; browser clients cannot upload or replace storage objects directly. The bucket allows JPG, PNG, WebP, MP4, and WebM files up to 100 MB (images are limited to 15 MB by the server). Uploaded assets are immutable and replacements use new object names so existing published pages remain intact until the new draft is published.
+Apply `supabase/migrations/20261021170000_create_site_media_storage_bucket.sql` to provision the public-read `site-media` bucket used by Page Content Manager uploads. Upload signing and verification require the server-side admin session and section permissions. The browser receives a short-lived URL scoped to one random object path, never a service-role credential. The bucket allows JPG, PNG, WebP, MP4, and WebM files up to 100 MB (images are limited to 15 MB by the server). Uploaded assets are immutable and replacements use new object names so existing published pages remain intact until the new draft is published.
 
 The Page Content Manager's Images & Media and Animations & Effects settings are stored in the existing `site_content_cms` JSON draft/published columns. No additional database migration is needed for animation settings; publish them through the CMS after applying the site content migration.
 
@@ -74,6 +79,18 @@ The Primary Owner must reauthenticate, verify the Test API credentials, and expl
 
 ## 6. Hosting and deployment
 
-Run the Express application with `npm start` on a Node.js host, behind a reverse proxy configured to replace untrusted forwarding headers. This application needs both the Express API and the durable writable `PERSISTENT_DATA_DIR` described above. A static-only Vercel or Netlify deployment with `dist` as its output cannot provide the API or persistent filesystem required by this configuration; do not use that deployment mode for a complete application deployment. The `vercel.json` and `netlify.toml` configurations publish the frontend and rewrite client-side routes such as `/admin` to `index.html`; this makes direct page navigation work but does not implement the `/api/*` endpoints used by admin features. Netlify's secrets scanning omits only public contact/site values, the public analytics measurement ID, and generic build variables; server-side secrets remain subject to scanning and must never be embedded in the frontend.
+### Vercel (full-stack)
 
-For each release, set `SITE_URL`, server-only Supabase credentials, the exact trusted proxy hop count, and the persistent volume in the host's secret/environment settings. Build with the confirmed canonical HTTPS origin, apply reviewed Supabase migrations separately, and deploy only after the staging checks pass. Keep payment settings in their existing Test mode; this repair does not enable real payments.
+`vercel.json` builds the Vite frontend into `dist`, rewrites `/admin` and known client-side routes to `index.html`, and leaves `/api/*` to the Vercel Function at `api/[...path].ts`. That Function lazily creates the existing Express app without binding a persistent port or serving static files. Vercel serves `dist` assets; API requests are same-origin. `/uploads/...` is routed to the API's safe public Storage redirect.
+
+1. Connect the GitHub repository to Vercel and use the repository root as the project root.
+2. Keep the framework preset at Vite (or Other if automatic detection does not identify Vite); use `npm run build` and `dist`. Do not add a catch-all rewrite that sends `/api/*` to the SPA.
+3. Set the required environment variable names above for Preview and Production. For the initial verification, use a Preview deployment and a staging Supabase project. Set `SITE_URL` to that deployment's canonical HTTPS origin during the preview, and update it to the approved custom domain (for example, `https://neargrowads.com`) only after the domain decision.
+4. Apply all reviewed Supabase migrations in order, including the serverless CMS migration, and run the CMS importer only after reviewing and backing up its source files and destination.
+5. Redeploy after setting environment variables. Verify `/`, `/admin`, `/api/health`, a protected admin endpoint (401 without a session), browser assets, authenticated flows with an explicitly authorized test account, and a refreshed nested route. Do not test by changing production owner or customer data.
+
+### Standalone Express or Netlify
+
+For a standalone Node.js host, run `npm start` behind a reverse proxy configured to replace untrusted forwarding headers, and provide a durable `PERSISTENT_DATA_DIR`. Its in-process rate limits and CMS mutation queue are not shared across replicas; use one instance or add a shared persistent coordination service before scaling horizontally. Netlify's current configuration publishes only the static frontend: its SPA fallback does not run Express or provide `/api/*`, so it is not a full-stack deployment target for this application.
+
+Vercel Functions remove dependence on a permanent Express process and local disk. Serverless CMS JSON documents use database version checks; a concurrent stale save fails instead of silently overwriting the newer document. Process-local throttling/caches and serial mutation queues are still not shared across invocations. Treat rate limiting as a deployment requirement: configure Vercel Firewall limits for public and authentication endpoints before exposing the deployment. Test payments remain in Test mode; this integration does not enable live payments or change payment destinations.

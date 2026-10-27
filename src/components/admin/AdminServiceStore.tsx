@@ -4,6 +4,7 @@ import { billingTypeLabel, formatServicePrice, type ServiceBillingType, type Ser
 import { normalizeCatalogueCategoryName, serviceCatalogueSlug, uniqueServiceCatalogueSlug } from '../../data/serviceCatalogueCategories';
 import { AdminPaymentReceiving } from './AdminPaymentReceiving';
 import { AdminServiceOrders } from './AdminServiceOrders';
+import { uploadAdminMedia } from './uploadAdminMedia';
 
 interface PackageForm {
   slug: string;
@@ -416,9 +417,7 @@ export function AdminServiceStore({
     setBusy(true);
     setError('');
     try {
-      const data = new FormData();
-      data.append('image', file);
-      const result = await readApi<{ url: string }>('/api/admin/service-packages/upload', { method: 'POST', body: data });
+      const result = await uploadAdminMedia({ purpose: 'service-store', file, fileName: file.name });
       updateForm('imageUrl', result.url);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'The image could not be uploaded.');

@@ -1819,6 +1819,70 @@ const blogCategoriesFile = path.join(persistentDataRoot, 'blog-categories.json')
 const blogSeoHealthFile = path.join(persistentDataRoot, 'blog-seo-health.json');
 const siteContentFile = path.join(persistentDataRoot, 'site-content.json');
 const blogUploadDir = path.join(persistentDataRoot, 'uploads', 'blog');
+type ServerlessCmsDocumentKey =
+  | 'blog-posts'
+  | 'blog-categories'
+  | 'blog-seo-health'
+  | 'site-content'
+  | 'team';
+const serverlessCmsDocumentVersions = new Map<ServerlessCmsDocumentKey, number>();
+
+class CmsDocumentWriteConflictError extends Error {
+  constructor(key: ServerlessCmsDocumentKey) {
+    super(`CMS document ${key} changed during this update; reload the latest version before saving again.`);
+    this.name = 'CmsDocumentWriteConflictError';
+  }
+}
+
+async function readCmsDocument<T>(key: ServerlessCmsDocumentKey, localFile: string): Promise<T | undefined> {
+  if (process.env.VERCEL !== '1') {
+    try {
+      return JSON.parse(await fs.readFile(localFile, 'utf8')) as T;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  }
+
+  const query = new URLSearchParams({ select: 'document_value,version', document_key: `eq.${key}`, limit: '1' });
+  const response = await supabaseAdminRequest(`rest/v1/serverless_cms_documents?${query}`);
+  if (!response.ok) throw new Error(`CMS document read failed (${key}, ${response.status}).`);
+  const rows = await response.json() as Array<{ document_value: T; version: number }>;
+  if (rows[0]) serverlessCmsDocumentVersions.set(key, rows[0].version);
+  else serverlessCmsDocumentVersions.delete(key);
+  return rows[0]?.document_value;
+}
+
+async function writeCmsDocument<T>(key: ServerlessCmsDocumentKey, localFile: string, value: T): Promise<void> {
+  if (process.env.VERCEL === '1') {
+    const expectedVersion = serverlessCmsDocumentVersions.get(key);
+    const updateExisting = expectedVersion !== undefined;
+    const query = updateExisting
+      ? new URLSearchParams({ document_key: `eq.${key}`, version: `eq.${expectedVersion}` })
+      : new URLSearchParams({ on_conflict: 'document_key' });
+    const response = await supabaseAdminRequest(
+      `rest/v1/serverless_cms_documents?${query}`,
+      {
+        method: updateExisting ? 'PATCH' : 'POST',
+        headers: {
+          Prefer: updateExisting ? 'return=representation' : 'resolution=ignore-duplicates,return=representation',
+        },
+        body: JSON.stringify({ ...(updateExisting ? {} : { document_key: key }), document_value: value }),
+      },
+    );
+    if (!response.ok) throw new Error(`CMS document write failed (${key}, ${response.status}).`);
+    const rows = await response.json() as Array<{ version: number }>;
+    if (rows.length !== 1) throw new CmsDocumentWriteConflictError(key);
+    serverlessCmsDocumentVersions.set(key, rows[0].version);
+    return;
+  }
+
+  await fs.mkdir(path.dirname(localFile), { recursive: true });
+  const temporaryFile = `${localFile}.${process.pid}.tmp`;
+  await fs.writeFile(temporaryFile, JSON.stringify(value, null, 2), 'utf8');
+  await fs.rename(temporaryFile, localFile);
+}
+
 const validSlug = (slug: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && slug.length <= 140;
 const stableBlogId = (slug: string) => `legacy-${createHash('sha256').update(`blog:${slug}`).digest('hex').slice(0, 32)}`;
 
@@ -1910,7 +1974,7 @@ function validateBlogCategory(value: unknown): BlogCategory | undefined {
 
 async function readBlogCategories(): Promise<BlogCategory[]> {
   try {
-    const parsed = JSON.parse(await fs.readFile(blogCategoriesFile, 'utf8')) as unknown;
+    const parsed = await readCmsDocument<unknown>('blog-categories', blogCategoriesFile);
     if (Array.isArray(parsed)) {
       const categories = parsed.map(validateBlogCategory);
       if (categories.every((category): category is BlogCategory => Boolean(category)) &&
@@ -1918,6 +1982,7 @@ async function readBlogCategories(): Promise<BlogCategory[]> {
       console.error('[NearGrow Ads] Blog category store has an invalid structure; using defaults.');
     }
   } catch (error) {
+    if (process.env.VERCEL === '1') throw error;
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.error('[NearGrow Ads] Blog category store read error:', error);
     }
@@ -1926,19 +1991,16 @@ async function readBlogCategories(): Promise<BlogCategory[]> {
 }
 
 async function writeBlogCategories(categories: BlogCategory[]): Promise<void> {
-  await fs.mkdir(path.dirname(blogCategoriesFile), { recursive: true });
-  const temporaryFile = `${blogCategoriesFile}.${process.pid}.tmp`;
-  await fs.writeFile(temporaryFile, JSON.stringify(categories, null, 2), 'utf8');
-  await fs.rename(temporaryFile, blogCategoriesFile);
+  await writeCmsDocument('blog-categories', blogCategoriesFile, categories);
   memoryBlogCategories = categories;
 }
 
 async function readBlogPosts(): Promise<ManagedBlogPost[]> {
   try {
-    const json = await fs.readFile(blogDataFile, 'utf8');
-    const parsed = JSON.parse(json) as unknown;
+    const parsed = await readCmsDocument<unknown>('blog-posts', blogDataFile);
     if (Array.isArray(parsed)) return parsed as ManagedBlogPost[];
   } catch (error) {
+    if (process.env.VERCEL === '1') throw error;
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.error('[NearGrow Ads] Blog store read error:', error);
     }
@@ -1947,10 +2009,7 @@ async function readBlogPosts(): Promise<ManagedBlogPost[]> {
 }
 
 async function writeBlogPosts(posts: ManagedBlogPost[]): Promise<void> {
-  await fs.mkdir(path.dirname(blogDataFile), { recursive: true });
-  const temporaryFile = `${blogDataFile}.${process.pid}.tmp`;
-  await fs.writeFile(temporaryFile, JSON.stringify(posts, null, 2), 'utf8');
-  await fs.rename(temporaryFile, blogDataFile);
+  await writeCmsDocument('blog-posts', blogDataFile, posts);
   memoryBlogPosts = posts;
 }
 
@@ -1960,20 +2019,19 @@ interface StoredBlogSeoAnalysis extends BlogSeoAnalysis {
 
 async function readBlogSeoAnalyses(): Promise<StoredBlogSeoAnalysis[]> {
   try {
-    const parsed = JSON.parse(await fs.readFile(blogSeoHealthFile, 'utf8')) as unknown;
+    const parsed = await readCmsDocument<unknown>('blog-seo-health', blogSeoHealthFile);
+    if (parsed === undefined) return [];
     if (!Array.isArray(parsed)) throw new Error('The stored SEO health data has an invalid structure.');
     return parsed as StoredBlogSeoAnalysis[];
   } catch (error) {
+    if (process.env.VERCEL === '1') throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
 }
 
 async function writeBlogSeoAnalyses(analyses: StoredBlogSeoAnalysis[]): Promise<void> {
-  await fs.mkdir(path.dirname(blogSeoHealthFile), { recursive: true });
-  const temporaryFile = `${blogSeoHealthFile}.${process.pid}.tmp`;
-  await fs.writeFile(temporaryFile, JSON.stringify(analyses, null, 2), 'utf8');
-  await fs.rename(temporaryFile, blogSeoHealthFile);
+  await writeCmsDocument('blog-seo-health', blogSeoHealthFile, analyses);
 }
 
 function validateBlogPost(value: unknown): ManagedBlogPost | undefined {
@@ -2171,11 +2229,13 @@ const fallbackSiteContent: SiteContent = defaultSiteContent;
 
 async function readLegacySiteContent(): Promise<SiteContent> {
   try {
-    const parsed = JSON.parse(await fs.readFile(siteContentFile, 'utf8')) as unknown;
+    const parsed = await readCmsDocument<unknown>('site-content', siteContentFile);
+    if (parsed === undefined) return fallbackSiteContent;
     const validated = validateSiteContent(parsed);
     if (validated) return validated;
     console.error('[NearGrow Ads] Site content store has an invalid structure; using defaults.');
   } catch (error) {
+    if (process.env.VERCEL === '1') throw error;
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.error('[NearGrow Ads] Site content store read error:', error);
     }
@@ -2746,19 +2806,18 @@ async function discardSiteContentDraft(actorId: string, actorLabel: string): Pro
 
 async function readTeam(): Promise<TeamMember[]> {
   try {
-    const parsed = JSON.parse(await fs.readFile(teamDataFile, 'utf8')) as unknown;
+    const parsed = await readCmsDocument<unknown>('team', teamDataFile);
+    if (parsed === undefined) return memoryTeam;
     if (Array.isArray(parsed)) return parsed as TeamMember[];
   } catch (error) {
+    if (process.env.VERCEL === '1') throw error;
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[NearGrow Ads] Team store read error:', error);
   }
   return memoryTeam;
 }
 
 async function writeTeam(members: TeamMember[]): Promise<void> {
-  await fs.mkdir(path.dirname(teamDataFile), { recursive: true });
-  const tmp = `${teamDataFile}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(members, null, 2), 'utf8');
-  await fs.rename(tmp, teamDataFile); // atomic swap: readers never see a half-written file
+  await writeCmsDocument('team', teamDataFile, members);
   memoryTeam = members;
 }
 
@@ -2801,6 +2860,181 @@ function sniffVideo(buf: Buffer): 'mp4' | 'webm' | undefined {
   if (buf.length > 12 && buf.toString('ascii', 4, 8) === 'ftyp') return 'mp4';
   if (buf.length > 4 && buf.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'webm';
   return undefined;
+}
+
+type AdminUploadPurpose = 'blog' | 'team' | 'service-store' | 'case-study' | 'site-media' | 'website-service';
+type AdminUploadSpec = {
+  purpose: AdminUploadPurpose;
+  section: AdminSection;
+  bucket: 'cms-uploads' | 'case-study-media' | 'site-media';
+  objectPath: string;
+  mimeType: string;
+  extension: string;
+  maxSize: number;
+};
+
+const uploadExtensions: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+};
+
+function createAdminUploadSpec(input: unknown): AdminUploadSpec | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const body = input as Record<string, unknown>;
+  const purpose = body.purpose;
+  const mimeType = body.mimeType;
+  if (typeof purpose !== 'string' || typeof mimeType !== 'string') return undefined;
+  const extension = uploadExtensions[mimeType];
+  if (!extension) return undefined;
+
+  if (purpose === 'blog' || purpose === 'team' || purpose === 'service-store') {
+    if (!mimeType.startsWith('image/')) return undefined;
+    return {
+      purpose,
+      section: purpose === 'blog' ? 'blogs' : purpose === 'team' ? 'team' : 'serviceStore',
+      bucket: 'cms-uploads',
+      objectPath: `${purpose === 'service-store' ? 'service-store' : purpose}/${randomUUID()}.${extension}`,
+      mimeType,
+      extension,
+      maxSize: 15 * 1024 * 1024,
+    };
+  }
+  if (purpose === 'case-study') {
+    if (mimeType !== 'image/png' && mimeType !== 'image/webp') return undefined;
+    return {
+      purpose,
+      section: 'caseStudies',
+      bucket: 'case-study-media',
+      objectPath: `${randomUUID()}.${extension}`,
+      mimeType,
+      extension,
+      maxSize: 15 * 1024 * 1024,
+    };
+  }
+  if (purpose === 'website-service') {
+    if (!WEBSITE_SERVICE_UUID.test(String(body.serviceId || '')) || !mimeType.startsWith('image/')) return undefined;
+    return {
+      purpose,
+      section: 'servicesManagement',
+      bucket: 'site-media',
+      objectPath: `website-services/${body.serviceId}/${randomUUID()}.${extension}`,
+      mimeType,
+      extension,
+      maxSize: 15 * 1024 * 1024,
+    };
+  }
+  if (purpose === 'site-media') {
+    const definition = typeof body.assetId === 'string'
+      ? PUBLIC_MEDIA.find((item) => item.id === body.assetId)
+      : undefined;
+    if (!definition || (definition.kind === 'image' && !mimeType.startsWith('image/')) ||
+      (definition.kind === 'video' && !mimeType.startsWith('video/'))) return undefined;
+    return {
+      purpose,
+      section: 'content',
+      bucket: 'site-media',
+      objectPath: `${definition.id}/${randomUUID()}.${extension}`,
+      mimeType,
+      extension,
+      maxSize: definition.kind === 'video' ? 100 * 1024 * 1024 : 15 * 1024 * 1024,
+    };
+  }
+  return undefined;
+}
+
+function isValidUploadObjectPath(spec: AdminUploadSpec, value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const uuidFile = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+  const prefix = spec.objectPath.slice(0, spec.objectPath.lastIndexOf('/') + 1);
+  return value.startsWith(prefix) && new RegExp(`^${uuidFile}\\.${spec.extension}$`, 'i')
+    .test(value.slice(prefix.length));
+}
+
+function verifiedUploadUrl(spec: AdminUploadSpec, objectPath: string): string {
+  if (spec.bucket === 'cms-uploads') {
+    const folder = spec.purpose === 'service-store' ? 'service-store' : spec.purpose;
+    return `/uploads/${folder}/${objectPath.split('/').pop()}`;
+  }
+  if (spec.purpose === 'case-study') return `/api/admin/case-studies/media/${objectPath}`;
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  if (!baseUrl) throw new Error('Supabase Storage is not configured.');
+  return `${baseUrl}/storage/v1/object/public/site-media/${objectPath}`;
+}
+
+async function prepareAdminUpload(input: unknown): Promise<{ uploadUrl: string; path: string; url: string; spec: AdminUploadSpec } | undefined> {
+  const spec = createAdminUploadSpec(input);
+  if (!spec) return undefined;
+  const body = input as Record<string, unknown>;
+  if (!Number.isSafeInteger(body.size) || Number(body.size) < 1 || Number(body.size) > spec.maxSize) return undefined;
+  const path = spec.objectPath.split('/').map(encodeURIComponent).join('/');
+  const response = await supabaseAdminRequest(`storage/v1/object/upload/sign/${spec.bucket}/${path}`, {
+    method: 'POST',
+    headers: { 'x-upsert': 'false' },
+  });
+  if (!response.ok) {
+    console.error(`[NearGrow Ads] Signed upload URL creation failed (${response.status}).`);
+    throw new Error('Supabase Storage could not prepare the media upload.');
+  }
+  const result = await response.json() as { url?: string; signedUrl?: string };
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  if (!baseUrl) throw new Error('Supabase Storage is not configured.');
+  const signedUrl = result.signedUrl || result.url;
+  const uploadUrl = signedUrl
+    ? /^https?:\/\//i.test(signedUrl)
+      ? signedUrl
+      : `${baseUrl}/storage/v1${signedUrl.startsWith('/') ? signedUrl : `/${signedUrl}`}`
+    : undefined;
+  if (!uploadUrl) throw new Error('Supabase Storage returned an invalid signed upload response.');
+  const parsedUploadUrl = new URL(uploadUrl);
+  const expectedPath = `/storage/v1/object/upload/sign/${spec.bucket}/${path}`;
+  if (parsedUploadUrl.origin !== new URL(baseUrl).origin ||
+    parsedUploadUrl.pathname !== expectedPath ||
+    !parsedUploadUrl.searchParams.has('token')) {
+    throw new Error('Supabase Storage returned an unexpected signed upload URL.');
+  }
+  return { uploadUrl, path: spec.objectPath, url: verifiedUploadUrl(spec, spec.objectPath), spec };
+}
+
+async function verifyAdminUpload(input: unknown): Promise<string | undefined> {
+  const spec = createAdminUploadSpec(input);
+  if (!spec) return undefined;
+  const body = input as Record<string, unknown>;
+  if (!isValidUploadObjectPath(spec, body.path)) return undefined;
+  if (!Number.isSafeInteger(body.size) || Number(body.size) < 1 || Number(body.size) > spec.maxSize) return undefined;
+  const encodedPath = body.path.split('/').map(encodeURIComponent).join('/');
+  const objectUrl = `storage/v1/object/${spec.bucket}/${encodedPath}`;
+  const head = await supabaseAdminRequest(objectUrl, { method: 'HEAD' });
+  const contentLength = Number(head.headers.get('content-length'));
+  const storedType = head.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+  if (!head.ok || contentLength !== body.size || contentLength > spec.maxSize || storedType !== spec.mimeType) {
+    await supabaseAdminRequest(objectUrl, { method: 'DELETE' }).catch(() => undefined);
+    return undefined;
+  }
+  const sampleResponse = await supabaseAdminRequest(objectUrl, { headers: { Range: 'bytes=0-15' } });
+  if (!sampleResponse.ok) return undefined;
+  const reader = sampleResponse.body?.getReader();
+  if (!reader) return undefined;
+  let sample = Buffer.alloc(0);
+  try {
+    while (sample.length < 16) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      sample = Buffer.concat([sample, Buffer.from(value)]).subarray(0, 16);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const actualExtension = spec.mimeType.startsWith('image/')
+    ? sniffImage(sample)
+    : sniffVideo(sample);
+  if (actualExtension !== spec.extension) {
+    await supabaseAdminRequest(objectUrl, { method: 'DELETE' }).catch(() => undefined);
+    return undefined;
+  }
+  return verifiedUploadUrl(spec, body.path);
 }
 
 async function uploadSiteMedia(req: Request): Promise<{ url: string } | { message: string }> {
@@ -2935,10 +3169,47 @@ async function storeMultipartImage(req: Request, directory: string): Promise<{ u
   const extension = sniffImage(bytes);
   if (!extension) return { message: 'The uploaded file is not a valid PNG, JPG or WebP image.' };
 
-  await fs.mkdir(directory, { recursive: true });
   const filename = `${randomUUID()}.${extension}`;
+  if (process.env.VERCEL === '1') {
+    const folder = path.basename(directory);
+    const mimeType = extension === 'jpg' ? 'image/jpeg' : `image/${extension}`;
+    const response = await supabaseAdminRequest(`storage/v1/object/cms-uploads/${folder}/${filename}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'x-upsert': 'false',
+      },
+      body: bytes,
+    });
+    if (!response.ok) {
+      console.error(`[NearGrow Ads] CMS image upload failed (${folder}, ${response.status}).`);
+      return { message: 'Image storage is unavailable. Confirm the CMS uploads migration has been applied.' };
+    }
+    return { url: `/uploads/${folder}/${filename}` };
+  }
+
+  await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(path.join(directory, filename), bytes, { flag: 'wx' });
   return { url: `/uploads/${path.basename(directory)}/${filename}` };
+}
+
+async function cmsUploadExists(folder: string, filename: string): Promise<boolean> {
+  if (!['blog', 'team', 'service-store'].includes(folder) ||
+    !/^[0-9a-f-]{36}\.(png|jpg|webp)$/.test(filename)) return false;
+  if (process.env.VERCEL !== '1') {
+    try {
+      await fs.access(path.join(persistentDataRoot, 'uploads', folder, filename));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+  const response = await supabaseAdminRequest(`storage/v1/object/cms-uploads/${folder}/${filename}`, { method: 'HEAD' });
+  if (response.status === 404) return false;
+  if (!response.ok) throw new Error(`CMS upload lookup failed (${response.status}).`);
+  return true;
 }
 
 async function uploadCaseStudyImage(req: Request): Promise<{ url: string } | { message: string }> {
@@ -3305,6 +3576,10 @@ function hasSecurityMonitoringAccess(identity: AdminIdentity, action: 'view' | '
 
 function requiredAdminPermission(req: Request): { section: AdminSection; action: AdminAction } | undefined {
   const pathName = req.path;
+  if (pathName === '/uploads/sign' || pathName === '/uploads/complete') {
+    const upload = createAdminUploadSpec(req.body);
+    return upload ? { section: upload.section, action: 'edit' } : undefined;
+  }
   const blogSeoPermission = blogSeoAdminPermission(pathName, req.method);
   if (blogSeoPermission) return blogSeoPermission;
   if (pathName === '/security-monitoring') return { section: 'securityMonitoring', action: 'view' };
@@ -4389,31 +4664,31 @@ async function findAvailablePort(startPort: number, host?: string): Promise<numb
   throw new Error(`No available port found between ${startPort} and ${Math.min(startPort + 99, 65535)}.`);
 }
 
-async function startServer() {
+async function createApplication(serverless = false): Promise<{ app: express.Express; port?: number }> {
   if (process.env.NODE_ENV === 'production') canonicalSiteOrigin();
-  if (process.env.NODE_ENV === 'production' && !process.env.PERSISTENT_DATA_DIR) {
+  if (!serverless && process.env.NODE_ENV === 'production' && !process.env.PERSISTENT_DATA_DIR) {
     throw new Error('PERSISTENT_DATA_DIR must point to a durable mounted volume in production.');
   }
-  await fs.mkdir(persistentDataRoot, { recursive: true });
-  await ensurePrimaryOwnerAccount();
+  if (!serverless) await fs.mkdir(persistentDataRoot, { recursive: true });
+  if (!serverless) await ensurePrimaryOwnerAccount();
   const app = express();
-  const proxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  const proxyHops = serverless ? 1 : Number(process.env.TRUST_PROXY_HOPS ?? 0);
   if (!Number.isSafeInteger(proxyHops) || proxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative integer matching the hosting proxy chain.');
   }
   app.set('trust proxy', proxyHops);
-  const requestedPort = process.env.PORT ? parseInt(process.env.PORT, 10) : DEFAULT_PORT;
-  if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+  const requestedPort = serverless ? undefined : process.env.PORT ? parseInt(process.env.PORT, 10) : DEFAULT_PORT;
+  if (!serverless && (!Number.isInteger(requestedPort) || requestedPort! < 1 || requestedPort! > 65535)) {
     throw new Error(`Invalid PORT value "${process.env.PORT}". Choose a port between 1 and 65535.`);
   }
 
-  const port = process.env.PORT
+  const port = serverless ? undefined : process.env.PORT
     ? requestedPort
-    : await findAvailablePort(requestedPort, '0.0.0.0');
-  if (process.env.PORT && !(await isPortAvailable(port, '0.0.0.0'))) {
+    : await findAvailablePort(requestedPort!, '0.0.0.0');
+  if (!serverless && process.env.PORT && !(await isPortAvailable(port!, '0.0.0.0'))) {
     throw new Error(`Port ${port} is already in use. Stop the process using it or choose another PORT.`);
   }
-  const hmrPort = await findAvailablePort(DEFAULT_HMR_PORT);
+  const hmrPort = serverless ? DEFAULT_HMR_PORT : await findAvailablePort(DEFAULT_HMR_PORT);
 
   app.use('/api/website-activity', express.json({ limit: '1kb' }));
   app.use(express.json({
@@ -4426,10 +4701,12 @@ async function startServer() {
   }));
 
   // Uploaded team portraits. Random UUID filenames never change, so they are safe to cache hard.
-  app.use('/uploads', express.static(teamUploadRoot, {
-    maxAge: '30d', immutable: true, index: false, dotfiles: 'deny',
-    setHeaders: (res) => { res.setHeader('X-Content-Type-Options', 'nosniff'); },
-  }));
+  if (!serverless) {
+    app.use('/uploads', express.static(teamUploadRoot, {
+      maxAge: '30d', immutable: true, index: false, dotfiles: 'deny',
+      setHeaders: (res) => { res.setHeader('X-Content-Type-Options', 'nosniff'); },
+    }));
+  }
 
   // --- API Routes ---
   // Health check
@@ -4440,6 +4717,22 @@ async function startServer() {
       version: '1.0.0',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get('/api/uploads/:folder/:filename', (req: Request, res: Response): void => {
+    const { folder, filename } = req.params;
+    if (!['blog', 'team', 'service-store'].includes(folder) ||
+      !/^[0-9a-f-]{36}\.(png|jpg|webp)$/.test(filename)) {
+      res.status(404).end();
+      return;
+    }
+    const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+    if (!baseUrl) {
+      res.status(503).json({ message: 'CMS media storage is not configured.' });
+      return;
+    }
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.redirect(302, `${baseUrl}/storage/v1/object/public/cms-uploads/${folder}/${filename}`);
   });
 
   app.post('/api/website-activity', async (req: Request, res: Response): Promise<void> => {
@@ -4594,8 +4887,20 @@ async function startServer() {
         return;
       }
       const permission = requiredAdminPermission(req);
-      if (req.path === '/blogs/upload' || req.path === '/team/upload' || req.path === '/service-packages/upload' || req.path === '/case-studies/upload' || req.path === '/services/upload') {
-        const section = req.path === '/blogs/upload' ? 'blogs' : req.path === '/team/upload' ? 'team' : req.path === '/case-studies/upload' ? 'caseStudies' : req.path === '/services/upload' ? 'servicesManagement' : 'serviceStore';
+      if (req.path === '/blogs/upload' || req.path === '/team/upload' || req.path === '/service-packages/upload' ||
+        req.path === '/case-studies/upload' || req.path === '/services/upload' ||
+        req.path === '/uploads/sign' || req.path === '/uploads/complete') {
+        const upload = req.path === '/uploads/sign' || req.path === '/uploads/complete'
+          ? createAdminUploadSpec(req.body)
+          : undefined;
+        const section = upload?.section ||
+          (req.path === '/blogs/upload' ? 'blogs' : req.path === '/team/upload' ? 'team' :
+            req.path === '/case-studies/upload' ? 'caseStudies' : req.path === '/services/upload' ?
+              'servicesManagement' : 'serviceStore');
+        if ((req.path === '/uploads/sign' || req.path === '/uploads/complete') && !upload) {
+          res.status(400).json({ message: 'Choose a supported media purpose and file type.' });
+          return;
+        }
         if (identity.role !== 'owner' &&
           !hasPermission(identity, section, 'create') &&
           !hasPermission(identity, section, 'edit')) {
@@ -4662,6 +4967,50 @@ async function startServer() {
     } catch (error) {
       console.error('[NearGrow Ads] Admin request authorization failed:', error);
       res.status(503).json({ message: 'Administrator access could not be verified. Please try again.' });
+    }
+  });
+
+  app.post('/api/admin/uploads/sign', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Media can only be uploaded from this website.' });
+      return;
+    }
+    try {
+      const prepared = await prepareAdminUpload(req.body);
+      if (!prepared) {
+        res.status(400).json({ message: 'Choose a supported file type and ensure the file is within the allowed size.' });
+        return;
+      }
+      res.status(201).json({
+        uploadUrl: prepared.uploadUrl,
+        path: prepared.path,
+        url: prepared.url,
+      });
+    } catch (error) {
+      console.error('[NearGrow Ads] Admin upload preparation failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'Media storage could not prepare the upload.' });
+    }
+  });
+
+  app.post('/api/admin/uploads/complete', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Media can only be verified from this website.' });
+      return;
+    }
+    try {
+      const url = await verifyAdminUpload(req.body);
+      if (!url) {
+        res.status(415).json({ message: 'The uploaded file failed storage, size, or file-signature verification.' });
+        return;
+      }
+      res.status(201).json({ url });
+    } catch (error) {
+      console.error('[NearGrow Ads] Admin upload verification failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'The uploaded file could not be verified.' });
     }
   });
 
@@ -7219,11 +7568,7 @@ async function startServer() {
             missingLocalImageSources.add(source);
             continue;
           }
-          try {
-            await fs.access(path.join(blogUploadDir, assetName));
-          } catch {
-            missingLocalImageSources.add(source);
-          }
+          if (!await cmsUploadExists('blog', assetName)) missingLocalImageSources.add(source);
         }
         const withId = { ...post, id: articleId };
         return {
@@ -9289,7 +9634,7 @@ async function startServer() {
 
   const isProduction = process.env.NODE_ENV === 'production';
 
-  if (!isProduction) {
+  if (!serverless && !isProduction) {
     // Development mode: Vite middleware
     const vite = await createViteServer({
       server: {
@@ -9301,7 +9646,7 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!serverless) {
     // Production mode: Static files
     const distPath = path.resolve(__dirname, 'dist');
     app.get('/robots.txt', (_req: Request, res: Response): void => {
@@ -9364,12 +9709,25 @@ async function startServer() {
     });
   }
 
+  return { app, port };
+}
+
+export async function createVercelApplication(): Promise<express.Express> {
+  const { app } = await createApplication(true);
+  return app;
+}
+
+async function startServer() {
+  const { app, port } = await createApplication();
+  if (port === undefined) throw new Error('The local server did not resolve a listening port.');
   app.listen(port, '0.0.0.0', () => {
     console.log(`[NearGrow Ads] Full-stack application running at http://localhost:${port}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error('[NearGrow Ads] Server startup failure:', err);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  startServer().catch((err) => {
+    console.error('[NearGrow Ads] Server startup failure:', err);
+    process.exit(1);
+  });
+}

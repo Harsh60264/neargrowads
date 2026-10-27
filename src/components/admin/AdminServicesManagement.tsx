@@ -3,6 +3,7 @@ import { ImageThemeTabs } from './ImageThemeTabs';
 import { resolveThemeImage, type PublicImageTheme, type ThemeImageFields } from '../../data/themeImages';
 import { ArrowDown, ArrowUp, Check, Eye, LoaderCircle, Plus, Save, Send, Trash2, Upload, X } from 'lucide-react';
 import type { WebsiteService } from '../../data/websiteServices';
+import { uploadAdminMedia } from './uploadAdminMedia';
 
 type ServiceDraft = Omit<WebsiteService, 'id' | 'status' | 'hasUnpublishedChanges'> & {
   id?: string;
@@ -295,10 +296,7 @@ export function AdminServicesManagement({ canCreate, canEdit, canDelete, canPubl
     setError('');
     setNotice('');
     try {
-      const form = new FormData();
-      form.set('serviceId', editing.id);
-      form.set('image', file);
-      const result = await api<{ url: string }>('/api/admin/services/upload', { method: 'POST', body: form });
+      const result = await uploadAdminMedia({ purpose: 'website-service', file, serviceId: editing.id });
       update({
         backgroundImageVariants: {
           ...editing.backgroundImageVariants,

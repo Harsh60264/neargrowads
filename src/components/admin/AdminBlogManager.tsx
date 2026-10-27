@@ -10,6 +10,7 @@ import type { PublicImageTheme } from '../../data/themeImages';
 import { isSupportedBlogImageWidth } from '../../data/blogImagePlacement';
 import { BlogPostPage } from '../blog/BlogPostPage';
 import { AdminBlogSeoHealth } from './AdminBlogSeoHealth';
+import { uploadAdminMedia } from './uploadAdminMedia';
 
 interface BlogRecord extends BlogPost {
   status: 'draft' | 'published';
@@ -778,15 +779,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     }
     setUploadingImage(kind === 'inline' || kind === 'pending-inline' ? { kind, sectionIndex: sectionIndex ?? -1, imageIndex } : { kind });
     try {
-      const formData = new FormData();
-      formData.append('image', file, file.name);
-      const response = await fetch('/api/admin/blogs/upload', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: formData,
-      });
-      if (!response.ok) throw new Error(await apiMessage(response));
-      const result = await apiData<{ url: string }>(response);
+      const result = await uploadAdminMedia({ purpose: 'blog', file, fileName: file.name });
       if (kind === 'featured' && theme) setField('featuredImageVariants', {
         ...post.featuredImageVariants,
         [theme]: { ...post.featuredImageVariants?.[theme], url: result.url },
