@@ -152,6 +152,34 @@ test('lead API confirms memory-mode persistence and makes retries idempotent in 
   }
 });
 
+test('nested API routes resolve through the Express application', async () => {
+  const server = await startLocalServer('test');
+  try {
+    const sessionResponse = await fetch(`${server.baseUrl}/api/admin/session?source=route-test`);
+    assert.equal(sessionResponse.status, 200);
+    const session = await sessionResponse.json() as { configured: boolean; authenticated: boolean };
+    assert.equal(session.configured, false);
+    assert.equal(session.authenticated, false);
+
+    const leadsResponse = await fetch(`${server.baseUrl}/api/admin/leads?page=1`);
+    assert.equal(leadsResponse.status, 401);
+
+    const catalogueResponse = await fetch(`${server.baseUrl}/api/catalogue/payment-availability?source=route-test`);
+    assert.equal(catalogueResponse.status, 503);
+    const catalogue = await catalogueResponse.json() as { available: boolean };
+    assert.equal(catalogue.available, false);
+
+    const loginResponse = await fetch(`${server.baseUrl}/api/admin/login?source=route-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'invalid@example.test', password: 'synthetic-password' }),
+    });
+    assert.equal(loginResponse.status, 503);
+  } finally {
+    await server.stop();
+  }
+});
+
 test('lead notification HTTP failures remain distinct from saved leads and changing XFF cannot evade throttling', async () => {
   const webhookRequests: Array<{ idempotencyKey: string; body: string }> = [];
   const webhookServer = createHttpServer((req, res) => {
