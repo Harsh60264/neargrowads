@@ -122,9 +122,18 @@ async function responseMessage(response: Response): Promise<string> {
   return data.message || `Request failed (${response.status}).`;
 }
 
+async function adminSessionFromResponse(response: Response): Promise<AdminSession> {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('The admin API is not connected to this Netlify site. The frontend is deployed, but the Express API must also be hosted and configured to handle /api/* requests.');
+  }
+  if (!response.ok) throw new Error(await responseMessage(response));
+  return await response.json() as AdminSession;
+}
+
 function requestErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof TypeError && /fetch/i.test(error.message)) {
-    return 'Could not reach the admin server. Check that the Express server is running, then try again.';
+    return 'Could not reach the admin API. Check that the Express server is running and that /api/* requests are routed to it, then try again.';
   }
   return error instanceof Error ? error.message : fallback;
 }
@@ -227,10 +236,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   useEffect(() => {
     let active = true;
     fetch('/api/admin/session', { credentials: 'same-origin' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await responseMessage(response));
-        return (await response.json()) as AdminSession;
-      })
+      .then(adminSessionFromResponse)
       .then((data) => {
         if (active) {
           lastSessionValidatedAt.current = Date.now();
@@ -330,7 +336,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           }
           return;
         }
-        const latest = await response.json() as AdminSession;
+        const latest = await adminSessionFromResponse(response);
         if (!active) return;
         lastSessionValidatedAt.current = Date.now();
         if (!latest.authenticated) {
@@ -610,9 +616,9 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               setError('');
               fetch('/api/admin/session', { credentials: 'same-origin' })
                 .then(async (response) => {
-                  if (!response.ok) throw new Error(await responseMessage(response));
+                  const data = await adminSessionFromResponse(response);
                   setError('');
-                  setSession(await response.json() as AdminSession);
+                  setSession(data);
                 })
                 .catch((err: unknown) => {
                   setError(requestErrorMessage(err, 'Could not verify the admin session.'));
