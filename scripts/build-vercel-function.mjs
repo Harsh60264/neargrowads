@@ -23,5 +23,11 @@ const unresolvedLocalImports = bundledOutput?.imports.filter((item) =>
 if (unresolvedLocalImports.length) {
   throw new Error(`Function bundle contains unresolved local imports: ${unresolvedLocalImports.map((item) => item.path).join(', ')}`);
 }
+const eagerViteImports = bundledOutput?.imports.filter((item) =>
+  item.path === 'vite' && item.kind !== 'dynamic-import',
+) ?? [];
+if (eagerViteImports.length) {
+  throw new Error('Vite must remain a lazy development-only import in the Vercel Function bundle.');
+}
 
 console.log(`Bundled Express Function for Node.js 22: ${path.relative(root, outfile)}`);

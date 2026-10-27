@@ -1,5 +1,4 @@
 import express, { type Request, type Response } from 'express';
-import { createServer as createViteServer } from 'vite';
 import { createServer as createNetServer } from 'node:net';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
@@ -9636,6 +9635,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   if (!serverless && !isProduction) {
     // Development mode: Vite middleware
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
