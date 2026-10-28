@@ -6138,10 +6138,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   app.post('/api/admin/profile/password', async (req: Request, res: Response): Promise<void> => {
     if (!requireAdmin(req, res)) return;
     const identity = currentAdmin(res)!;
-    if (!identity.isPrimaryOwner) {
-      res.status(403).json({ message: 'Only the Primary Owner can change a password from My Password.' });
-      return;
-    }
     const { currentPassword, newPassword, confirmPassword } = req.body || {};
     if (typeof newPassword !== 'string' || newPassword !== confirmPassword || newPassword.length < 12 ||
       newPassword.length > 200 || new Set([

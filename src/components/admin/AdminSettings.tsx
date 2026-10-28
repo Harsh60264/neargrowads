@@ -1091,7 +1091,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         </div>
       )}
 
-      {identity?.isPrimaryOwner && <Panel title="Security & Password" description="My Password — change only the Primary Owner's own password after re-authentication. Google-only accounts must manage their password with Google.">
+      {identity?.status === 'active' && <Panel title="Security & Password" description="My Password — change only this signed-in account's password after re-authentication. Google-only accounts must manage their password with Google.">
         <form onSubmit={changePassword} className="grid gap-3 sm:grid-cols-2">
           {(['currentPassword', 'newPassword', 'confirmPassword'] as const).map((key) => (
             <label key={key} className="text-xs font-medium capitalize text-[#B8C7BC]">{key.replace(/([A-Z])/g, ' $1')}
@@ -1106,7 +1106,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             <button className={buttonClass} disabled={busy || ownerPasswordStrength < 4 || passwordValues.newPassword !== passwordValues.confirmPassword}><ShieldCheck className="h-4 w-4" /> Update password</button>
           </div>
         </form>
-        <p className="mt-3 text-[10px] leading-5 text-[#91A195]">Changing your password revokes your active CMS sessions, including this one. Passwords are never visible to Owners or other administrators.</p>
+        <p className="mt-3 text-[10px] leading-5 text-[#91A195]">Changing your password revokes your active CMS sessions, including this one. Passwords are never visible to other administrators.</p>
       </Panel>}
 
       {isOwner && (
