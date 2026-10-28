@@ -154,6 +154,24 @@ function broadcastAdminSessionEvent(type: AdminSessionEvent): void {
   }
 }
 
+export function shouldRefreshLeads({
+  authenticated,
+  canViewLeads,
+  section,
+  lastFetchedAt,
+  now,
+  refreshIntervalMs = LEADS_REFRESH_INTERVAL_MS,
+}: {
+  authenticated: boolean;
+  canViewLeads: boolean;
+  section?: string;
+  lastFetchedAt: number;
+  now: number;
+  refreshIntervalMs?: number;
+}): boolean {
+  return authenticated && canViewLeads && section === 'leads' && now - lastFetchedAt >= refreshIntervalMs;
+}
+
 export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, onSiteContentSaved, theme = 'dark', onToggleTheme = () => {} }: {
   section?: 'blog' | 'team' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'leads' | 'categories' | 'securityMonitoring' | 'settings' | 'serviceStore';
   blogMode?: 'list' | 'editor';
@@ -336,19 +354,27 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   ));
 
   useEffect(() => {
-    if (!session?.authenticated || !canViewLeads || (section && section !== 'leads')) return;
-    if (Date.now() - lastLeadsFetchedAt.current >= LEADS_REFRESH_INTERVAL_MS) void loadLeads();
-  }, [session?.authenticated, canViewLeads, section, loadLeads]);
-
-  useEffect(() => {
-    if (!session?.authenticated || !canViewLeads || (section && section !== 'leads')) return;
+    if (!session?.authenticated || !canViewLeads || section !== 'leads') return;
     lastLeadsFetchedAt.current = 0;
     void loadLeads();
   }, [search, statusFilter, leadPage]);
 
   useEffect(() => {
     if (!session?.authenticated || !canViewLeads || section !== 'leads') return;
-    const timer = window.setInterval(() => { void loadLeads(); }, 30_000);
+    const refreshLeads = () => {
+      if (shouldRefreshLeads({
+        authenticated: true,
+        canViewLeads,
+        section,
+        lastFetchedAt: lastLeadsFetchedAt.current,
+        now: Date.now(),
+      })) {
+        void loadLeads();
+      }
+    };
+
+    refreshLeads();
+    const timer = window.setInterval(refreshLeads, LEADS_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [session?.authenticated, canViewLeads, section, loadLeads]);
 
@@ -908,7 +934,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           </div>
         </header>
         {mobileNavOpen && <button type="button" aria-label="Close CMS navigation" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/50 lg:hidden" />}
-        <aside ref={mobileDrawerRef} id="admin-mobile-navigation" className={`admin-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col overflow-y-auto bg-[#14251A] px-5 py-4 text-white shadow-2xl sm:px-6 lg:static lg:z-auto lg:h-screen lg:w-auto lg:shrink-0 lg:overflow-visible lg:px-4 lg:py-5 lg:shadow-none ${mobileNavOpen ? 'flex' : 'hidden'} lg:flex ${sidebarCollapsed ? 'lg:w-[84px]' : 'lg:w-[260px]'}`} role="dialog" aria-modal={mobileNavOpen || undefined} aria-label="CMS navigation">
+        <aside ref={mobileDrawerRef} id="admin-mobile-navigation" className={`admin-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col overflow-y-auto bg-[#14251A] px-5 py-4 text-white shadow-2xl sm:px-6 lg:sticky lg:top-0 lg:z-auto lg:self-start lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:w-auto lg:shrink-0 lg:overflow-y-auto lg:overscroll-contain lg:touch-pan-y lg:px-4 lg:py-5 lg:shadow-none ${mobileNavOpen ? 'flex' : 'hidden'} lg:flex ${sidebarCollapsed ? 'lg:w-[84px]' : 'lg:w-[260px]'}`} role="dialog" aria-modal={mobileNavOpen || undefined} aria-label="CMS navigation">
           <button ref={mobileDrawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close CMS navigation" className="mb-2 ml-auto grid h-10 w-10 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10 lg:hidden">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -918,7 +944,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           </a>
 
           <p className={`mt-8 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[#91A899] ${sidebarCollapsed ? 'lg:sr-only' : ''}`}>CMS MANAGEMENT</p>
-          <nav aria-label="Admin navigation" className="mt-3 flex min-w-0 flex-col gap-2 overflow-x-hidden lg:overflow-visible">
+          <nav aria-label="Admin navigation" className="mt-3 flex min-w-0 flex-col gap-2 overflow-x-hidden lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
             {hasView('dashboard') && <button type="button" onClick={() => navigate('/admin')} title="Dashboard" aria-current={activeSection === 'dashboard' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${activeSection === 'dashboard' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
               <LayoutDashboard className="h-4 w-4 shrink-0 text-[#84D095]" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Dashboard</span>
             </button>}
