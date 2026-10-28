@@ -1315,7 +1315,7 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   }
 
   .ng-mentor-carousel.is-stack {
-    --cycle-interval: 4500ms;
+    --cycle-interval: 5000ms;
     --flick-duration: 540ms;
     --stack-offset: clamp(30px, 4.8vw, 42px);
     position: relative;

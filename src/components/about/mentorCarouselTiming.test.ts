@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 
-test('uses a stable 4.5 second mentor dwell and does not pause for hover', () => {
-  assert.equal(MENTOR_AUTOPLAY_DWELL_MS, 4500);
+test('uses a stable 5 second mentor dwell and does not pause for hover', () => {
+  assert.equal(MENTOR_AUTOPLAY_DWELL_MS, 5000);
   assert.equal(shouldRunMentorAutoplay({
     isStack: true,
     documentVisible: true,
@@ -25,4 +25,19 @@ test('pauses mentor autoplay only when visibility, motion, or carousel readiness
   assert.equal(shouldRunMentorAutoplay({ ...base, carouselVisible: false }), false);
   assert.equal(shouldRunMentorAutoplay({ ...base, reducedMotion: true }), false);
   assert.equal(shouldRunMentorAutoplay({ ...base, mentorCount: 1 }), false);
+});
+
+test('keeps one interval advancing while visibility remains true', () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  try {
+    const changes: number[] = [];
+    const timer = setInterval(() => changes.push(changes.length + 1), MENTOR_AUTOPLAY_DWELL_MS);
+
+    mock.timers.tick(MENTOR_AUTOPLAY_DWELL_MS * 3);
+
+    assert.deepEqual(changes, [1, 2, 3]);
+    clearInterval(timer);
+  } finally {
+    mock.timers.reset();
+  }
 });

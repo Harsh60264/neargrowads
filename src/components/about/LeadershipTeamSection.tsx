@@ -230,7 +230,7 @@ export function LeadershipTeamSection() {
   const coreCarouselRef = useRef<HTMLUListElement>(null);
   const virtualIndexRef = useRef(1);
   const interactionReasonsRef = useRef(new Set<string>());
-  const autoplayTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const autoplayTimerRef = useRef<number | undefined>(undefined);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -370,7 +370,7 @@ export function LeadershipTeamSection() {
     const canAutoplay = isMobile && carouselReady && carouselVisible && documentVisible &&
       !reducedMotion && !interactionPaused && core.length > 1;
     if (!canAutoplay) return;
-    autoplayTimerRef.current = setInterval(() => moveCarouselRef.current(1), 3000);
+    autoplayTimerRef.current = window.setInterval(() => moveCarouselRef.current(1), 3000);
     return () => {
       if (autoplayTimerRef.current) clearInterval(autoplayTimerRef.current);
       autoplayTimerRef.current = undefined;
@@ -546,9 +546,14 @@ export function LeadershipTeamSection() {
       mentorCount: mentors.length,
     }) || !stage) return;
     const dwellTime = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || MENTOR_AUTOPLAY_DWELL_MS;
-    const timer = window.setTimeout(() => cycleMentorsRef.current(1), dwellTime);
-    return () => window.clearTimeout(timer);
-  }, [documentVisible, isMentorStack, mentorCarouselVisible, mentorSignature, mentorOrder, reducedMotion, mentors.length]);
+    autoplayTimerRef.current = window.setInterval(() => cycleMentorsRef.current(1), dwellTime);
+    return () => {
+      if (autoplayTimerRef.current) {
+        window.clearInterval(autoplayTimerRef.current);
+        autoplayTimerRef.current = undefined;
+      }
+    };
+  }, [documentVisible, isMentorStack, mentorCarouselVisible, reducedMotion, mentors.length]);
 
   if (!mentors.length && !core.length) return null;
 

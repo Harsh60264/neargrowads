@@ -1,4 +1,4 @@
-export const MENTOR_AUTOPLAY_DWELL_MS = 4500;
+export const MENTOR_AUTOPLAY_DWELL_MS = 5000;
 
 export function shouldRunMentorAutoplay(options: {
   isStack: boolean;
