@@ -715,6 +715,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const initialPasswordStrength = passwordStrength(initialPassword);
   const resetPasswordStrength = passwordStrength(resetPasswordValues.newPassword);
   const delegatedUsers = users.filter((user) => !user.isPrimaryOwner);
+  const activeDelegatedUsers = delegatedUsers.filter((user) => user.status === 'active' || user.status === 'pending');
   const latestUserActivity = (userId: string) => logs.find((log) => log.target_id === userId);
   const historyStatus = (user: AdminUser): AdminHistoryStatus => {
     const lastAction = latestUserActivity(user.id)?.action;
@@ -750,13 +751,13 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     ].includes(log.action),
   );
   const invitationCounts = {
-    total: delegatedUsers.length,
     pending: delegatedUsers.filter((user) => user.status === 'pending').length,
     active: delegatedUsers.filter((user) => user.status === 'active').length,
     expired: 0,
     cancelled: delegatedUsers.filter((user) => historyStatus(user) === 'cancelled').length,
     disabled: delegatedUsers.filter((user) => user.status === 'disabled' && historyStatus(user) !== 'cancelled' && historyStatus(user) !== 'removed').length,
   };
+  const totalInvitationHistory = invitationCounts.pending + invitationCounts.active + invitationCounts.cancelled;
 
   return (
     <div className="admin-settings space-y-5 text-[#ECF3EE]">
@@ -886,7 +887,11 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
               )}
             </form>}
             {adminTab === 'accounts' && <div className="mt-5 space-y-3">
-              {delegatedUsers.map((user) => (
+              <div className="flex items-center justify-between rounded-xl border border-[#304135] bg-[#131D16] px-4 py-3 text-xs text-[#A9B8AD]">
+                <span>Active and pending administrators are shown here. Disabled, removed, and cancelled records remain available in history.</span>
+                <button type="button" className="shrink-0 rounded-lg border border-[#47594C] px-3 py-2 font-semibold text-[#C8D8CA] hover:bg-white/5" onClick={() => setAdminTab('history')}>View History</button>
+              </div>
+              {activeDelegatedUsers.map((user) => (
                 <article id={`admin-account-${user.id}`} key={user.id} className="rounded-xl border border-[#304135] bg-[#131D16] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0"><p className="break-all text-sm font-semibold">{user.email}</p><p className="mt-1 text-[10px] capitalize text-[#91A195]">{historyStatusLabel(user)} · {user.role.replace('_', ' ')} · {user.username ? `@${user.username}` : 'No username alias'}{user.mustChangePassword ? ' · Password change required' : ''}</p><p className="mt-1 text-[10px] text-[#819286]">Allowed sections: {Object.entries(user.permissions || {}).filter(([, actions]) => actions?.view).map(([section]) => sectionLabels[section as AdminSection]).join(', ') || 'None'}</p><p className="mt-1 text-[10px] text-[#819286]">Email verification: {user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'} · Last login: {user.lastLoginAt || user.authLastSignInAt ? new Date(user.lastLoginAt || user.authLastSignInAt || '').toLocaleString() : 'Never'} · Last password reset: {user.lastPasswordResetAt ? new Date(user.lastPasswordResetAt).toLocaleString() : 'Not recorded'}</p></div>
@@ -949,7 +954,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             {adminTab === 'history' && <div className="mt-5 space-y-5">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 {([
-                  ['Total invitations', invitationCounts.total],
+                  ['Total invitations', totalInvitationHistory],
                   ['Pending', invitationCounts.pending],
                   ['Accepted / active', invitationCounts.active],
                   ['Expired', invitationCounts.expired],

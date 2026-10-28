@@ -5853,64 +5853,24 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'Owner accounts cannot be cancelled from delegated invitation management.' });
         return;
       }
-      if (target.status !== 'pending') {
-        if (target.status === 'disabled') {
-          const previousCancellationQuery = new URLSearchParams({
-            target_id: `eq.${target.id}`,
-            action: 'eq.admin.invitation.cancelled',
-            select: 'id',
-            limit: '1',
-          });
-          const previousCancellation = await readSupabaseJson<Array<{ id: string }>>(
-            await supabaseAdminRequest(`rest/v1/admin_audit_logs?${previousCancellationQuery}`),
-          );
-          if (previousCancellation.length) {
-            res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
-            return;
-          }
-        }
-        res.status(409).json({ message: 'Only a pending administrator invitation can be cancelled.' });
+      const cancellation = await readSupabaseJson<{ status?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/cancel_admin_invitation', {
+          method: 'POST',
+          body: JSON.stringify({ p_actor_id: actor.id, p_target_id: target.id }),
+        }),
+      );
+      if (cancellation.status === 'already_cancelled') {
+        await revokeSupabaseRefreshTokens(target.id);
+        res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
         return;
       }
-      const cancelledAt = new Date().toISOString();
-      const userQuery = new URLSearchParams({ id: `eq.${target.id}`, status: 'eq.pending' });
-      const updatedUsers = await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ status: 'disabled', username: null, permissions: {}, updated_at: cancelledAt }),
-      }));
-      if (!updatedUsers.length) {
-        const currentTarget = await readAdminIdentity(target.id);
-        if (currentTarget?.status === 'disabled') {
-          const previousCancellationQuery = new URLSearchParams({
-            target_id: `eq.${target.id}`,
-            action: 'eq.admin.invitation.cancelled',
-            select: 'id',
-            limit: '1',
-          });
-          const previousCancellation = await readSupabaseJson<Array<{ id: string }>>(
-            await supabaseAdminRequest(`rest/v1/admin_audit_logs?${previousCancellationQuery}`),
-          );
-          if (previousCancellation.length) {
-            res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
-            return;
-          }
-        }
-        res.status(409).json({ message: 'The invitation state changed before cancellation completed. Refresh the invitation history and try again if it is still pending.' });
-        return;
-      }
-      const sessionsQuery = new URLSearchParams({ user_id: `eq.${target.id}`, revoked_at: 'is.null' });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ revoked_at: cancelledAt }),
-      }));
       await revokeSupabaseRefreshTokens(target.id);
-      await writeAdminAudit(actor.id, 'admin.invitation.cancelled', 'settings', target.id, {
-        cancellationPolicy: 'disable_cms_access_keep_auth_identity_and_audit_history',
-      });
       res.json({ message: 'Invitation cancelled. CMS access and username login were revoked; the Auth identity was retained safely.' });
     } catch (error) {
+      if (error instanceof SupabaseRequestError && error.providerMessage) {
+        res.status(409).json({ message: error.providerMessage });
+        return;
+      }
       console.error('[NearGrow Ads] Administrator invitation cancellation failed.', error instanceof Error ? error.name : 'Unknown error');
       res.status(503).json({ message: 'The pending invitation could not be cancelled. Try again or contact the system administrator.' });
     }

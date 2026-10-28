@@ -540,9 +540,9 @@ export function LeadershipTeamSection() {
   useEffect(() => {
     const stage = mentorCarouselRef.current;
     if (!isMentorStack || !documentVisible || !mentorCarouselVisible || mentorHovered || !stage) return;
-    const interval = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || 2800;
-    const timer = setInterval(() => cycleMentorsRef.current(1), interval);
-    return () => clearInterval(timer);
+    const dwellTime = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || 5600;
+    const timer = window.setTimeout(() => cycleMentorsRef.current(1), dwellTime);
+    return () => window.clearTimeout(timer);
   }, [documentVisible, isMentorStack, mentorCarouselVisible, mentorHovered, mentorSignature]);
 
   if (!mentors.length && !core.length) return null;
