@@ -19,6 +19,7 @@ import { isSafePublicDestination } from './src/data/publicLinks';
 import { normalizeTeamUrl } from './src/data/teamLinks';
 import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
+import { decideAdminInvitationCompletion } from './server/adminInvitation';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -5288,52 +5289,153 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   });
 
   app.post('/api/admin/auth/complete', async (req: Request, res: Response): Promise<void> => {
-    const { accessToken, password, confirmPassword, mode } = req.body || {};
-    if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 10_000 ||
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Setup can only be completed from this website.' });
+      return;
+    }
+    const {
+      accessToken,
+      authorizationCode,
+      codeVerifier,
+      tokenHash,
+      tokenType,
+      password,
+      confirmPassword,
+      mode,
+    } = req.body || {};
+    const hasAccessToken = typeof accessToken === 'string';
+    const hasCodeCallback = typeof authorizationCode === 'string' || typeof codeVerifier === 'string';
+    const hasTokenHash = typeof tokenHash === 'string' || typeof tokenType === 'string';
+    if ([hasAccessToken, hasCodeCallback, hasTokenHash].filter(Boolean).length !== 1 ||
+      (hasAccessToken && (accessToken.length < 20 || accessToken.length > 10_000)) ||
+      (typeof authorizationCode === 'string' && (authorizationCode.length < 8 || authorizationCode.length > 2_000)) ||
+      (typeof codeVerifier === 'string' && !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier)) ||
+      (hasCodeCallback && (typeof authorizationCode !== 'string' || typeof codeVerifier !== 'string')) ||
+      (typeof tokenHash === 'string' && (tokenHash.length < 20 || tokenHash.length > 2_000)) ||
+      (hasTokenHash && (typeof tokenHash !== 'string' || typeof tokenType !== 'string' ||
+        !['signup', 'invite', 'recovery'].includes(tokenType))) ||
       (mode !== 'invite' && mode !== 'recovery') ||
       (typeof password !== 'string' && !(mode === 'invite' && password === undefined)) ||
       (password !== undefined && (!isStrongAdminPassword(password) || password !== confirmPassword))) {
-      res.status(400).json({ message: 'Use a password with at least 12 characters and at least three character types.' });
+      res.status(400).json({ message: 'The setup request is incomplete or invalid. Check the link and password requirements.' });
       return;
     }
     try {
-      const authResponse = await supabaseAuthRequest('user', { method: 'GET' }, accessToken);
+      let verifiedAccessToken = accessToken as string | undefined;
+      if (typeof authorizationCode === 'string' && typeof codeVerifier === 'string') {
+        const exchangeResponse = await supabaseAuthRequest('token?grant_type=pkce', {
+          method: 'POST',
+          body: JSON.stringify({ auth_code: authorizationCode, code_verifier: codeVerifier }),
+        });
+        const exchange = await readSupabaseJson<{ access_token?: string }>(exchangeResponse);
+        verifiedAccessToken = exchange.access_token;
+      } else if (typeof tokenHash === 'string' && typeof tokenType === 'string') {
+        const allowedTypes = mode === 'invite' ? ['signup', 'invite'] : ['recovery'];
+        if (!allowedTypes.includes(tokenType)) {
+          res.status(401).json({ message: 'This email link is not valid for the requested account action.' });
+          return;
+        }
+        const verifyResponse = await supabaseAuthRequest('verify', {
+          method: 'POST',
+          body: JSON.stringify({ token_hash: tokenHash, type: tokenType }),
+        });
+        const verified = await readSupabaseJson<{ access_token?: string }>(verifyResponse);
+        verifiedAccessToken = verified.access_token;
+      }
+      if (!verifiedAccessToken || verifiedAccessToken.length > 10_000) {
+        res.status(401).json({ message: 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.' });
+        return;
+      }
+      const authResponse = await supabaseAuthRequest('user', { method: 'GET' }, verifiedAccessToken);
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(authResponse);
       if (!authUser.id || !authUser.email || !authUser.email_confirmed_at) {
-        res.status(401).json({ message: 'The verification link is invalid or expired. Request a new email.' });
+        res.status(401).json({ message: 'Verify the invited email address before completing setup.' });
         return;
       }
       const identity = await readAdminIdentity(authUser.id);
-      if (!identity || identity.email !== authUser.email.toLowerCase() ||
-        (mode === 'invite' && identity.status !== 'pending') ||
-        (mode === 'recovery' && identity.status !== 'active' &&
-          !(identity.status === 'pending' && identity.mustChangePassword))) {
+      if (!identity) {
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
+        return;
+      }
+      if ((mode === 'invite' && decideAdminInvitationCompletion(identity, authUser) === 'reject') ||
+        (mode === 'recovery' && (identity.email !== authUser.email.toLowerCase() ||
+          identity.status === 'disabled' || (identity.status !== 'active' &&
+            !(identity.status === 'pending' && identity.mustChangePassword))))) {
+        res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
+        return;
+      }
+      if (mode === 'invite' && identity.status === 'active') {
+        const replayResult = await readSupabaseJson<{ status?: string }>(
+          await supabaseAdminRequest('rest/v1/rpc/complete_admin_invitation', {
+            method: 'POST',
+            body: JSON.stringify({
+              p_user_id: identity.id,
+              p_email: identity.email,
+              p_must_change_password: identity.mustChangePassword === true,
+            }),
+          }),
+        );
+        if (decideAdminInvitationCompletion(identity, authUser, replayResult.status === 'already_accepted') !== 'already_accepted') {
+          res.status(403).json({ message: 'This invitation is no longer available. Contact the Primary Owner.' });
+          return;
+        }
+        res.json({ message: 'Admin setup is already complete. Sign in with your own password.' });
         return;
       }
       if (password !== undefined) {
         const updateResponse = await supabaseAuthRequest('user', {
           method: 'PUT',
           body: JSON.stringify({ password }),
-        }, accessToken);
+        }, verifiedAccessToken);
         await readSupabaseJson<unknown>(updateResponse);
       } else if (!identity.mustChangePassword) {
         res.status(400).json({ message: 'Choose a strong password to finish setting up this invitation.' });
         return;
       }
-      if (mode === 'invite' || mode === 'recovery') {
-        const query = new URLSearchParams({ id: `eq.${identity.id}` });
-        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${query}`, {
-          method: 'PATCH',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            ...(mode === 'invite' ? { status: 'active' } : {}),
-            ...(mode === 'recovery' && identity.status === 'pending' ? { status: 'active' } : {}),
-            must_change_password: mode === 'invite' && password === undefined,
-            ...(mode === 'recovery' ? { last_password_reset_at: new Date().toISOString() } : {}),
-            updated_at: new Date().toISOString(),
+      if (mode === 'invite') {
+        const completion = await readSupabaseJson<{ status?: string }>(
+          await supabaseAdminRequest('rest/v1/rpc/complete_admin_invitation', {
+            method: 'POST',
+            body: JSON.stringify({
+              p_user_id: identity.id,
+              p_email: identity.email,
+              p_must_change_password: password === undefined,
+            }),
           }),
-        }));
+        );
+        if (completion.status !== 'accepted' &&
+          decideAdminInvitationCompletion(identity, authUser, completion.status === 'already_accepted') !== 'already_accepted') {
+          res.status(403).json({ message: 'This invitation is no longer pending or has been cancelled. Contact the Primary Owner.' });
+          return;
+        }
+      } else {
+        if (identity.status === 'pending') {
+          const completion = await readSupabaseJson<{ status?: string }>(
+            await supabaseAdminRequest('rest/v1/rpc/complete_admin_invitation', {
+              method: 'POST',
+              body: JSON.stringify({
+                p_user_id: identity.id,
+                p_email: identity.email,
+                p_must_change_password: false,
+              }),
+            }),
+          );
+          if (completion.status !== 'accepted') {
+            res.status(403).json({ message: 'This invitation is no longer pending or has been cancelled. Contact the Primary Owner.' });
+            return;
+          }
+        } else {
+          const query = new URLSearchParams({ id: `eq.${identity.id}` });
+          await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${query}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              must_change_password: false,
+              last_password_reset_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }),
+          }));
+        }
       }
       if (mode === 'recovery') {
         const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
@@ -5343,18 +5445,22 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           body: JSON.stringify({ revoked_at: new Date().toISOString() }),
         }));
         await revokeSupabaseRefreshTokens(identity.id);
+        if (identity.status !== 'pending') {
+          await writeAdminAudit(identity.id, 'auth.password.recovered', 'security', identity.id);
+        }
       }
-      await writeAdminAudit(
-        identity.id,
-        mode === 'invite' || identity.status === 'pending' ? 'admin.invitation.accepted' : 'auth.password.recovered',
-        mode === 'invite' || identity.status === 'pending' ? 'settings' : 'security',
-        identity.id,
-        mode === 'recovery' && identity.status === 'pending' ? { activation: 'completed_after_verified_setup' } : {},
-      );
-      res.json({ message: 'Your account is ready. Sign in with your new password.' });
+      res.json({ message: 'Your account is ready. Sign in with your own password.' });
     } catch (error) {
-      console.error('[NearGrow Ads] Admin account activation or recovery failed:', error);
-      res.status(503).json({ message: 'The account could not be updated. The verification link may have expired.' });
+      console.error('[NearGrow Ads] Admin account activation or recovery failed.', {
+        status: error instanceof SupabaseRequestError ? error.status : undefined,
+        code: error instanceof SupabaseRequestError ? error.code : undefined,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      if (error instanceof SupabaseRequestError && [400, 401, 403].includes(error.status)) {
+        res.status(401).json({ message: 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.' });
+        return;
+      }
+      res.status(503).json({ message: 'Setup could not be completed right now. Retry, or ask the Primary Owner to resend setup.' });
     }
   });
 

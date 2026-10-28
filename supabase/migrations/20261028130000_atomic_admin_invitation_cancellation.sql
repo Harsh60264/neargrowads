@@ -2,7 +2,7 @@ create or replace function public.cancel_admin_invitation(p_actor_id uuid, p_tar
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 declare
   target_row public.admin_users%rowtype;
