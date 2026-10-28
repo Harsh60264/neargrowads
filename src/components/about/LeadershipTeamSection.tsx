@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
 import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
+import { MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 
 /* ---------- small primitives ---------- */
 
@@ -219,7 +220,6 @@ export function LeadershipTeamSection() {
   const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [interactionPaused, setInteractionPaused] = useState(false);
   const [mentorCarouselVisible, setMentorCarouselVisible] = useState(false);
-  const [mentorHovered, setMentorHovered] = useState(false);
   const [mentorOrder, setMentorOrder] = useState<string[]>(() => sortTeam(TEAM_SEED.filter((m) => m.visible && m.group === 'mentor')).map((m) => m.id));
   const [flickingMentorId, setFlickingMentorId] = useState<string | null>(null);
   const coreSectionRef = useRef<HTMLDivElement>(null);
@@ -510,7 +510,6 @@ export function LeadershipTeamSection() {
 
   useEffect(() => {
     const stage = mentorCarouselRef.current;
-    setMentorHovered(isMentorStack && Boolean(stage?.matches(':hover')));
     if (!isMentorStack) {
       setMentorOrder(mentors.map((member) => member.id));
       mentorOrderRef.current = mentors.map((member) => member.id);
@@ -539,11 +538,17 @@ export function LeadershipTeamSection() {
 
   useEffect(() => {
     const stage = mentorCarouselRef.current;
-    if (!isMentorStack || !documentVisible || !mentorCarouselVisible || mentorHovered || !stage) return;
-    const dwellTime = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || 5600;
+    if (!shouldRunMentorAutoplay({
+      isStack: isMentorStack,
+      documentVisible,
+      carouselVisible: mentorCarouselVisible,
+      reducedMotion,
+      mentorCount: mentors.length,
+    }) || !stage) return;
+    const dwellTime = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || MENTOR_AUTOPLAY_DWELL_MS;
     const timer = window.setTimeout(() => cycleMentorsRef.current(1), dwellTime);
     return () => window.clearTimeout(timer);
-  }, [documentVisible, isMentorStack, mentorCarouselVisible, mentorHovered, mentorSignature]);
+  }, [documentVisible, isMentorStack, mentorCarouselVisible, mentorSignature, mentorOrder, reducedMotion, mentors.length]);
 
   if (!mentors.length && !core.length) return null;
 
@@ -571,8 +576,6 @@ export function LeadershipTeamSection() {
                 className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
                 aria-label="Strategic mentors"
                 onKeyDown={isMentorStack ? handleMentorKeyDown : undefined}
-                onMouseEnter={isMentorStack ? () => setMentorHovered(true) : undefined}
-                onMouseLeave={isMentorStack ? () => setMentorHovered(false) : undefined}
               >
                 {displayMentors.map((m, index) => (
                   <li

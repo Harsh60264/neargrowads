@@ -85,6 +85,7 @@ export function ChatbotWidget({ siteContent, siteContentLoaded, blogPosts, onNav
   else engineRef.current.updateKnowledge(knowledge);
 
   useEffect(() => {
+    if (!isOpen) return;
     const controller = new AbortController();
     void fetch('/api/services', { cache: 'no-store', signal: controller.signal })
       .then(async (response) => {
@@ -138,7 +139,7 @@ export function ChatbotWidget({ siteContent, siteContentLoaded, blogPosts, onNav
       });
 
     return () => controller.abort();
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)');

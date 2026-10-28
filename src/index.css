@@ -1315,7 +1315,7 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   }
 
   .ng-mentor-carousel.is-stack {
-    --cycle-interval: 5600ms;
+    --cycle-interval: 4500ms;
     --flick-duration: 540ms;
     --stack-offset: clamp(30px, 4.8vw, 42px);
     position: relative;
@@ -1798,6 +1798,7 @@ html[data-theme='light'] .ng-global-reach {
 
 html[data-theme='light'] .ng-global-reach-header {
   margin-bottom: 1rem;
+  background-color: transparent !important;
 }
 
 html[data-theme='light'] .ng-global-reach-rail {
@@ -3016,6 +3017,10 @@ html[data-theme='light'] [data-public-theme='light'] header nav button:focus-vis
 html[data-theme='light'] [data-public-theme='light'] header .absolute.top-full button:focus-visible {
   outline: 2px solid var(--brand-green) !important;
   outline-offset: 2px;
+}
+
+html[data-theme='light'] [data-public-theme='light'] .ng-global-reach-header {
+  background-color: transparent !important;
 }
 
 html[data-theme='light'] [data-public-theme='light'] header button:disabled,
@@ -7140,6 +7145,10 @@ html[data-theme='light'] [data-public-theme='light'] .about-leadership-section {
   color: var(--brand-text) !important;
   background-color: var(--brand-bg) !important;
   border-color: var(--brand-border) !important;
+}
+
+html[data-theme='light'] [data-public-theme='light'] .about-leadership-section > div > header {
+  background-color: transparent !important;
 }
 
 html[data-theme='light'] [data-public-theme='light'] .about-page > section:last-child {
