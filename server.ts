@@ -5854,16 +5854,51 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
       if (target.status !== 'pending') {
+        if (target.status === 'disabled') {
+          const previousCancellationQuery = new URLSearchParams({
+            target_id: `eq.${target.id}`,
+            action: 'eq.admin.invitation.cancelled',
+            select: 'id',
+            limit: '1',
+          });
+          const previousCancellation = await readSupabaseJson<Array<{ id: string }>>(
+            await supabaseAdminRequest(`rest/v1/admin_audit_logs?${previousCancellationQuery}`),
+          );
+          if (previousCancellation.length) {
+            res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
+            return;
+          }
+        }
         res.status(409).json({ message: 'Only a pending administrator invitation can be cancelled.' });
         return;
       }
       const cancelledAt = new Date().toISOString();
-      const userQuery = new URLSearchParams({ id: `eq.${target.id}` });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
+      const userQuery = new URLSearchParams({ id: `eq.${target.id}`, status: 'eq.pending' });
+      const updatedUsers = await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
         method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
+        headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ status: 'disabled', username: null, permissions: {}, updated_at: cancelledAt }),
       }));
+      if (!updatedUsers.length) {
+        const currentTarget = await readAdminIdentity(target.id);
+        if (currentTarget?.status === 'disabled') {
+          const previousCancellationQuery = new URLSearchParams({
+            target_id: `eq.${target.id}`,
+            action: 'eq.admin.invitation.cancelled',
+            select: 'id',
+            limit: '1',
+          });
+          const previousCancellation = await readSupabaseJson<Array<{ id: string }>>(
+            await supabaseAdminRequest(`rest/v1/admin_audit_logs?${previousCancellationQuery}`),
+          );
+          if (previousCancellation.length) {
+            res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
+            return;
+          }
+        }
+        res.status(409).json({ message: 'The invitation state changed before cancellation completed. Refresh the invitation history and try again if it is still pending.' });
+        return;
+      }
       const sessionsQuery = new URLSearchParams({ user_id: `eq.${target.id}`, revoked_at: 'is.null' });
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
         method: 'PATCH',

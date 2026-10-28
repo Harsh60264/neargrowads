@@ -1003,7 +1003,11 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                           }}>View Details / Edit Access</button>
                           <button type="button" className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'permissions')}>View Permissions</button>
                           {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || user.role === 'owner'} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
-                          {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel invitation</button>}
+                          {user.status === 'pending' && user.role !== 'owner' && <>
+                            <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel invitation</button>
+                            {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
+                          </>}
+                          {user.status === 'active' && <span className="text-[10px] leading-4 text-[#91A195]">Active account: use Remove CMS Access in Admin Accounts instead.</span>}
                         </div></td>
                       </tr>;
                     })}
