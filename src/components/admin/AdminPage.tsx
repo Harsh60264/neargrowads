@@ -883,13 +883,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
             <p className="mt-2 text-[11px] leading-5 text-[#9DB1A2]">{storage === 'supabase' ? 'Protected cloud storage is connected.' : 'Connected to this server session.'}</p>
           </div>}
 
-          <div className="mt-6 border-t border-white/10 pt-5 lg:mt-auto lg:block">
+          <div className="mt-6 border-t border-white/10 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5 lg:mt-auto lg:pb-0 lg:block">
             {!sidebarCollapsed && <a href="mailto:support@neargrowads.com" className="admin-support-panel mb-3 block rounded-xl bg-white/[0.05] p-3 text-xs text-[#B7C8BA]">
               <span className="flex items-center gap-2 font-semibold text-white"><Headset className="h-4 w-4" /> 24/7 Support</span>
               <span className="mt-1 block leading-5 text-[#9DB1A2]">Need technical assistance?</span>
               <span className="mt-2 block font-semibold text-[#84D095]">Contact Team</span>
             </a>}
-            <button type="button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#B7C8BA] transition hover:bg-white/5 hover:text-white">
+            <button type="button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'} className="hidden w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[#B7C8BA] transition hover:bg-white/5 hover:text-white lg:flex">
               {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <><PanelLeftClose className="h-4 w-4" /> Collapse Sidebar</>}
             </button>
             <a href="/" className="mt-1 flex items-center gap-2 px-3 py-2 text-xs text-[#B7C8BA] transition hover:text-white"><ArrowLeft className="h-4 w-4" />{!sidebarCollapsed && ' Back to website'}</a>
