@@ -3,7 +3,7 @@ import { Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, User
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
 type AdminStatus = 'pending' | 'active' | 'disabled';
-type AdminHistoryStatus = AdminStatus | 'cancelled' | 'removed';
+type AdminHistoryStatus = AdminStatus | 'cancelled' | 'removed' | 'archived';
 type AdminAction = 'view' | 'create' | 'edit' | 'delete' | 'publish' | 'export';
 type AdminSection = 'dashboard' | 'leads' | 'serviceStore' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'blogs' | 'team' | 'categories' | 'securityMonitoring' | 'settings';
 type Permissions = Partial<Record<AdminSection, Partial<Record<AdminAction, boolean>>>>;
@@ -14,6 +14,7 @@ interface AdminUser {
   username?: string | null;
   role: AdminRole;
   status: AdminStatus;
+  archivedAt?: string | null;
   permissions: Permissions;
   isPrimaryOwner: boolean;
   mustChangePassword?: boolean;
@@ -368,6 +369,8 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword: reauthPassword }),
       });
+      setExistingAccountId(null);
+      setAdminTab('history');
       return result.message;
     });
   };
@@ -419,6 +422,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           currentPassword: reauthPassword,
         }),
       });
+      if (status === 'disabled') setAdminTab('history');
       return result.message;
     });
   };
@@ -431,6 +435,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword: reauthPassword }),
       });
+      setAdminTab('history');
       return result.message;
     });
   };
@@ -439,6 +444,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     if (!window.confirm(`Cancel the pending invitation for ${user.email}? CMS access will be revoked and the Supabase Auth identity will be retained.`)) return;
     await runAction(async () => {
       const result = await api<{ message: string }>(`/api/admin/users/${encodeURIComponent(user.id)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: reauthPassword }),
+      });
+      setAdminTab('history');
+      return result.message;
+    });
+  };
+
+  const archiveUser = async (user: AdminUser) => {
+    if (!window.confirm(`Archive ${user.email} from the active administrator list? This is a soft archive; the Supabase Auth identity and audit history will be retained. Only disabled or cancelled accounts can be archived.`)) return;
+    await runAction(async () => {
+      const result = await api<{ message: string }>(`/api/admin/users/${encodeURIComponent(user.id)}/archive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword: reauthPassword }),
@@ -715,12 +733,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const initialPasswordStrength = passwordStrength(initialPassword);
   const resetPasswordStrength = passwordStrength(resetPasswordValues.newPassword);
   const delegatedUsers = users.filter((user) => !user.isPrimaryOwner);
-  const activeDelegatedUsers = delegatedUsers.filter((user) => user.status === 'active' || user.status === 'pending');
-  const latestUserActivity = (userId: string) => logs.find((log) => log.target_id === userId);
+  const activeDelegatedUsers = delegatedUsers.filter((user) =>
+    !user.archivedAt && (user.status === 'active' || user.status === 'pending'));
   const historyStatus = (user: AdminUser): AdminHistoryStatus => {
-    const lastAction = latestUserActivity(user.id)?.action;
-    if (user.status === 'disabled' && lastAction === 'admin.invitation.cancelled') return 'cancelled';
-    if (user.status === 'disabled' && lastAction === 'admin.removed') return 'removed';
+    if (user.archivedAt) return 'archived';
+    const lastLifecycleAction = logs.find((log) => log.target_id === user.id && [
+      'admin.invitation.cancelled',
+      'admin.removed',
+      'admin.archived',
+      'admin.disabled',
+      'admin.access.updated',
+    ].includes(log.action))?.action;
+    if (user.status === 'disabled' && lastLifecycleAction === 'admin.invitation.cancelled') return 'cancelled';
+    if (user.status === 'disabled' && lastLifecycleAction === 'admin.removed') return 'removed';
     return user.status;
   };
   const historyStatusLabel = (user: AdminUser): string => {
@@ -734,6 +759,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     if (status === 'active') return user.mustChangePassword ? 'Active · password change required' : 'Active';
     if (status === 'cancelled') return 'Cancelled';
     if (status === 'removed') return 'Removed · Auth retained';
+    if (status === 'archived') return 'Archived · Auth retained';
     return 'Disabled';
   };
   const filteredHistoryUsers = delegatedUsers.filter((user) => {
@@ -748,18 +774,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       'admin.invitation.reissued',
       'admin.invitation.resent',
       'admin.invitation.setup_link_resent',
-      'admin.invitation.reissued',
       'admin.invited',
     ].includes(log.action),
   );
   const invitationCounts = {
-    pending: delegatedUsers.filter((user) => user.status === 'pending').length,
-    active: delegatedUsers.filter((user) => user.status === 'active').length,
+    pending: delegatedUsers.filter((user) => historyStatus(user) === 'pending').length,
+    active: delegatedUsers.filter((user) => historyStatus(user) === 'active').length,
     expired: 0,
     cancelled: delegatedUsers.filter((user) => historyStatus(user) === 'cancelled').length,
-    disabled: delegatedUsers.filter((user) => user.status === 'disabled' && historyStatus(user) !== 'cancelled' && historyStatus(user) !== 'removed').length,
+    disabled: delegatedUsers.filter((user) => user.status === 'disabled' && historyStatus(user) === 'disabled').length,
+    removed: delegatedUsers.filter((user) => historyStatus(user) === 'removed').length,
+    archived: delegatedUsers.filter((user) => historyStatus(user) === 'archived').length,
   };
-  const totalInvitationHistory = invitationCounts.pending + invitationCounts.active + invitationCounts.cancelled;
+  const totalInvitationHistory = delegatedUsers.length;
 
   return (
     <div className="admin-settings space-y-5 text-[#ECF3EE]">
@@ -774,8 +801,8 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">
         <span>{error}</span>
         {existingAccountId && <button type="button" className="min-h-9 rounded-lg border border-rose-200/30 px-3 text-xs font-semibold hover:bg-white/5" onClick={() => {
-          setAdminTab('accounts');
-          window.setTimeout(() => document.getElementById(`admin-account-${existingAccountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+          setAdminTab('history');
+          window.setTimeout(() => document.getElementById(`admin-history-${existingAccountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
         }}>View Existing Account</button>}
       </div>}
       {notice && <div role="status" className="rounded-xl border border-[#67D8B7]/30 bg-[#67D8B7]/10 px-4 py-3 text-sm text-[#B8F1DC]">{notice}</div>}
@@ -824,10 +851,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             </div>}
             {existingAccountId && <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/25 bg-amber-950/20 p-4 text-xs text-amber-100">
               <span>This email belongs to an existing administrator. No duplicate was created.</span>
-              <button type="button" className="min-h-9 rounded-lg border border-amber-200/30 px-3 font-semibold hover:bg-white/5" onClick={() => {
-                setAdminTab('accounts');
-                window.setTimeout(() => document.getElementById(`admin-account-${existingAccountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
-              }}>View Existing Account</button>
+              <div className="flex flex-wrap gap-2">
+                {(() => {
+                  const existing = users.find((user) => user.id === existingAccountId);
+                  return existing && !existing.isPrimaryOwner && (existing.status === 'pending' || existing.status === 'disabled') &&
+                    existing.authIdentityExists
+                    ? <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="min-h-9 rounded-lg border border-[#67D8B7]/30 px-3 font-semibold text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(existing)}>{existing.archivedAt ? 'Restore / Re-invite CMS Access' : 'Recover / Re-invite CMS Access'}</button>
+                    : null;
+                })()}
+                <button type="button" className="min-h-9 rounded-lg border border-amber-200/30 px-3 font-semibold hover:bg-white/5" onClick={() => {
+                  setAdminTab('history');
+                  window.setTimeout(() => document.getElementById(`admin-history-${existingAccountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+                }}>View Existing Account</button>
+              </div>
             </div>}
             {adminTab === 'create' && showCreateAdmin && <form onSubmit={inviteAdmin} className="grid gap-3 rounded-xl border border-[#304135] bg-[#131D16] p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_190px_auto] xl:items-end">
               <label className="text-xs font-medium text-[#B8C7BC]">Recipient email (must be verified)
@@ -890,7 +926,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             </form>}
             {adminTab === 'accounts' && <div className="mt-5 space-y-3">
               <div className="flex items-center justify-between rounded-xl border border-[#304135] bg-[#131D16] px-4 py-3 text-xs text-[#A9B8AD]">
-                <span>Active and pending administrators are shown here. Verified email or historical Auth login does not complete CMS onboarding; only a fresh accepted invitation does. Disabled, removed, and cancelled records remain available in history.</span>
+                <span>Active and pending administrators are shown here. Cancelled, disabled, removed, and archived records remain in history; archived records are hidden from this active list.</span>
                 <button type="button" className="shrink-0 rounded-lg border border-[#47594C] px-3 py-2 font-semibold text-[#C8D8CA] hover:bg-white/5" onClick={() => setAdminTab('history')}>View History</button>
               </div>
               {activeDelegatedUsers.map((user) => (
@@ -902,6 +938,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                         {user.role === 'owner' && <option value="owner">Owner</option>}<option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
                       </select>
                       <button type="button" className={buttonClass} disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
+                      {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
                       {!user.isPrimaryOwner && <details className="relative">
                         <summary className="inline-flex min-h-10 cursor-pointer list-none items-center rounded-xl border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5">Actions</summary>
                         <div className="absolute right-0 z-20 mt-2 flex min-w-60 flex-col rounded-xl border border-[#304135] bg-[#19241D] p-1.5 shadow-xl">
@@ -917,8 +954,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                           <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; do not create a replacement automatically.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.status === 'pending' ? 'Resend Verification / Setup Link' : 'Reset Password by Email'}</button>
                           <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void revokeUserSessions(user)}>Revoke Sessions</button>
                           {user.status === 'active' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void toggleUserStatus(user)}>Disable Admin</button>}
-                          {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Pending Invitation</button>}
-                          {user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
+                          {user.status === 'active' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
                         </div>
                       </details>}
                     </div>
@@ -951,14 +987,15 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
               {!delegatedUsers.length && <p className="text-sm text-[#A9B8AD]">No delegated alternative login accounts yet. Create one above.</p>}
             </div>}
             {adminTab === 'history' && <div className="mt-5 space-y-5">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {([
-                  ['Total invitations', totalInvitationHistory],
+                  ['Total admin records', totalInvitationHistory],
                   ['Pending', invitationCounts.pending],
                   ['Accepted / active', invitationCounts.active],
                   ['Expired', invitationCounts.expired],
                   ['Cancelled', invitationCounts.cancelled],
-                  ['Disabled / removed', invitationCounts.disabled + delegatedUsers.filter((user) => historyStatus(user) === 'removed').length],
+                  ['Disabled / removed', invitationCounts.disabled + invitationCounts.removed],
+                  ['Archived', invitationCounts.archived],
                 ] as const).map(([label, count]) => <div key={label} className="rounded-xl border border-[#304135] bg-[#131D16] p-3">
                   <p className="text-xl font-bold text-[#B8F1DC]">{count}</p><p className="mt-1 text-[10px] text-[#91A195]">{label}</p>
                 </div>)}
@@ -972,7 +1009,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 </label>
                 <label className="text-xs font-medium text-[#B8C7BC]">Account status
                   <select className={`${inputClass} mt-1.5`} value={historyStatusFilter} onChange={(event) => setHistoryStatusFilter(event.target.value as typeof historyStatusFilter)}>
-                    <option value="all">All statuses</option><option value="pending">Pending</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="cancelled">Cancelled</option><option value="removed">Removed</option>
+                    <option value="all">All statuses</option><option value="pending">Pending</option><option value="active">Active</option><option value="disabled">Disabled</option><option value="cancelled">Cancelled</option><option value="removed">Removed</option><option value="archived">Archived</option>
                   </select>
                 </label>
               </div>
@@ -1001,18 +1038,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                         <td className="px-3 py-3">{user.invitedByEmail || 'Unknown'}</td>
                         <td className="max-w-64 px-3 py-3 text-[10px] leading-5 text-[#91A195]">{permissionSummary}</td>
                         <td className="px-3 py-3"><div className="flex min-w-36 flex-col gap-1">
-                          <button type="button" className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5" onClick={() => {
+                          {(user.status === 'active' || user.status === 'pending') && <button type="button" className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5" onClick={() => {
                             setAdminTab('accounts');
                             window.setTimeout(() => document.getElementById(`admin-account-${user.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
-                          }}>View Details / Edit Access</button>
-                          <button type="button" className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'permissions')}>View Permissions</button>
+                          }}>View Details / Edit Access</button>}
                           {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; review it before retrying.' : undefined} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
                           {user.status === 'pending' && user.role !== 'owner' && <>
-                            <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Pending Invitation</button>
+                            <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>
                             {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
                           </>}
                           {user.status === 'active' && <span className="text-[10px] leading-4 text-[#91A195]">Active account: use Remove CMS Access in Admin Accounts instead.</span>}
-                          {user.status === 'disabled' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists || user.isPrimaryOwner} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The original Supabase Auth identity is unavailable; automatic replacement is blocked.' : user.isPrimaryOwner ? 'Primary Owner identity cannot be recovered through delegated account management.' : undefined} className="rounded-lg border border-[#67D8B7]/30 px-2 py-1.5 text-left text-[10px] text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(user)}>Re-invite / Recover CMS Access</button>}
+                          {user.status === 'disabled' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists || user.isPrimaryOwner} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : !user.authIdentityExists ? 'The original Supabase Auth identity is unavailable; automatic replacement is blocked.' : user.isPrimaryOwner ? 'Primary Owner identity cannot be recovered through delegated account management.' : undefined} className="rounded-lg border border-[#67D8B7]/30 px-2 py-1.5 text-left text-[10px] text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.archivedAt ? 'Restore / Re-invite CMS Access' : 'Re-invite / Recover CMS Access'}</button>}
+                          {user.status === 'disabled' && !user.archivedAt && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void archiveUser(user)}>Archive from Active List</button>}
+                          {user.archivedAt && <time className="px-2 py-1 text-[10px] text-[#91A195]">Archived {new Date(user.archivedAt).toLocaleString()}</time>}
                         </div></td>
                       </tr>;
                     })}

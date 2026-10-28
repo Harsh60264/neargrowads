@@ -227,11 +227,11 @@ test('recovery is Owner-authorized, keeps Co-Owners independent, and never sets 
 test('duplicate email routes to existing history; access editing cannot reactivate without onboarding', () => {
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
-  assert.match(serverSource, /email: `eq\.\$\{email\}`,[\s\S]*?select: 'id,email,username,role,status,is_primary_owner'/);
+  assert.match(serverSource, /email: `eq\.\$\{email\}`,[\s\S]*?select: 'id,email,username,role,status,is_primary_owner,archived_at'/);
   assert.match(serverSource, /target\.status !== status && !\(target\.status === 'active' && status === 'disabled'\)/);
   assert.match(settingsSource, /View Existing Account/);
   assert.match(settingsSource, /Re-invite \/ Recover CMS Access/);
-  assert.match(settingsSource, /Cancel Pending Invitation/);
+  assert.match(settingsSource, /Cancel Invitation/);
   assert.match(settingsSource, /Remove CMS Access/);
   assert.match(settingsSource, /user\.emailVerified && user\.mustChangePassword\) return 'Pending Setup'/);
   assert.match(settingsSource, /status === 'cancelled'\) return 'Cancelled'/);
@@ -286,4 +286,61 @@ test('pending password recovery uses the same atomic invitation completion RPC',
   assert.match(pendingRecoveryBranch, /p_must_change_password: false/);
   assert.match(pendingRecoveryBranch, /p_invitation_generation: invitationGeneration/);
   assert.match(pendingRecoveryBranch, /completion\.status !== 'accepted'/);
+});
+
+test('cancellation rotates generations and archive/recovery preserve identity and history', () => {
+  const migration = readFileSync(new URL('../supabase/migrations/20261028230000_admin_account_archiving.sql', import.meta.url), 'utf8');
+  const cancelStart = migration.indexOf('create or replace function public.cancel_admin_invitation');
+  const recoveryStart = migration.indexOf('create or replace function public.prepare_admin_invitation_recovery');
+  const archiveStart = migration.indexOf('create or replace function public.archive_admin_account');
+  const cancelSql = migration.slice(cancelStart, recoveryStart);
+  const recoverySql = migration.slice(recoveryStart, archiveStart);
+  const archiveSql = migration.slice(archiveStart);
+
+  assert.match(migration, /add column if not exists archived_at timestamptz/i);
+  assert.match(cancelSql, /role = 'owner'[\s\S]*?status = 'active'[\s\S]*?is_primary_owner[\s\S]*?for share/i);
+  assert.match(cancelSql, /status = 'disabled'[\s\S]*?invitation_generation = gen_random_uuid\(\)/i);
+  assert.match(cancelSql, /insert into public\.admin_audit_logs[\s\S]*?'admin\.invitation\.cancelled'/i);
+  assert.match(recoverySql, /invitation_generation = p_invitation_generation[\s\S]*?archived_at = null/i);
+  assert.match(recoverySql, /'previouslyArchived', target_row\.archived_at is not null/i);
+  assert.match(archiveSql, /status is distinct from 'disabled'/i);
+  assert.match(archiveSql, /set archived_at = archived_at_value[\s\S]*?invitation_generation = gen_random_uuid\(\)/i);
+  assert.match(archiveSql, /'admin\.archived'/i);
+  assert.match(migration, /grant execute on function public\.archive_admin_account\(uuid, uuid\) to service_role/i);
+});
+
+test('admin account routes enforce reauthentication and archive via a soft-archive RPC', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const cancelStart = serverSource.indexOf("app.post('/api/admin/users/:id/cancel'");
+  const archiveStart = serverSource.indexOf("app.post('/api/admin/users/:id/archive'");
+  const passwordStart = serverSource.indexOf("app.post('/api/admin/users/:id/password'", archiveStart);
+  const cancelRoute = serverSource.slice(cancelStart, archiveStart);
+  const archiveRoute = serverSource.slice(archiveStart, passwordStart);
+
+  assert.match(cancelRoute, /requireOwner\(req, res\)/);
+  assert.match(cancelRoute, /reauthenticateAdminRequest/);
+  assert.match(cancelRoute, /actor\.isPrimaryOwner/);
+  assert.match(cancelRoute, /cancellation\.status !== 'cancelled' && cancellation\.status !== 'already_cancelled'/);
+  assert.match(archiveRoute, /requireOwner\(req, res\)/);
+  assert.match(archiveRoute, /reauthenticateAdminRequest/);
+  assert.match(archiveRoute, /actor\.isPrimaryOwner/);
+  assert.match(archiveRoute, /target\.status !== 'disabled'/);
+  assert.match(archiveRoute, /rpc\/archive_admin_account/);
+  assert.match(archiveRoute, /Auth identity and audit history were retained/);
+  assert.doesNotMatch(archiveRoute, /auth\/v1\/admin\/users\/.*DELETE/i);
+});
+
+test('admin account management surfaces direct recovery, archive state, and backend-synced statuses', () => {
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+
+  assert.match(serverSource, /archived_at[\s\S]*?archivedAt:/);
+  assert.match(settingsSource, /Recover \/ Re-invite CMS Access/);
+  assert.match(settingsSource, /Restore \/ Re-invite CMS Access/);
+  assert.match(settingsSource, /Cancel Invitation/);
+  assert.match(settingsSource, /\/archive`/);
+  assert.match(settingsSource, /if \(user\.archivedAt\) return 'archived'/);
+  assert.match(settingsSource, /\['Archived', invitationCounts\.archived\]/);
+  assert.match(settingsSource, /value="archived">Archived/);
+  assert.match(settingsSource, /activeDelegatedUsers = delegatedUsers\.filter\(\(user\) =>\s*!user\.archivedAt/);
 });

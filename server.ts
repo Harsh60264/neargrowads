@@ -3284,6 +3284,7 @@ interface AdminIdentity {
   isPrimaryOwner: boolean;
   username?: string;
   mustChangePassword?: boolean;
+  archivedAt?: string | null;
 }
 
 interface AdminSessionToken {
@@ -3477,7 +3478,7 @@ function warnAdminAccountMigrationMissing(error: unknown): void {
 async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefined> {
   const query = new URLSearchParams({
     id: `eq.${userId}`,
-    select: 'id,email,role,status,permissions,is_primary_owner',
+    select: 'id,email,role,status,permissions,is_primary_owner,archived_at',
     limit: '1',
   });
   const response = await supabaseAdminRequest(`rest/v1/admin_users?${query}`);
@@ -3492,6 +3493,7 @@ async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefi
     status: row.status as AdminIdentity['status'],
     permissions: row.permissions && typeof row.permissions === 'object' ? row.permissions as AdminPermissions : {},
     isPrimaryOwner: row.is_primary_owner === true && row.role === 'owner',
+    archivedAt: typeof row.archived_at === 'string' ? row.archived_at : null,
   };
   const accountDetailsQuery = new URLSearchParams({
     id: `eq.${userId}`,
@@ -3522,7 +3524,7 @@ async function authenticateAdminSession(req: Request): Promise<AdminIdentity | u
   );
   if (!activeSessions.length) return undefined;
   const identity = await readAdminIdentity(token.userId);
-  return identity?.status === 'active' ? identity : undefined;
+  return identity?.status === 'active' && !identity.archivedAt ? identity : undefined;
 }
 
 function currentAdmin(res: Response): AdminIdentity | undefined {
@@ -5496,7 +5498,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     if (!requireOwner(req, res)) return;
     try {
       const query = new URLSearchParams({
-        select: 'id,email,username,role,status,permissions,is_primary_owner,must_change_password,last_login_at,last_password_reset_at,invited_by,created_at,updated_at',
+        select: 'id,email,username,role,status,permissions,is_primary_owner,must_change_password,last_login_at,last_password_reset_at,invited_by,created_at,updated_at,archived_at',
         order: 'created_at.desc',
         limit: '300',
       });
@@ -5519,6 +5521,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           status: user.status,
           permissions: user.permissions || {},
           isPrimaryOwner: user.is_primary_owner === true && user.role === 'owner',
+          archivedAt: typeof user.archived_at === 'string' ? user.archived_at : null,
           mustChangePassword: user.must_change_password === true,
           lastLoginAt: user.last_login_at || null,
           lastPasswordResetAt: user.last_password_reset_at || null,
@@ -5538,7 +5541,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       console.error('[NearGrow Ads] Admin user list failed:', error);
       res.status(503).json({
-        message: isMissingAdminAccountManagementSchema(error)
+        message: error instanceof SupabaseRequestError && /archived_at/i.test(error.providerMessage)
+          ? 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql before using administrator archival.'
+          : isMissingAdminAccountManagementSchema(error)
           ? 'Apply supabase/migrations/20261020000000_admin_account_management.sql before using Settings account management.'
           : 'Administrator records are temporarily unavailable.',
       });
@@ -5579,7 +5584,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       const duplicateQuery = new URLSearchParams({
         email: `eq.${email}`,
-        select: 'id,email,username,role,status,is_primary_owner',
+        select: 'id,email,username,role,status,is_primary_owner,archived_at',
         limit: '1',
       });
       operationStage = 'email_duplicate_check';
@@ -5595,6 +5600,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             role: existing.role,
             status: existing.status,
             isPrimaryOwner: existing.is_primary_owner === true,
+            archivedAt: typeof existing.archived_at === 'string' ? existing.archived_at : null,
           },
         });
         return;
@@ -5854,6 +5860,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(404).json({ message: 'Administrator record not found.' });
         return;
       }
+      if (target.archivedAt) {
+        res.status(409).json({ message: 'This administrator record is archived. Re-invite it first before changing access.' });
+        return;
+      }
       if (target.status !== status && !(target.status === 'active' && status === 'disabled')) {
         res.status(409).json({ message: 'Account status cannot be reactivated or moved to pending through access editing. Use a fresh invitation workflow for pending or disabled accounts.' });
         return;
@@ -5943,6 +5953,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       if (target.isPrimaryOwner) {
         res.status(403).json({ message: 'The primary Owner manages only their own password through My Password.' });
+        return;
+      }
+      if (!actor.isPrimaryOwner) {
+        res.status(403).json({ message: 'Only the Primary Owner can re-invite or recover administrator access.' });
         return;
       }
       if (target.status === 'pending' || target.status === 'disabled') {
@@ -6044,7 +6058,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.json({ message: 'A secure password-reset link has been sent. The account must set a new password before signing in; existing sessions were revoked.' });
     } catch (error) {
       if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
-        res.status(503).json({ message: 'Apply supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql before using this recovery workflow.' });
+        res.status(503).json({ message: 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql and reload the Supabase schema before using invitation recovery.' });
         return;
       }
       console.error('[NearGrow Ads] Administrator recovery request failed:', error);
@@ -6054,9 +6068,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   app.post('/api/admin/users/:id/cancel', async (req: Request, res: Response): Promise<void> => {
     if (!requireOwner(req, res)) return;
+    if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many administrator account changes. Please wait 15 minutes and try again.')) return;
     const actor = currentAdmin(res)!;
     if (!await reauthenticateAdminRequest(req, res, actor, req.body?.currentPassword, 'Re-enter your current password to cancel this invitation.')) return;
     try {
+      if (!actor.isPrimaryOwner) {
+        res.status(403).json({ message: 'Only the Primary Owner can cancel administrator invitations.' });
+        return;
+      }
       const target = await readAdminIdentity(req.params.id);
       if (!target) {
         res.status(404).json({ message: 'Administrator record not found.' });
@@ -6072,20 +6091,90 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           body: JSON.stringify({ p_actor_id: actor.id, p_target_id: target.id }),
         }),
       );
-      if (cancellation.status === 'already_cancelled') {
-        await revokeSupabaseRefreshTokens(target.id);
-        res.json({ message: 'Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.' });
+      if (cancellation.status !== 'cancelled' && cancellation.status !== 'already_cancelled') {
+        res.status(409).json({ message: 'This invitation is no longer pending and was not changed.' });
         return;
       }
-      await revokeSupabaseRefreshTokens(target.id);
-      res.json({ message: 'Invitation cancelled. CMS access and username login were revoked; the Auth identity was retained safely.' });
+      let refreshTokensRevoked = true;
+      try {
+        await revokeSupabaseRefreshTokens(target.id);
+      } catch (error) {
+        refreshTokensRevoked = false;
+        console.error('[NearGrow Ads] Invitation cancellation committed, but Supabase refresh-token revocation failed:', error instanceof Error ? error.name : 'Unknown error');
+      }
+      if (cancellation.status === 'already_cancelled') {
+        res.json({ message: `Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}` });
+        return;
+      }
+      res.json({ message: `Invitation cancelled. CMS access and username login were revoked; the Auth identity was retained safely.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}` });
     } catch (error) {
+      if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
+        res.status(503).json({ message: 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql and reload the Supabase schema before cancelling invitations.' });
+        return;
+      }
       if (error instanceof SupabaseRequestError && error.providerMessage) {
         res.status(409).json({ message: error.providerMessage });
         return;
       }
       console.error('[NearGrow Ads] Administrator invitation cancellation failed.', error instanceof Error ? error.name : 'Unknown error');
       res.status(503).json({ message: 'The pending invitation could not be cancelled. Try again or contact the system administrator.' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/archive', async (req: Request, res: Response): Promise<void> => {
+    if (!requireOwner(req, res)) return;
+    if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many administrator account changes. Please wait 15 minutes and try again.')) return;
+    const actor = currentAdmin(res)!;
+    if (!await reauthenticateAdminRequest(req, res, actor, req.body?.currentPassword, 'Re-enter your current password to archive this administrator.')) return;
+    if (!actor.isPrimaryOwner) {
+      res.status(403).json({ message: 'Only the Primary Owner can archive administrator records.' });
+      return;
+    }
+    try {
+      const target = await readAdminIdentity(req.params.id);
+      if (!target) {
+        res.status(404).json({ message: 'Administrator record not found.' });
+        return;
+      }
+      if (target.isPrimaryOwner || target.role === 'owner') {
+        res.status(403).json({ message: 'Owner accounts cannot be archived from delegated-account management.' });
+        return;
+      }
+      if (target.status !== 'disabled') {
+        res.status(409).json({ message: 'Disable or cancel this administrator before archiving the record.' });
+        return;
+      }
+      const result = await readSupabaseJson<{ status?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/archive_admin_account', {
+          method: 'POST',
+          body: JSON.stringify({ p_actor_id: actor.id, p_target_id: target.id }),
+        }),
+      );
+      if (result.status !== 'archived' && result.status !== 'already_archived') {
+        res.status(409).json({ message: 'This administrator record could not be archived in its current state.' });
+        return;
+      }
+      let refreshTokensRevoked = true;
+      try {
+        await revokeSupabaseRefreshTokens(target.id);
+      } catch (error) {
+        refreshTokensRevoked = false;
+        console.error('[NearGrow Ads] Administrator archive committed, but Supabase refresh-token revocation failed:', error instanceof Error ? error.name : 'Unknown error');
+      }
+      res.json({
+        message: `Administrator record archived from the active list. The Auth identity and audit history were retained.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}`,
+      });
+    } catch (error) {
+      if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
+        res.status(503).json({ message: 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql and reload the Supabase schema before archiving administrators.' });
+        return;
+      }
+      if (error instanceof SupabaseRequestError && error.providerMessage) {
+        res.status(409).json({ message: error.providerMessage });
+        return;
+      }
+      console.error('[NearGrow Ads] Administrator account archival failed:', error instanceof Error ? error.name : 'Unknown error');
+      res.status(503).json({ message: 'The administrator record could not be archived.' });
     }
   });
 
