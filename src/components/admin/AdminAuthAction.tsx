@@ -26,7 +26,11 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
       const response = await fetch('/api/admin/auth/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken, mode, ...(!usesTemporaryCredential ? { password } : {}) }),
+        body: JSON.stringify({
+          accessToken,
+          mode,
+          ...(!usesTemporaryCredential ? { password, confirmPassword } : {}),
+        }),
       });
       const data = await response.json() as { message?: string };
       if (!response.ok) throw new Error(data.message || `Request failed (${response.status}).`);

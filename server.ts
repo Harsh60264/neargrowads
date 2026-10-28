@@ -5282,11 +5282,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   });
 
   app.post('/api/admin/auth/complete', async (req: Request, res: Response): Promise<void> => {
-    const { accessToken, password, mode } = req.body || {};
+    const { accessToken, password, confirmPassword, mode } = req.body || {};
     if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 10_000 ||
       (mode !== 'invite' && mode !== 'recovery') ||
       (typeof password !== 'string' && !(mode === 'invite' && password === undefined)) ||
-      (password !== undefined && !isStrongAdminPassword(password))) {
+      (password !== undefined && (!isStrongAdminPassword(password) || password !== confirmPassword))) {
       res.status(400).json({ message: 'Use a password with at least 12 characters and at least three character types.' });
       return;
     }
