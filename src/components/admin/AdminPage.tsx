@@ -883,7 +883,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
             <p className="mt-2 text-[11px] leading-5 text-[#9DB1A2]">{storage === 'supabase' ? 'Protected cloud storage is connected.' : 'Connected to this server session.'}</p>
           </div>}
 
-          <div className="mt-auto hidden border-t border-white/10 pt-5 lg:block">
+          <div className="mt-6 border-t border-white/10 pt-5 lg:mt-auto lg:block">
             {!sidebarCollapsed && <a href="mailto:support@neargrowads.com" className="admin-support-panel mb-3 block rounded-xl bg-white/[0.05] p-3 text-xs text-[#B7C8BA]">
               <span className="flex items-center gap-2 font-semibold text-white"><Headset className="h-4 w-4" /> 24/7 Support</span>
               <span className="mt-1 block leading-5 text-[#9DB1A2]">Need technical assistance?</span>
