@@ -19,7 +19,11 @@ import { isSafePublicDestination } from './src/data/publicLinks';
 import { normalizeTeamUrl } from './src/data/teamLinks';
 import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
-import { decideAdminInvitationCompletion } from './server/adminInvitation';
+import {
+  buildAdminInvitationRedirect,
+  decideAdminInvitationCompletion,
+  decideAdminInvitationRecovery,
+} from './server/adminInvitation';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -5299,6 +5303,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       codeVerifier,
       tokenHash,
       tokenType,
+      invitationGeneration,
       password,
       confirmPassword,
       mode,
@@ -5357,10 +5362,30 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
         return;
       }
-      if ((mode === 'invite' && decideAdminInvitationCompletion(identity, authUser) === 'reject') ||
+      const needsGeneration = mode === 'invite' || identity.status === 'pending' || invitationGeneration !== undefined;
+      if (needsGeneration) {
+        if (!isUuid(invitationGeneration)) {
+          res.status(401).json({ message: 'This link is missing its current recovery state. Ask the Primary Owner to send a fresh link.' });
+          return;
+        }
+        const generationQuery = new URLSearchParams({
+          id: `eq.${identity.id}`,
+          select: 'invitation_generation',
+          limit: '1',
+        });
+        const generationRows = await readSupabaseJson<Array<{ invitation_generation?: string | null }>>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${generationQuery}`),
+        );
+        if (generationRows[0]?.invitation_generation !== invitationGeneration) {
+          res.status(401).json({ message: 'This link has been replaced or cancelled. Ask the Primary Owner to send a fresh link.' });
+          return;
+        }
+      }
+      if ((mode === 'invite' && identity.status !== 'active' && decideAdminInvitationCompletion(identity, authUser) === 'reject') ||
+        (mode === 'invite' && identity.status === 'active' &&
+          (identity.email !== authUser.email.toLowerCase() || identity.isPrimaryOwner)) ||
         (mode === 'recovery' && (identity.email !== authUser.email.toLowerCase() ||
-          identity.status === 'disabled' || (identity.status !== 'active' &&
-            !(identity.status === 'pending' && identity.mustChangePassword))))) {
+          identity.status === 'disabled' || (identity.status !== 'active' && identity.status !== 'pending')))) {
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
         return;
       }
@@ -5372,6 +5397,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
               p_user_id: identity.id,
               p_email: identity.email,
               p_must_change_password: identity.mustChangePassword === true,
+              p_invitation_generation: invitationGeneration,
             }),
           }),
         );
@@ -5400,6 +5426,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
               p_user_id: identity.id,
               p_email: identity.email,
               p_must_change_password: password === undefined,
+              p_invitation_generation: invitationGeneration,
             }),
           }),
         );
@@ -5417,6 +5444,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
                 p_user_id: identity.id,
                 p_email: identity.email,
                 p_must_change_password: false,
+                p_invitation_generation: invitationGeneration,
               }),
             }),
           );
@@ -5549,13 +5577,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let adminRecordCreated = false;
     let operationStage = 'admin_count';
     try {
-      const userCountQuery = new URLSearchParams({ select: 'id', limit: '100' });
-      const existingUsers = await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest(`rest/v1/admin_users?${userCountQuery}`));
-      if (existingUsers.length >= 100) {
-        res.status(409).json({ message: 'The 100-administrator account limit has been reached.' });
-        return;
-      }
-      const duplicateQuery = new URLSearchParams({ email: `eq.${email}`, select: 'id', limit: '1' });
+      const duplicateQuery = new URLSearchParams({
+        email: `eq.${email}`,
+        select: 'id,email,username,role,status,is_primary_owner',
+        limit: '1',
+      });
       operationStage = 'email_duplicate_check';
       const duplicate = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_users?${duplicateQuery}`));
       if (duplicate.length) {
@@ -5571,6 +5597,12 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             isPrimaryOwner: existing.is_primary_owner === true,
           },
         });
+        return;
+      }
+      const userCountQuery = new URLSearchParams({ select: 'id', limit: '100' });
+      const existingUsers = await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest(`rest/v1/admin_users?${userCountQuery}`));
+      if (existingUsers.length >= 100) {
+        res.status(409).json({ message: 'The 100-administrator account limit has been reached.' });
         return;
       }
       if (username) {
@@ -5590,14 +5622,21 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       let userId: string;
       let status: AdminIdentity['status'];
       let sendSignupVerification = false;
+      let sendPasswordRecovery = false;
+      const invitationGeneration = randomUUID();
       const mustChangePassword = role !== 'owner';
       if (role === 'owner' && authUser) {
         userId = authUser.id;
-        status = authUser.email_confirmed_at ? 'active' : 'pending';
+        status = 'pending';
         sendSignupVerification = !authUser.email_confirmed_at;
+        sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
       } else if (role === 'owner') {
         operationStage = 'auth_invitation';
-        const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/accept-invite`;
+        const redirectTo = buildAdminInvitationRedirect(
+          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          'invite',
+          invitationGeneration,
+        );
         const query = new URLSearchParams({ redirect_to: redirectTo });
         const invited = await readSupabaseJson<{ id?: string; email?: string }>(await supabaseAuthRequest(`invite?${query}`, {
           method: 'POST',
@@ -5608,8 +5647,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         status = 'pending';
       } else if (authUser) {
         userId = authUser.id;
-        status = authUser.email_confirmed_at ? 'active' : 'pending';
+        status = 'pending';
         sendSignupVerification = !authUser.email_confirmed_at;
+        sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
       } else {
         operationStage = 'auth_user_create';
         const created = await readSupabaseJson<{ id?: string; email?: string }>(
@@ -5641,32 +5681,42 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           permissions,
           is_primary_owner: false,
           must_change_password: mustChangePassword,
-          ...(mustChangePassword ? { last_password_reset_at: new Date().toISOString() } : {}),
+          invitation_generation: invitationGeneration,
+          ...(mustChangePassword && !authUser ? { last_password_reset_at: new Date().toISOString() } : {}),
           invited_by: actor.id,
         }),
       });
       await readSupabaseJson<unknown>(createResponse);
       adminRecordCreated = true;
-      if (role !== 'owner' && authUser) {
-        operationStage = 'auth_password_setup';
-        await setSupabaseUserPassword(userId, initialPassword as string);
-      }
       if (role !== 'owner') {
-        if (sendSignupVerification) {
-          operationStage = 'verification_email';
-          const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/accept-invite?setup=temporary`;
-          const query = new URLSearchParams({ type: 'signup', redirect_to: redirectTo });
-          await readSupabaseJson<unknown>(await supabaseAuthRequest(`resend?${query}`, {
-            method: 'POST',
-            body: JSON.stringify({ type: 'signup', email }),
-          }));
+        if (sendSignupVerification || sendPasswordRecovery) {
+          operationStage = sendPasswordRecovery ? 'password_recovery_email' : 'verification_email';
+          const redirectTo = buildAdminInvitationRedirect(
+            process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+            sendPasswordRecovery ? 'recovery' : 'invite',
+            invitationGeneration,
+            sendSignupVerification && mustChangePassword,
+          );
+          if (sendPasswordRecovery) {
+            const query = new URLSearchParams({ redirect_to: redirectTo });
+            await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
+              method: 'POST',
+              body: JSON.stringify({ email }),
+            }));
+          } else {
+            const query = new URLSearchParams({ type: 'signup', redirect_to: redirectTo });
+            await readSupabaseJson<unknown>(await supabaseAuthRequest(`resend?${query}`, {
+              method: 'POST',
+              body: JSON.stringify({ type: 'signup', email }),
+            }));
+          }
           await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
             provider: 'supabase_auth',
             accountStatus: status,
           });
         }
         operationStage = 'session_revocation';
-        await revokeSupabaseRefreshTokens(userId);
+        if (!authUser) await revokeSupabaseRefreshTokens(userId);
         const sessionsQuery = new URLSearchParams({ user_id: `eq.${userId}`, revoked_at: 'is.null' });
         await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
           method: 'PATCH',
@@ -5676,20 +5726,32 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         operationStage = 'audit_log';
         await writeAdminAudit(actor.id, 'admin.created_with_temporary_password', 'settings', userId, { email, username, role, permissions });
         res.status(201).json({
-          message: status === 'active'
-            ? 'Delegated administrator created with a one-time password. Deliver it through a secure channel; the user must change it at first sign-in.'
-            : 'Delegated account created and kept pending. A verification link was sent to the email; access remains blocked until verification, then the one-time password must be changed at first sign-in.',
+          message: sendPasswordRecovery
+            ? 'Delegated account is pending. A fresh password setup link was sent to the existing verified Auth identity; its existing password was not changed.'
+            : 'Delegated account created and kept pending. A verification link was sent; CMS access remains blocked until onboarding completes.',
         });
         return;
       }
-      if (sendSignupVerification) {
+      if (sendSignupVerification || sendPasswordRecovery) {
         operationStage = 'verification_email';
-        const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/accept-invite`;
-        const query = new URLSearchParams({ type: 'signup', redirect_to: redirectTo });
-        await readSupabaseJson<unknown>(await supabaseAuthRequest(`resend?${query}`, {
-          method: 'POST',
-          body: JSON.stringify({ type: 'signup', email }),
-        }));
+        const redirectTo = buildAdminInvitationRedirect(
+          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          sendPasswordRecovery ? 'recovery' : 'invite',
+          invitationGeneration,
+        );
+        if (sendPasswordRecovery) {
+          const query = new URLSearchParams({ redirect_to: redirectTo });
+          await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+          }));
+        } else {
+          const query = new URLSearchParams({ type: 'signup', redirect_to: redirectTo });
+          await readSupabaseJson<unknown>(await supabaseAuthRequest(`resend?${query}`, {
+            method: 'POST',
+            body: JSON.stringify({ type: 'signup', email }),
+          }));
+        }
         await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
           provider: 'supabase_auth',
           accountStatus: status,
@@ -5697,7 +5759,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       operationStage = 'audit_log';
       await writeAdminAudit(actor.id, 'admin.invited', 'settings', userId, { email, username, role, permissions });
-      res.status(201).json({ message: status === 'active' ? 'Co-Owner account added.' : 'Co-Owner invitation sent. Access activates after email verification and password setup.' });
+      res.status(201).json({ message: sendPasswordRecovery
+        ? 'Co-Owner account is pending. A fresh password setup link was sent to the existing verified Auth identity; its existing password was not changed.'
+        : 'Co-Owner invitation sent. Access activates after email verification and password setup.' });
     } catch (error) {
       let authCleanupFailed = false;
       if (newlyCreatedAuthUserId && !adminRecordCreated) {
@@ -5745,7 +5809,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           : 'This email already has a CMS administrator record.';
       } else if (requestError?.code === 'over_email_send_rate_limit' ||
         requestError?.code === 'email_rate_limit_exceeded' ||
-        (requestError?.status === 429 && ['auth_invitation', 'verification_email'].includes(operationStage))) {
+        (requestError?.status === 429 && ['auth_invitation', 'verification_email', 'password_recovery_email'].includes(operationStage))) {
         message = 'Invitation delivery failed because Supabase is rate-limiting email. Check Auth email/SMTP limits and try again later.';
       } else if (requestError && /already registered|already exists|email_exists/i.test(requestError.providerMessage)) {
         statusCode = 409;
@@ -5756,7 +5820,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       } else if (['42P01', '42703', '42501', 'PGRST204', 'PGRST205'].includes(requestError?.code || '') ||
         operationStage === 'admin_record_insert') {
         message = 'Database setup incomplete. Check the admin account-management migration and service-role database permissions.';
-      } else if (['auth_invitation', 'verification_email'].includes(operationStage) &&
+      } else if (['auth_invitation', 'verification_email', 'password_recovery_email'].includes(operationStage) &&
         requestError?.status !== undefined && requestError.status >= 400 && requestError.status < 500) {
         message = 'Invitation delivery failed. Check Supabase Auth email provider, SMTP settings, site URL, and allowed redirect URLs.';
       }
@@ -5788,6 +5852,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const target = await readAdminIdentity(targetId);
       if (!target) {
         res.status(404).json({ message: 'Administrator record not found.' });
+        return;
+      }
+      if (target.status !== status && !(target.status === 'active' && status === 'disabled')) {
+        res.status(409).json({ message: 'Account status cannot be reactivated or moved to pending through access editing. Use a fresh invitation workflow for pending or disabled accounts.' });
         return;
       }
       if (target.role !== 'owner' && role === 'owner') {
@@ -5877,19 +5945,40 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'The primary Owner manages only their own password through My Password.' });
         return;
       }
-      if (target.status === 'disabled') {
-        res.status(409).json({ message: 'This account is disabled. Enable it before issuing setup or recovery email.' });
-        return;
-      }
-      if (target.status === 'pending') {
+      if (target.status === 'pending' || target.status === 'disabled') {
         const authUser = await readAdminAuthStatus(target.id);
-        if (!authUser || authUser.email?.toLowerCase() !== target.email.toLowerCase()) {
+        const recoveryMethod = decideAdminInvitationRecovery(target, {
+          id: authUser?.id,
+          email: authUser?.email,
+          email_confirmed_at: authUser?.email_confirmed_at,
+        });
+        if (recoveryMethod === 'reject') {
           res.status(409).json({ message: 'The matching Supabase Auth identity is unavailable. Do not create a duplicate; review the Auth account first.' });
           return;
         }
-        if (!authUser.email_confirmed_at) {
-          const temporarySetup = target.mustChangePassword ? '?setup=temporary' : '';
-          const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/accept-invite${temporarySetup}`;
+        const invitationGeneration = randomUUID();
+        const prepared = await readSupabaseJson<{ status?: string; previousStatus?: string }>(
+          await supabaseAdminRequest('rest/v1/rpc/prepare_admin_invitation_recovery', {
+            method: 'POST',
+            body: JSON.stringify({
+              p_actor_id: actor.id,
+              p_target_id: target.id,
+              p_invitation_generation: invitationGeneration,
+            }),
+          }),
+        );
+        if (prepared.status !== 'prepared') {
+          res.status(409).json({ message: 'This account state cannot be re-invited. Refresh the account list and review its history.' });
+          return;
+        }
+        await revokeSupabaseRefreshTokens(target.id);
+        if (recoveryMethod === 'signup') {
+          const redirectTo = buildAdminInvitationRedirect(
+            process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+            'invite',
+            invitationGeneration,
+            target.role !== 'owner',
+          );
           const query = new URLSearchParams({ type: 'signup', redirect_to: redirectTo });
           await readSupabaseJson<unknown>(await supabaseAuthRequest(`resend?${query}`, {
             method: 'POST',
@@ -5900,10 +5989,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             delivery: 'dispatch_initiated',
             kind: 'verification',
           });
-          res.json({ message: 'Supabase Auth accepted a new verification-email request. Delivery is not confirmed; access remains blocked until verification.' });
+          res.json({ message: prepared.previousStatus === 'disabled'
+            ? 'A fresh verification link was requested. The account remains pending; its old username and permissions were cleared and must be reassigned after onboarding.'
+            : 'A fresh verification link was requested. CMS access remains pending until secure onboarding completes.' });
           return;
         }
-        const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/password-reset`;
+        const redirectTo = buildAdminInvitationRedirect(
+          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          'recovery',
+          invitationGeneration,
+        );
         const query = new URLSearchParams({ redirect_to: redirectTo });
         await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
           method: 'POST',
@@ -5914,7 +6009,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           delivery: 'dispatch_initiated',
           kind: 'password_setup',
         });
-        res.json({ message: 'Supabase Auth accepted a secure password-setup request. Delivery is not confirmed; the account remains pending until setup is completed.' });
+        res.json({ message: prepared.previousStatus === 'disabled'
+          ? 'A fresh password setup link was requested for the verified Auth identity. The account remains pending; its old username and permissions were cleared and must be reassigned after onboarding.'
+          : 'A fresh password setup link was requested for the verified Auth identity. Its CMS access remains pending until onboarding completes.' });
         return;
       }
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(
@@ -5946,6 +6043,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       await writeAdminAudit(actor.id, 'admin.password_reset.requested', 'security', target.id);
       res.json({ message: 'A secure password-reset link has been sent. The account must set a new password before signing in; existing sessions were revoked.' });
     } catch (error) {
+      if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
+        res.status(503).json({ message: 'Apply supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql before using this recovery workflow.' });
+        return;
+      }
       console.error('[NearGrow Ads] Administrator recovery request failed:', error);
       res.status(503).json({ message: 'The password-reset email could not be sent. Check Supabase Auth SMTP settings.' });
     }

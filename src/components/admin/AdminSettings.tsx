@@ -745,8 +745,10 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const latestInvitationActivity = (user: AdminUser) => logs.find((log) =>
     log.target_id === user.id && [
       'admin.invitation.dispatch_initiated',
+      'admin.invitation.reissued',
       'admin.invitation.resent',
       'admin.invitation.setup_link_resent',
+      'admin.invitation.reissued',
       'admin.invited',
     ].includes(log.action),
   );
@@ -811,7 +813,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
               ] as const).map(([tab, label]) => <button key={tab} type="button" role="tab" aria-selected={adminTab === tab} onClick={() => setAdminTab(tab)} className={`min-h-10 rounded-xl px-4 text-xs font-semibold transition ${adminTab === tab ? 'bg-[#286D3B] text-white' : 'border border-[#33453A] text-[#C8D4CB] hover:bg-white/5'}`}>{label}</button>)}
             </div>
             <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_180px]">
-              <label className="text-xs text-[#B8C7BC]">Re-authentication password
+              <label className="text-xs text-[#B8C7BC]">Owner re-authentication password
                 <input type="password" autoComplete="current-password" className={`${inputClass} mt-1.5`} value={reauthPassword} onChange={(event) => setReauthPassword(event.target.value)} />
               </label>
             </div>
@@ -836,7 +838,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 <span className="mt-1 block text-[10px] text-[#819286]">3–32 letters, numbers, dots, underscores or hyphens.</span>
               </label>
               <div className="col-span-full grid gap-3 rounded-xl border border-[#304135] bg-[#101913] p-4 sm:grid-cols-2">
-                <p className="col-span-full text-[11px] leading-5 text-[#A9B8AD]">Choose a one-time password. New or unverified email identities remain pending until Supabase email verification succeeds; the user must change this password at first sign-in.</p>
+                <p className="col-span-full text-[11px] leading-5 text-[#A9B8AD]">New or unverified Auth identities remain pending until email verification. Existing Auth identities are reused without changing their current password; verified identities receive a fresh password-setup link. CMS access stays pending until onboarding completes.</p>
                 <label className="text-xs font-medium text-[#B8C7BC]">New Password
                   <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3 focus-within:border-[#67D8B7]">
                     <input className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" type={showInitialPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={200} required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} />
@@ -888,7 +890,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             </form>}
             {adminTab === 'accounts' && <div className="mt-5 space-y-3">
               <div className="flex items-center justify-between rounded-xl border border-[#304135] bg-[#131D16] px-4 py-3 text-xs text-[#A9B8AD]">
-                <span>Active and pending administrators are shown here. Disabled, removed, and cancelled records remain available in history.</span>
+                <span>Active and pending administrators are shown here. Verified email or historical Auth login does not complete CMS onboarding; only a fresh accepted invitation does. Disabled, removed, and cancelled records remain available in history.</span>
                 <button type="button" className="shrink-0 rounded-lg border border-[#47594C] px-3 py-2 font-semibold text-[#C8D8CA] hover:bg-white/5" onClick={() => setAdminTab('history')}>View History</button>
               </div>
               {activeDelegatedUsers.map((user) => (
@@ -899,10 +901,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                       <select id={`admin-role-${user.id}`} aria-label={`Role for ${user.email}`} className="rounded-lg border border-[#33453A] bg-[#101913] px-2 py-2 text-xs text-[#ECF3EE]" disabled={user.isPrimaryOwner} value={user.role} onChange={(event) => changeUserRole(user, event.target.value as AdminRole)}>
                         {user.role === 'owner' && <option value="owner">Owner</option>}<option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
                       </select>
-                      <select aria-label={`Status for ${user.email}`} className="rounded-lg border border-[#33453A] bg-[#101913] px-2 py-2 text-xs text-[#ECF3EE]" disabled={user.isPrimaryOwner} value={user.status} onChange={(event) => changeUser(user.id, { status: event.target.value as AdminStatus })}>
-                        <option value="active">Active</option><option value="pending">Pending</option><option value="disabled">Disabled</option>
-                      </select>
-                      <button type="button" className={buttonClass} disabled={busy || !reauthPassword} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
+                      <button type="button" className={buttonClass} disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
                       {!user.isPrimaryOwner && <details className="relative">
                         <summary className="inline-flex min-h-10 cursor-pointer list-none items-center rounded-xl border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5">Actions</summary>
                         <div className="absolute right-0 z-20 mt-2 flex min-w-60 flex-col rounded-xl border border-[#304135] bg-[#19241D] p-1.5 shadow-xl">
@@ -910,16 +909,16 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                           <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'username')}>Change Username</button>
                           <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'role')}>Change Role</button>
                           <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'permissions')}>Edit Permissions</button>
-                          <button type="button" disabled={busy || !reauthPassword || user.status !== 'active' || user.role === 'owner'} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
+                          <button type="button" disabled={busy || !reauthPassword || user.status !== 'active' || user.role === 'owner'} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : user.status !== 'active' ? 'Temporary passwords are only available for active delegated accounts.' : user.role === 'owner' ? 'Co-Owner passwords are independent and cannot be set here.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
                             setPasswordResetUser(user);
                             setResetPasswordValues({ newPassword: '', confirmPassword: '' });
                             setShowResetPassword(false);
                           }}>Set New Temporary Password</button>
-                          <button type="button" disabled={busy || !reauthPassword || user.status === 'disabled'} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.status === 'pending' ? 'Resend Verification / Setup Link' : 'Reset Password by Email'}</button>
+                          <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; do not create a replacement automatically.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.status === 'pending' ? 'Resend Verification / Setup Link' : 'Reset Password by Email'}</button>
                           <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void revokeUserSessions(user)}>Revoke Sessions</button>
-                          <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void toggleUserStatus(user)}>{user.status === 'disabled' ? 'Enable Admin' : 'Disable Admin'}</button>
-                          {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Pending Invitation</button>}
-                          {user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
+                          {user.status === 'active' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void toggleUserStatus(user)}>Disable Admin</button>}
+                          {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Pending Invitation</button>}
+                          {user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
                         </div>
                       </details>}
                     </div>
@@ -1007,12 +1006,13 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                             window.setTimeout(() => document.getElementById(`admin-account-${user.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
                           }}>View Details / Edit Access</button>
                           <button type="button" className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'permissions')}>View Permissions</button>
-                          {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || user.role === 'owner'} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
+                          {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; review it before retrying.' : undefined} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
                           {user.status === 'pending' && user.role !== 'owner' && <>
-                            <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel invitation</button>
+                            <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Pending Invitation</button>
                             {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
                           </>}
                           {user.status === 'active' && <span className="text-[10px] leading-4 text-[#91A195]">Active account: use Remove CMS Access in Admin Accounts instead.</span>}
+                          {user.status === 'disabled' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists || user.isPrimaryOwner} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The original Supabase Auth identity is unavailable; automatic replacement is blocked.' : user.isPrimaryOwner ? 'Primary Owner identity cannot be recovered through delegated account management.' : undefined} className="rounded-lg border border-[#67D8B7]/30 px-2 py-1.5 text-left text-[10px] text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(user)}>Re-invite / Recover CMS Access</button>}
                         </div></td>
                       </tr>;
                     })}

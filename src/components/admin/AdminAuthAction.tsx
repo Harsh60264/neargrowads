@@ -18,6 +18,7 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
     for (const key of [
       'access_token', 'refresh_token', 'token_type', 'expires_in', 'expires_at', 'code', 'token', 'token_hash',
       'provider_token', 'provider_refresh_token', 'state', 'error', 'error_code', 'error_description', 'type',
+      'invitation_generation',
     ]) {
       safeQuery.delete(key);
     }

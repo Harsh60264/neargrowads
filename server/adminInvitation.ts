@@ -14,6 +14,32 @@ export interface VerifiedAdminAuthUser {
 }
 
 export type AdminInvitationCompletionDecision = 'complete' | 'already_accepted' | 'reject';
+export type AdminInvitationRecoveryMethod = 'signup' | 'password_recovery' | 'reject';
+
+export function decideAdminInvitationRecovery(
+  identity: AdminInvitationIdentity | undefined,
+  authUser: VerifiedAdminAuthUser,
+): AdminInvitationRecoveryMethod {
+  if (!identity || !authUser.id || !authUser.email ||
+    identity.id !== authUser.id || identity.email !== authUser.email.toLowerCase() ||
+    identity.isPrimaryOwner || (identity.status !== 'pending' && identity.status !== 'disabled')) {
+    return 'reject';
+  }
+  return authUser.email_confirmed_at ? 'password_recovery' : 'signup';
+}
+
+export function buildAdminInvitationRedirect(
+  siteUrl: string,
+  mode: 'invite' | 'recovery',
+  generation: string,
+  temporaryCredential = false,
+): string {
+  const redirect = new URL('/admin/accept-invite', siteUrl);
+  redirect.searchParams.set('mode', mode);
+  redirect.searchParams.set('invitation_generation', generation);
+  if (temporaryCredential) redirect.searchParams.set('setup', 'temporary');
+  return redirect.toString();
+}
 
 export function decideAdminInvitationCompletion(
   identity: AdminInvitationIdentity | undefined,

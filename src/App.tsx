@@ -418,7 +418,11 @@ export default function App() {
   // Route matching logic
   const renderCurrentView = () => {
     if (currentPath === '/admin/accept-invite') {
-      return <AdminAuthAction mode="invite" temporaryCredential={new URLSearchParams(window.location.search).get('setup') === 'temporary'} />;
+      const callbackQuery = new URLSearchParams(window.location.search);
+      return <AdminAuthAction
+        mode={callbackQuery.get('mode') === 'recovery' ? 'recovery' : 'invite'}
+        temporaryCredential={callbackQuery.get('setup') === 'temporary'}
+      />;
     }
     if (currentPath === '/admin/password-reset') {
       return <AdminAuthAction mode="recovery" />;
