@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
 import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
-import { MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
+import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 
 /* ---------- small primitives ---------- */
 
@@ -231,6 +231,9 @@ export function LeadershipTeamSection() {
   const virtualIndexRef = useRef(1);
   const interactionReasonsRef = useRef(new Set<string>());
   const autoplayTimerRef = useRef<number | undefined>(undefined);
+  const mentorAutoplayTimerRef = useRef<number | undefined>(undefined);
+  const mentorLastTransitionAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const mentorTransitioningRef = useRef(false);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -485,10 +488,14 @@ export function LeadershipTeamSection() {
 
   const cycleMentors = (direction: 1 | -1) => {
     const current = mentorOrderRef.current;
-    if (current.length < 2 || flickingMentorId) return;
+    if (current.length < 2 || mentorTransitioningRef.current) return;
+    const now = performance.now();
+    if (!canAdvanceMentor(now, mentorLastTransitionAtRef.current)) return;
     const next = direction === 1
       ? [...current.slice(1), current[0]]
       : [current[current.length - 1], ...current.slice(0, -1)];
+    mentorLastTransitionAtRef.current = now;
+    mentorTransitioningRef.current = direction === 1;
     if (direction === 1) setFlickingMentorId(current[0]);
     else setFlickingMentorId(null);
     mentorOrderRef.current = next;
@@ -498,6 +505,7 @@ export function LeadershipTeamSection() {
 
   const handleMentorAnimationEnd = (event: AnimationEvent<HTMLLIElement>, memberId: string) => {
     if (event.animationName === 'ng-mentor-flick-out') {
+      mentorTransitioningRef.current = false;
       setFlickingMentorId((current) => current === memberId ? null : current);
     }
   };
@@ -546,11 +554,11 @@ export function LeadershipTeamSection() {
       mentorCount: mentors.length,
     }) || !stage) return;
     const dwellTime = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--cycle-interval')) || MENTOR_AUTOPLAY_DWELL_MS;
-    autoplayTimerRef.current = window.setInterval(() => cycleMentorsRef.current(1), dwellTime);
+    mentorAutoplayTimerRef.current = window.setInterval(() => cycleMentorsRef.current(1), dwellTime);
     return () => {
-      if (autoplayTimerRef.current) {
-        window.clearInterval(autoplayTimerRef.current);
-        autoplayTimerRef.current = undefined;
+      if (mentorAutoplayTimerRef.current) {
+        window.clearInterval(mentorAutoplayTimerRef.current);
+        mentorAutoplayTimerRef.current = undefined;
       }
     };
   }, [documentVisible, isMentorStack, mentorCarouselVisible, reducedMotion, mentors.length]);

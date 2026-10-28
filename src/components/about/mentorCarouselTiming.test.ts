@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
-import { MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
+import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, MENTOR_MIN_GAP_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 
 test('uses a stable 5 second mentor dwell and does not pause for hover', () => {
   assert.equal(MENTOR_AUTOPLAY_DWELL_MS, 5000);
@@ -40,4 +40,9 @@ test('keeps one interval advancing while visibility remains true', () => {
   } finally {
     mock.timers.reset();
   }
+});
+
+test('rejects repeated mentor changes inside the minimum transition gap', () => {
+  assert.equal(canAdvanceMentor(10_000, 10_000 - MENTOR_MIN_GAP_MS), true);
+  assert.equal(canAdvanceMentor(10_001, 10_000), false);
 });
