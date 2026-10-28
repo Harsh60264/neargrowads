@@ -195,6 +195,10 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const [firstPasswordValues, setFirstPasswordValues] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [showFirstPassword, setShowFirstPassword] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileDrawerRef = useRef<HTMLElement>(null);
   const sessionAuthenticated = useRef(false);
   const lastLeadsFetchedAt = useRef(0);
   const lastSessionValidatedAt = useRef(0);
@@ -203,6 +207,37 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const leadsRequest = useRef<Promise<void> | null>(null);
   const navigate = onNavigate || ((path: string) => { window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); });
   sessionAuthenticated.current = Boolean(session?.authenticated);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      mobileMenuButtonRef.current?.focus();
+      return;
+    }
+    mobileDrawerCloseRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+      if (event.key !== 'Tab' || !mobileDrawerRef.current) return;
+      const focusable = Array.from(mobileDrawerRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+      ));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [section, blogMode, isNewBlog]);
 
   const loadLeads = useCallback(async () => {
     if (leadsRequest.current) return leadsRequest.current;
@@ -850,15 +885,40 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
 
   return (
     <main className="admin-portal min-h-screen" data-admin-theme="dark" data-admin-ready="true">
-      <div className="min-h-screen lg:flex" inert={sessionExpired}>
-        <aside className={`admin-sidebar flex shrink-0 flex-col bg-[#14251A] px-5 py-4 text-white sm:px-6 lg:sticky lg:top-0 lg:h-screen lg:px-4 lg:py-5 transition-[width] duration-200 ${sidebarCollapsed ? 'lg:w-[84px]' : 'lg:w-[260px]'}`}>
+      <div className="min-h-screen w-full max-w-full lg:flex" inert={sessionExpired}>
+        <header className="flex items-center justify-between border-b border-white/10 bg-[#14251A] px-4 py-3 text-white lg:hidden">
+          <a href="/" aria-label="NearGrow Ads home" className="flex min-w-0 items-center gap-3">
+            <NearGrowLogo variant={theme === 'dark' ? 'dark' : 'light'} size="sm" />
+            <span className="truncate text-[10px] font-medium tracking-[0.16em] text-[#9DB1A2]">WEBSITE CMS</span>
+          </a>
+          <div className="flex items-center gap-2">
+            {themeToggle}
+            <button
+              ref={mobileMenuButtonRef}
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open CMS navigation"
+              aria-expanded={mobileNavOpen}
+              aria-controls="admin-mobile-navigation"
+              className="grid h-10 w-10 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10"
+            >
+              <span className="sr-only">Open navigation</span>
+              <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+        {mobileNavOpen && <button type="button" aria-label="Close CMS navigation" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/50 lg:hidden" />}
+        <aside ref={mobileDrawerRef} id="admin-mobile-navigation" className={`admin-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col overflow-y-auto bg-[#14251A] px-5 py-4 text-white shadow-2xl sm:px-6 lg:static lg:z-auto lg:h-screen lg:w-auto lg:shrink-0 lg:overflow-visible lg:px-4 lg:py-5 lg:shadow-none ${mobileNavOpen ? 'flex' : 'hidden'} lg:flex ${sidebarCollapsed ? 'lg:w-[84px]' : 'lg:w-[260px]'}`} role="dialog" aria-modal={mobileNavOpen || undefined} aria-label="CMS navigation">
+          <button ref={mobileDrawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close CMS navigation" className="mb-2 ml-auto grid h-10 w-10 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10 lg:hidden">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
           <a href="/" aria-label="NearGrow Ads home" className={`flex items-center gap-3 px-2 py-2 ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
             <NearGrowLogo variant={sidebarCollapsed ? 'icon-only' : theme === 'dark' ? 'dark' : 'light'} size="sm" />
             {!sidebarCollapsed && <span className="hidden text-[10px] font-medium tracking-[0.16em] text-[#9DB1A2] lg:block">WEBSITE CMS</span>}
           </a>
 
           <p className={`mt-8 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-[#91A899] ${sidebarCollapsed ? 'lg:sr-only' : ''}`}>CMS MANAGEMENT</p>
-          <nav aria-label="Admin navigation" className="mt-3 flex gap-2 overflow-x-auto lg:flex-col">
+          <nav aria-label="Admin navigation" className="mt-3 flex min-w-0 flex-col gap-2 overflow-x-hidden lg:overflow-visible">
             {hasView('dashboard') && <button type="button" onClick={() => navigate('/admin')} title="Dashboard" aria-current={activeSection === 'dashboard' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${activeSection === 'dashboard' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
               <LayoutDashboard className="h-4 w-4 shrink-0 text-[#84D095]" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Dashboard</span>
             </button>}
@@ -897,7 +957,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           </div>
         </aside>
 
-        <section className={`min-w-0 flex-1 px-4 py-6 transition-[margin] duration-200 sm:px-7 lg:px-10 lg:py-9 xl:px-12 ${sidebarCollapsed ? 'lg:ml-0' : ''}`}>
+        <section className={`min-w-0 w-full max-w-full flex-1 px-4 py-6 transition-[margin] duration-200 sm:px-7 lg:px-10 lg:py-9 xl:px-12 ${sidebarCollapsed ? 'lg:ml-0' : ''}`}>
           <header className="admin-workspace-header flex flex-wrap items-center justify-between gap-4 border-b border-[#E4E9E3] pb-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#78907D]">NearGrow Ads · CMS</p>
