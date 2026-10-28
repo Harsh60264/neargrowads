@@ -137,6 +137,7 @@ class LeadStorageFailure extends Error {
     readonly operation: string,
     readonly code?: string,
     readonly status?: number,
+    readonly diagnostic?: { message?: string; hint?: string },
   ) {
     super(`Lead storage ${operation} failed (${kind}${code ? `, ${code}` : ''}${status ? `, ${status}` : ''}).`);
     this.name = 'LeadStorageFailure';
@@ -4023,14 +4024,18 @@ async function supabaseRequest(pathname: string, init: RequestInit = {}): Promis
 async function ensureLeadResponse(response: globalThis.Response, operation: string): Promise<void> {
   if (response.ok) return;
   let code: string | undefined;
+  let diagnostic: { message?: string; hint?: string } | undefined;
   try {
-    const payload = await response.json() as { code?: unknown };
+    const payload = await response.json() as { code?: unknown; message?: unknown; hint?: unknown };
     if (typeof payload.code === 'string') code = payload.code;
+    const message = typeof payload.message === 'string' ? payload.message.slice(0, 300) : undefined;
+    const hint = typeof payload.hint === 'string' ? payload.hint.slice(0, 300) : undefined;
+    if (message || hint) diagnostic = { message, hint };
   } catch {
     // HTTP status still provides a safe classification when PostgREST omits JSON details.
   }
   if (code === 'PGRST205' || code === 'PGRST204' || code === '42P01' || code === '42703') {
-    throw new LeadStorageFailure('schema', operation, code, response.status);
+    throw new LeadStorageFailure('schema', operation, code, response.status, diagnostic);
   }
   if (code === '42501' || response.status === 401 || response.status === 403) {
     throw new LeadStorageFailure('permission', operation, code, response.status);
@@ -4066,6 +4071,7 @@ function logLeadStorageFailure(operation: string, error: unknown): void {
       kind: error.kind,
       ...(error.code ? { code: error.code } : {}),
       ...(error.status ? { status: error.status } : {}),
+      ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
     });
     return;
   }
