@@ -1,4 +1,4 @@
-import express, { type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { createServer as createNetServer } from 'node:net';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
@@ -24,6 +24,7 @@ import {
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
 } from './server/adminInvitation';
+import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -4512,14 +4513,14 @@ async function dispatchLeadNotification(lead: StoredLead): Promise<StoredLead['n
 }
 
 function canonicalSiteOrigin(): string {
+  return resolveSiteOrigin(process.env.SITE_URL, isProductionDeployment());
+}
+
+function adminAuthRedirectOrigin(req: Request): string {
   const configured = process.env.SITE_URL;
-  if (!configured) throw new Error('SITE_URL must be configured with the canonical HTTPS origin.');
-  const parsed = new URL(configured);
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
-    parsed.pathname !== '/' || parsed.search || parsed.hash) {
-    throw new Error('SITE_URL must be the canonical HTTPS origin without a path, query or fragment.');
-  }
-  return parsed.origin;
+  if (configured) return resolveSiteOrigin(configured, isProductionDeployment());
+  if (isProductionDeployment()) return resolveSiteOrigin(undefined, true);
+  return `${req.protocol}://${req.get('host')}`;
 }
 
 function escapeXml(value: string): string {
@@ -4678,7 +4679,7 @@ async function findAvailablePort(startPort: number, host?: string): Promise<numb
 }
 
 async function createApplication(serverless = false): Promise<{ app: express.Express; port?: number }> {
-  if (process.env.NODE_ENV === 'production') canonicalSiteOrigin();
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') canonicalSiteOrigin();
   if (!serverless && process.env.NODE_ENV === 'production' && !process.env.PERSISTENT_DATA_DIR) {
     throw new Error('PERSISTENT_DATA_DIR must point to a durable mounted volume in production.');
   }
@@ -4703,6 +4704,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   }
   const hmrPort = serverless ? DEFAULT_HMR_PORT : await findAvailablePort(DEFAULT_HMR_PORT);
 
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
   app.use('/api/website-activity', express.json({ limit: '1kb' }));
   app.use(express.json({
     limit: '3mb',
@@ -5229,6 +5234,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   app.post('/api/admin/logout', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Sign-out must be requested from this website.' });
+      return;
+    }
     const session = readAdminSession(req);
     try {
       const identity = session ? await authenticateAdminSession(req) : undefined;
@@ -5260,6 +5269,17 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     res.json({ authenticated: false });
   });
 
+  app.get('/api/admin/auth/invitation-context', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const identity = await authenticateAdminSession(req);
+      res.json({ hasActiveAdminSession: Boolean(identity) });
+    } catch (error) {
+      console.error('[NearGrow Ads] Invitation browser-session isolation check failed:', error instanceof Error ? error.name : 'Unknown error');
+      res.status(503).json({ message: 'The current browser session could not be checked securely.' });
+    }
+  });
+
   app.post('/api/admin/auth/recovery', async (req: Request, res: Response): Promise<void> => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
@@ -5276,7 +5296,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/password-reset`;
+      const redirectTo = `${adminAuthRedirectOrigin(req)}/admin/password-reset`;
       const query = new URLSearchParams({ redirect_to: redirectTo });
       const response = await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',
@@ -5295,8 +5315,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   });
 
   app.post('/api/admin/auth/complete', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
     if (!isSameOriginRequest(req)) {
       res.status(403).json({ message: 'Setup can only be completed from this website.' });
+      return;
+    }
+    try {
+      if (await authenticateAdminSession(req)) {
+        res.status(409).json({ message: 'Sign out the existing administrator session in this browser before completing setup.' });
+        return;
+      }
+    } catch (error) {
+      console.error('[NearGrow Ads] Invitation completion could not isolate the browser session:', error instanceof Error ? error.name : 'Unknown error');
+      res.status(503).json({ message: 'The current browser session could not be isolated securely. Retry after signing out.' });
       return;
     }
     const {
@@ -5639,7 +5670,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       } else if (role === 'owner') {
         operationStage = 'auth_invitation';
         const redirectTo = buildAdminInvitationRedirect(
-          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          adminAuthRedirectOrigin(req),
           'invite',
           invitationGeneration,
         );
@@ -5698,7 +5729,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         if (sendSignupVerification || sendPasswordRecovery) {
           operationStage = sendPasswordRecovery ? 'password_recovery_email' : 'verification_email';
           const redirectTo = buildAdminInvitationRedirect(
-            process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+            adminAuthRedirectOrigin(req),
             sendPasswordRecovery ? 'recovery' : 'invite',
             invitationGeneration,
             sendSignupVerification && mustChangePassword,
@@ -5741,7 +5772,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       if (sendSignupVerification || sendPasswordRecovery) {
         operationStage = 'verification_email';
         const redirectTo = buildAdminInvitationRedirect(
-          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          adminAuthRedirectOrigin(req),
           sendPasswordRecovery ? 'recovery' : 'invite',
           invitationGeneration,
         );
@@ -5988,7 +6019,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         await revokeSupabaseRefreshTokens(target.id);
         if (recoveryMethod === 'signup') {
           const redirectTo = buildAdminInvitationRedirect(
-            process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+            adminAuthRedirectOrigin(req),
             'invite',
             invitationGeneration,
             target.role !== 'owner',
@@ -6009,7 +6040,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           return;
         }
         const redirectTo = buildAdminInvitationRedirect(
-          process.env.SITE_URL || `${req.protocol}://${req.get('host')}`,
+          adminAuthRedirectOrigin(req),
           'recovery',
           invitationGeneration,
         );
@@ -6048,7 +6079,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
       await revokeSupabaseRefreshTokens(target.id);
-      const redirectTo = `${process.env.SITE_URL || `${req.protocol}://${req.get('host')}`}/admin/password-reset`;
+      const redirectTo = `${adminAuthRedirectOrigin(req)}/admin/password-reset`;
       const query = new URLSearchParams({ redirect_to: redirectTo });
       await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',
@@ -6312,10 +6343,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   app.get('/api/admin/sessions', async (req: Request, res: Response): Promise<void> => {
     if (!requireOwner(req, res)) return;
+    if (!currentAdmin(res)?.isPrimaryOwner) {
+      res.status(403).json({ message: 'Only the Primary Owner can view administrator sessions.' });
+      return;
+    }
     const currentSessionId = readAdminSession(req)?.sessionId;
     try {
       const query = new URLSearchParams({
-        select: 'id,user_id,created_at,expires_at,revoked_at,user_agent,admin_users(email,role)',
+        select: 'id,user_id,created_at,expires_at,revoked_at,admin_users(email,role)',
         order: 'created_at.desc',
         limit: '200',
       });
@@ -6338,10 +6373,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(404).json({ message: 'Session not found.' });
         return;
       }
-      if (target.user_id !== identity.id && !identity.isPrimaryOwner) {
-        res.status(403).json({ message: 'You may revoke only your own sessions.' });
-        return;
+      if (target.user_id !== identity.id) {
+        if (!identity.isPrimaryOwner) {
+          res.status(403).json({ message: 'You may revoke only your own sessions.' });
+          return;
+        }
+        if (!await reauthenticateAdminRequest(req, res, identity, req.body?.currentPassword, 'Re-enter your current password to revoke another administrator’s session.')) return;
       }
+      if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many session revocation requests. Please wait 15 minutes and try again.')) return;
       const revokeQuery = new URLSearchParams({ id: `eq.${req.params.id}`, revoked_at: 'is.null' });
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${revokeQuery}`, {
         method: 'PATCH',
@@ -6359,6 +6398,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   app.post('/api/admin/users/:id/sessions/revoke', async (req: Request, res: Response): Promise<void> => {
     if (!requireOwner(req, res)) return;
     const actor = currentAdmin(res)!;
+    if (!actor.isPrimaryOwner) {
+      res.status(403).json({ message: 'Only the Primary Owner can revoke another administrator’s sessions.' });
+      return;
+    }
+    if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many session revocation requests. Please wait 15 minutes and try again.')) return;
     if (!await reauthenticateAdminRequest(req, res, actor, req.body?.currentPassword, 'Re-enter your current password to revoke administrator sessions.')) return;
     try {
       const target = await readAdminIdentity(req.params.id);

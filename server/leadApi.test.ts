@@ -54,7 +54,7 @@ async function startLocalServer(
       } : {}),
       ADMIN_OWNER_USER_ID: '',
       ADMIN_SESSION_SECRET: '',
-      SITE_URL: mode === 'production' ? 'https://localhost' : '',
+      SITE_URL: mode === 'production' ? 'https://www.neargrowads.com' : '',
       PERSISTENT_DATA_DIR: dataDirectory || '',
       N8N_LEAD_WEBHOOK_URL: notificationWebhookUrl,
       N8N_WEBHOOK_SECRET: '',

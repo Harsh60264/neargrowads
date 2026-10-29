@@ -50,3 +50,18 @@ export function readAdminAuthCallback(
     ? { authorizationCode, codeVerifier: distinctVerifiers[0], invitationGeneration: validGeneration }
     : { error: invalidLinkMessage };
 }
+
+export function clearAdminAuthCallbackVerifier(
+  storage: Pick<Storage, 'length' | 'key' | 'getItem' | 'removeItem'>,
+  verifier: string | undefined,
+): void {
+  if (!verifier) return;
+  const keysToRemove: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith('sb-') && key.endsWith('-auth-token-code-verifier') && storage.getItem(key) === verifier) {
+      keysToRemove.push(key);
+    }
+  }
+  for (const key of keysToRemove) storage.removeItem(key);
+}

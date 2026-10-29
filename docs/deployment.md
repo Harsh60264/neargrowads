@@ -11,7 +11,7 @@
 For local development, create `.env` using `.env.example`. For Vercel, add these names in Project Settings → Environment Variables. Do not put secret values in `VITE_*` variables:
 
 ```bash
-SITE_URL=https://your-production-domain.example
+SITE_URL=https://www.neargrowads.com
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -19,7 +19,7 @@ ADMIN_OWNER_USER_ID=
 ADMIN_SESSION_SECRET=
 ```
 
-`SITE_URL` must be the canonical HTTPS origin selected for the deployment. The five Supabase/admin variables above are required for admin access; the service role key and session secret must be server-only. Add optional `N8N_LEAD_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `CONTACT_NOTIFICATION_EMAIL`, `ADMIN_NOTIFICATION_EMAIL`, and Razorpay Test variables only when those features are configured. `PORT`, `NODE_ENV`, `PERSISTENT_DATA_DIR`, and `TRUST_PROXY_HOPS` are for the standalone Express host; Vercel manages its function runtime and proxy configuration.
+`SITE_URL` must be `https://www.neargrowads.com` in Production; Vercel Production builds and production server startup reject missing, malformed, localhost, legacy, or other origins. Preview deployments may use their own HTTPS origin, and local development may use `http://localhost:<port>`. The five Supabase/admin variables above are required for admin access; the service role key and session secret must be server-only. Add optional `N8N_LEAD_WEBHOOK_URL`, `N8N_WEBHOOK_SECRET`, `CONTACT_NOTIFICATION_EMAIL`, `ADMIN_NOTIFICATION_EMAIL`, and Razorpay Test variables only when those features are configured. `PORT`, `NODE_ENV`, `PERSISTENT_DATA_DIR`, and `TRUST_PROXY_HOPS` are for the standalone Express host; Vercel manages its function runtime and proxy configuration.
 
 Vercel Function initialization does not create or repair the Primary Owner record. Confirm `ADMIN_OWNER_USER_ID` identifies the already verified Owner account and that its active `admin_users` row exists before deployment; setup must be reviewed and completed through the normal Supabase administration process.
 
@@ -39,7 +39,7 @@ npm run build
 npm start
 ```
 
-Set `SITE_URL` to the one HTTPS origin selected for the deployment. The same value is used for build-time canonical and structured-data URLs and must be available to the running server. Do not substitute a domain until the production owner confirms whether `.in` or `.com` is canonical.
+Set `SITE_URL=https://www.neargrowads.com` for Production and the matching Preview origin when testing a Preview deployment. The same value is used for build-time canonical and structured-data URLs and server-generated Supabase Auth redirects. Production rejects any other origin.
 
 Set `TRUST_PROXY_HOPS` only to the exact number of trusted reverse proxies in front of Express. The default `0` ignores forwarded headers. Configure the edge proxy to replace, not append to, untrusted forwarding headers. The current in-process rate limiter does not share state across multiple instances; use a shared rate-limit store or a single instance before horizontally scaling.
 
@@ -59,14 +59,16 @@ Vercel admin media uploads use short-lived Supabase signed upload URLs so file b
 2. Open the SQL Editor and execute `supabase/migrations/20261015000000_create_leads_table.sql`.
 3. Apply all remaining SQL files in `supabase/migrations` in timestamp order. This includes `supabase/migrations/20261025210000_add_service_catalogue_categories.sql` before deploying managed Service Store categories. It creates the category table, links existing packages to case/whitespace-normalized categories without changing package status or content, and grants category-table access only to the existing server-side `service_role` flow. Review the migrated categories’ active/display settings in Service Store after deployment; the migration keeps migrated categories active and shown in the Catalogue by default.
 4. Existing admin installations must apply `supabase/migrations/20261020000000_admin_account_management.sql` before using username aliases, password-reset metadata, or configurable Super Admin permissions.
-4. Verify that Row Level Security (RLS) is active on the `public.leads` table and the admin tables. See the Supabase Auth and server-only environment setup in `README.md`.
-5. Before deploying the invitation-recovery code, review and apply `supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql` through the normal staging/production migration process. Confirm that the earlier admin identity and account-management migrations have created `admin_users`, `admin_sessions`, `admin_audit_logs`, `username`, and `must_change_password`; these are required by the recovery functions. The base admin migration enables RLS and grants table access to `service_role`; this migration limits both new/replaced RPCs to `service_role` and requests a PostgREST schema reload.
+5. Verify that Row Level Security (RLS) is active on the `public.leads` table and the admin tables. See the Supabase Auth and server-only environment setup in `README.md`.
+6. Before deploying the invitation-recovery code, review and apply `supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql` through the normal staging/production migration process. Confirm that the earlier admin identity and account-management migrations have created `admin_users`, `admin_sessions`, `admin_audit_logs`, `username`, and `must_change_password`; these are required by the recovery functions. The base admin migration enables RLS and grants table access to `service_role`; this migration limits both new/replaced RPCs to `service_role` and requests a PostgREST schema reload.
 
    This migration adds a nullable invitation-generation column, drops the older three-argument completion RPC, and creates a generation-bound replacement plus a locked Primary-Owner recovery RPC. Existing rows are not rewritten: pending rows with a NULL generation cannot complete from an old link and must be reissued by a reauthenticated Primary Owner. Disabled rows remain disabled until a fresh verified onboarding transaction; recovery retains the Auth identity, clears CMS permissions and username, and records the reissue event.
 
    Use a coordinated maintenance window for invitation completion and recovery. Apply the migration first, confirm the schema reload and RPC availability, then deploy the matching application immediately. Until deployment completes, the old application’s three-argument RPC call will fail closed because that signature has been removed; the new application must not serve recovery requests before the migration exists. Verify a fresh staged invitation end-to-end before enabling Owner recovery in production. Old setup links must be resent from Admin Accounts. The application does not apply this migration automatically.
 
-6. For administrator invitation archival, apply `supabase/migrations/20261028230000_admin_account_archiving.sql` after the invitation-recovery migration and before deploying the matching application. This migration adds a soft-archive timestamp and Primary-Owner-only RPCs; it rotates invitation generations when cancelling or archiving and clears the archive timestamp only when a fresh recovery link is prepared. It retains Auth users and audit history. Pending invitations must be cancelled before they can be archived. Supabase does not expose a reliable per-invitation expiry timestamp in this flow, so unverified pending invitations are not marked expired or archived as expired.
+7. For administrator invitation archival, apply `supabase/migrations/20261028230000_admin_account_archiving.sql` after the invitation-recovery migration and before deploying the matching application. This migration adds a soft-archive timestamp and Primary-Owner-only RPCs; it rotates invitation generations when cancelling or archiving and clears the archive timestamp only when a fresh recovery link is prepared. It retains Auth users and audit history. Pending invitations must be cancelled before they can be archived. Supabase does not expose a reliable per-invitation expiry timestamp in this flow, so unverified pending invitations are not marked expired or archived as expired.
+
+   For an existing Production project, verify the migration version `20261028230000` is listed as applied in the Supabase Dashboard migration history before enabling these routes. Also confirm `public.admin_users.archived_at` and the `cancel_admin_invitation`, `prepare_admin_invitation_recovery`, and `archive_admin_account` RPCs exist with execution restricted to `service_role`. Use the Dashboard's schema/function inspectors or read-only catalog inspection; do not invoke the mutation RPCs as a verification step. If the version is absent, do not deploy the matching application until the migration is reviewed and applied through the normal production process.
 
 Before deploying this repair, review and apply `supabase/migrations/20261025180000_harden_leads_access_and_consent.sql` to staging first. Confirm the current policies and grants, verify authorized leads access through the server API, and verify direct anonymous/authenticated access is denied. Apply it to production only through the normal reviewed migration process; the application never applies database migrations automatically.
 
@@ -86,15 +88,31 @@ The Primary Owner must reauthenticate, verify the Test API credentials, and expl
 
 ## 6. Hosting and deployment
 
+### Admin invitation security and email templates
+
+The invitation-session isolation, callback hardening, session-management authorization, and Admin Accounts accordion changes do not require a new database migration. Keep the existing `20261028200000_secure_admin_invitation_recovery.sql` and `20261028230000_admin_account_archiving.sql` schema in place; do not reapply or edit those migrations for this release.
+
+Before production rollout, use a Preview deployment with a staging Supabase project to verify an invitation for a new identity, recovery for an existing identity, rejection of a cancelled/old-generation link, and completion while another administrator session is active in the same browser. The callback must require that browser session to be signed out before it will enable or complete setup. The completion API independently enforces this check.
+
+The branded Supabase Auth templates are a separate manual Dashboard configuration. Install and preview the **Invite user**, **Confirm signup**, and **Reset password** templates from [the Supabase Admin Auth email-template guide](./supabase-admin-auth-email-templates.md) under **Authentication → Email Templates**. Confirm SMTP delivery and the callback URL allow-list before testing. Do not copy tokens or secrets into the templates.
+
+After staging passes, install the reviewed templates in the production Supabase Dashboard and deploy the reviewed application through the normal Vercel process. No production SQL, credentials, or deployment is changed automatically by this repository update. Manually verify:
+
+- The callback URL is cleared after processing, response headers use `Referrer-Policy: no-referrer`, and a recipient is never signed into the existing browser administrator session.
+- A new invite activates only the recipient's verified Auth identity and requires that recipient to set their own password; recovery keeps the existing Auth identity.
+- The Primary Owner can view and revoke administrator sessions after reauthentication; other roles do not see the session-management panel and cannot revoke another account's session through the API.
+- Admin Account cards are collapsed initially, keyboard-operable, and preserve unsaved edits when switching accounts.
+
 ### Vercel (full-stack)
 
 `vercel.json` builds the Vite frontend into `dist`, rewrites `/admin` and known client-side routes to `index.html`, and leaves `/api/*` to the Vercel Function at `api/[...path].ts`. That Function lazily creates the existing Express app without binding a persistent port or serving static files. Vercel serves `dist` assets; API requests are same-origin. `/uploads/...` is routed to the API's safe public Storage redirect.
 
 1. Connect the GitHub repository to Vercel and use the repository root as the project root.
 2. Keep the framework preset at Vite (or Other if automatic detection does not identify Vite); use `npm run build` and `dist`. Do not add a catch-all rewrite that sends `/api/*` to the SPA.
-3. Set the required environment variable names above for Preview and Production. For the initial verification, use a Preview deployment and a staging Supabase project. Set `SITE_URL` to that deployment's canonical HTTPS origin during the preview, and update it to the approved custom domain (for example, `https://neargrowads.com`) only after the domain decision.
+3. Configure the Preview `SITE_URL` to the Preview deployment's HTTPS origin and Production `SITE_URL` to exactly `https://www.neargrowads.com`. In Supabase Auth URL Configuration, set the Site URL to `https://www.neargrowads.com` and allow-list `https://www.neargrowads.com/admin/accept-invite` and `https://www.neargrowads.com/admin/password-reset`. Preview/local callback origins should be allow-listed only for the corresponding non-production Supabase project.
 4. Apply all reviewed Supabase migrations in order, including the serverless CMS migration, and run the CMS importer only after reviewing and backing up its source files and destination.
-5. Redeploy after setting environment variables. Verify `/`, `/admin`, `/api/health`, a protected admin endpoint (401 without a session), browser assets, authenticated flows with an explicitly authorized test account, and a refreshed nested route. Do not test by changing production owner or customer data.
+5. After Preview verification with a staging Supabase project, install the reviewed Invite user, Confirm signup, and Reset password templates from [the Supabase email-template guide](./supabase-admin-auth-email-templates.md), preserving each `{{ .ConfirmationURL }}` link. Then deploy the application through the approved Vercel process; this repository does not change hosted settings or deploy automatically.
+6. Verify `/`, `/admin`, `/api/health`, a protected admin endpoint (401 without a session), browser assets, authenticated invite and password-reset flows with an explicitly authorized test account, and a refreshed nested route. Do not test by changing production owner or customer data.
 
 ### Standalone Express or Netlify
 

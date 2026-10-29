@@ -2,20 +2,15 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import { resolveSiteOrigin } from './server/siteOrigin.ts';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const configuredSiteUrl = env.SITE_URL || process.env.SITE_URL || '';
-  let siteOrigin = '';
-  if (configuredSiteUrl) {
-    const parsedSiteUrl = new URL(configuredSiteUrl);
-    if ((parsedSiteUrl.protocol !== 'https:' && parsedSiteUrl.hostname !== 'localhost') ||
-      parsedSiteUrl.username || parsedSiteUrl.password || parsedSiteUrl.pathname !== '/' ||
-      parsedSiteUrl.search || parsedSiteUrl.hash) {
-      throw new Error('SITE_URL must be the canonical HTTPS origin without a path, query or fragment.');
-    }
-    siteOrigin = parsedSiteUrl.origin;
-  }
+  const production = process.env.VERCEL_ENV === 'production';
+  const siteOrigin = configuredSiteUrl || production
+    ? resolveSiteOrigin(configuredSiteUrl || undefined, production)
+    : '';
   return {
     plugins: [
       {

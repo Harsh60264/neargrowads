@@ -7,7 +7,7 @@ import {
   decideAdminInvitationRecovery,
   type AdminInvitationIdentity,
 } from './adminInvitation';
-import { readAdminAuthCallback } from '../src/components/admin/adminAuthCallback';
+import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from '../src/components/admin/adminAuthCallback';
 
 const pendingIdentity: AdminInvitationIdentity = {
   id: '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
@@ -100,12 +100,12 @@ test('recovers verified pending identities and disabled identities without chang
 
 test('invitation recovery redirects to the production onboarding route with a generation', () => {
   assert.equal(
-    buildAdminInvitationRedirect('https://neargrowads.com', 'recovery', '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62'),
-    'https://neargrowads.com/admin/accept-invite?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
+    buildAdminInvitationRedirect('https://www.neargrowads.com', 'recovery', '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62'),
+    'https://www.neargrowads.com/admin/accept-invite?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
   );
   assert.equal(
-    buildAdminInvitationRedirect('https://neargrowads.com/', 'invite', '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62', true),
-    'https://neargrowads.com/admin/accept-invite?mode=invite&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&setup=temporary',
+    buildAdminInvitationRedirect('https://www.neargrowads.com/', 'invite', '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62', true),
+    'https://www.neargrowads.com/admin/accept-invite?mode=invite&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&setup=temporary',
   );
 });
 
@@ -343,4 +343,97 @@ test('admin account management surfaces direct recovery, archive state, and back
   assert.match(settingsSource, /\['Archived', invitationCounts\.archived\]/);
   assert.match(settingsSource, /value="archived">Archived/);
   assert.match(settingsSource, /activeDelegatedUsers = delegatedUsers\.filter\(\(user\) =>\s*!user\.archivedAt/);
+});
+
+test('invitation setup isolates an existing CMS browser session on both client and server', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+  const callbackSource = readFileSync(new URL('../src/components/admin/adminAuthCallback.ts', import.meta.url), 'utf8');
+  const pageSource = readFileSync(new URL('../src/components/admin/AdminPage.tsx', import.meta.url), 'utf8');
+  const vercelSource = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8');
+  const completeStart = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const completeEnd = serverSource.indexOf("app.post('/api/admin/users/:id/recovery'", completeStart);
+  const completeRoute = serverSource.slice(completeStart, completeEnd);
+  const contextStart = serverSource.indexOf("app.get('/api/admin/auth/invitation-context'");
+  const contextEnd = serverSource.indexOf("app.post('/api/admin/auth/recovery'", contextStart);
+  const contextRoute = serverSource.slice(contextStart, contextEnd);
+
+  assert.match(contextRoute, /authenticateAdminSession\(req\)/);
+  assert.match(contextRoute, /hasActiveAdminSession:\s*Boolean\(identity\)/);
+  assert.match(completeRoute, /if \(await authenticateAdminSession\(req\)\)[\s\S]*?status\(409\)/);
+  assert.doesNotMatch(completeRoute, /setAdminSessionCookie/);
+  assert.match(authActionSource, /sessionGate !== 'ready'/);
+  assert.match(authActionSource, /Sign out this browser and continue/);
+  assert.match(authActionSource, /credentials:\s*'same-origin'/);
+  assert.match(authActionSource, /autoComplete="new-password"/);
+  assert.match(authActionSource, /clearAdminAuthCallbackVerifier\(window\.localStorage/);
+  assert.match(callbackSource, /storage\.removeItem\(key\)/);
+  assert.match(pageSource, /autoComplete="current-password"/);
+  assert.match(serverSource, /Referrer-Policy', 'no-referrer'/);
+  assert.match(vercelSource, /"value": "no-referrer"/);
+  assert.match(vercelSource, /no-store, max-age=0/);
+});
+
+test('admin session controls are owner-only for cross-account management and keep self sign-out', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+  const sessionsStart = serverSource.indexOf("app.get('/api/admin/sessions'");
+  const revokeStart = serverSource.indexOf("app.delete('/api/admin/sessions/:id'", sessionsStart);
+  const sessionDirectory = serverSource.slice(sessionsStart, revokeStart);
+  const revokeEnd = serverSource.indexOf("app.post('/api/admin/users/:id/sessions/revoke'", revokeStart);
+  const revokeRoute = serverSource.slice(revokeStart, revokeEnd);
+  const managedRevokeEnd = serverSource.indexOf("app.post('/api/admin/users/:id/password'", revokeEnd);
+  const managedRevokeRoute = serverSource.slice(revokeEnd, managedRevokeEnd);
+
+  assert.match(sessionDirectory, /currentAdmin\(res\)\?\.isPrimaryOwner/);
+  assert.match(settingsSource, /\{isPrimaryOwner && <Panel title="Active Sessions"/);
+  assert.match(revokeRoute, /target\.user_id !== identity\.id/);
+  assert.match(revokeRoute, /if \(!identity\.isPrimaryOwner\)/);
+  assert.match(revokeRoute, /reauthenticateAdminRequest/);
+  assert.match(revokeRoute, /target\.id === readAdminSession\(req\)\?\.sessionId/);
+  assert.match(managedRevokeRoute, /requireOwner\(req, res\)/);
+  assert.match(managedRevokeRoute, /actor\.isPrimaryOwner/);
+  assert.match(managedRevokeRoute, /writeAdminAudit/);
+});
+
+test('Admin Accounts accordion is collapsed initially, keyboard-operable, and warns without discarding edits', () => {
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+
+  assert.match(settingsSource, /useState<string \| null>\(null\)/);
+  assert.match(settingsSource, /<button type="button" aria-expanded=\{expandedUserId === user\.id\}/);
+  assert.match(settingsSource, /aria-controls=\{`admin-account-details-\$\{user\.id\}`\}/);
+  assert.match(settingsSource, /Keep them unsaved and open another account/);
+  assert.match(settingsSource, /savedUserAccess\.current\.set\(user\.id, adminUserAccessSnapshot\(user\)\)/);
+});
+
+test('branded email instructions configure the distinct Supabase invitation and recovery templates safely', () => {
+  const templateGuide = readFileSync(new URL('../docs/supabase-admin-auth-email-templates.md', import.meta.url), 'utf8');
+
+  assert.match(templateGuide, /Authentication → Email Templates/);
+  assert.match(templateGuide, /## Invite user/);
+  assert.match(templateGuide, /## Confirm signup/);
+  assert.match(templateGuide, /## Reset password/);
+  assert.match(templateGuide, /{{ \.ConfirmationURL }}/);
+  assert.match(templateGuide, /Accept Invitation &amp; Set Up Account/);
+  assert.match(templateGuide, /Reset your NearGrow Ads CMS password/);
+});
+
+test('consumed PKCE verifier is removed without touching unrelated Supabase Auth storage', () => {
+  const values = new Map([
+    ['sb-project-auth-token-code-verifier', 'one-time-code-verifier'],
+    ['sb-other-auth-token-code-verifier', 'unrelated-verifier'],
+    ['sb-project-auth-token', 'persistent-auth-session'],
+  ]);
+  const storage = {
+    get length() { return values.size; },
+    key(index: number) { return [...values.keys()][index] ?? null; },
+    getItem(key: string) { return values.get(key) ?? null; },
+    removeItem(key: string) { values.delete(key); },
+  };
+
+  clearAdminAuthCallbackVerifier(storage, 'one-time-code-verifier');
+
+  assert.equal(values.has('sb-project-auth-token-code-verifier'), false);
+  assert.equal(values.get('sb-other-auth-token-code-verifier'), 'unrelated-verifier');
+  assert.equal(values.get('sb-project-auth-token'), 'persistent-auth-session');
 });

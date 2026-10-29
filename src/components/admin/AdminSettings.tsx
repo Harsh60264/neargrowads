@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, UserPlus, X } from 'lucide-react';
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
 type AdminStatus = 'pending' | 'active' | 'disabled';
@@ -39,7 +39,6 @@ interface SessionRecord {
   created_at: string;
   expires_at: string;
   revoked_at: string | null;
-  user_agent: string;
   current?: boolean;
   admin_users?: { email?: string; role?: AdminRole };
 }
@@ -137,6 +136,15 @@ class SettingsApiError extends Error {
   }
 }
 
+function adminUserAccessSnapshot(user: AdminUser): string {
+  return JSON.stringify({
+    role: user.role,
+    status: user.status,
+    username: user.username || null,
+    permissions: user.permissions,
+  });
+}
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', ...init });
   let body: Record<string, unknown> = {};
@@ -193,6 +201,8 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [adminTab, setAdminTab] = useState<'create' | 'accounts' | 'history'>('create');
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const savedUserAccess = useRef(new Map<string, string>());
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'all' | AdminHistoryStatus>('all');
   const [historyTargetId, setHistoryTargetId] = useState<string | null>(null);
@@ -252,10 +262,6 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       const session = await api<{ authenticated: boolean; user?: Identity }>('/api/admin/session');
       if (!session.authenticated || !session.user) throw new Error('Your administrator session has expired. Sign in again.');
       setIdentity(session.user);
-      const [ownSessions] = await Promise.all([
-        api<{ sessions: SessionRecord[] }>('/api/admin/sessions/mine'),
-      ]);
-      setSessions(ownSessions.sessions || []);
       if (session.user.isPrimaryOwner) {
         const [userData, auditData, ownershipData, allSessions] = await Promise.all([
           api<{ users: AdminUser[] }>('/api/admin/users'),
@@ -264,23 +270,24 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           api<{ sessions: SessionRecord[] }>('/api/admin/sessions'),
         ]);
         setUsers(userData.users);
+        savedUserAccess.current = new Map(userData.users.map((user) => [user.id, adminUserAccessSnapshot(user)]));
         setLogs(auditData.logs);
         setTransfers(ownershipData.transfers);
         setOwners(ownershipData.owners);
-        setSessions(allSessions.sessions || ownSessions.sessions || []);
+        setSessions(allSessions.sessions || []);
       } else if (session.user.role === 'owner') {
         setUsers([]);
         setLogs([]);
-        setSessions(ownSessions.sessions || []);
+        setSessions([]);
         const ownershipData = await api<{ transfers: Array<Record<string, unknown>>; owners: Array<{ id: string; email: string; is_primary_owner: boolean }> }>('/api/admin/ownership');
         setTransfers(ownershipData.transfers);
         setOwners(ownershipData.owners);
       } else {
         setUsers([]);
         setLogs([]);
+        setSessions([]);
         setTransfers([]);
         setOwners([]);
-        setSessions(ownSessions.sessions || []);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not load account settings.');
@@ -357,6 +364,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           currentPassword: reauthPassword,
         }),
       });
+      savedUserAccess.current.set(user.id, adminUserAccessSnapshot(user));
       return result.message;
     });
   };
@@ -542,6 +550,20 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     changeUser(user.id, { permissions: next });
   };
 
+  const toggleAccountDetails = (userId: string) => {
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      return;
+    }
+    if (expandedUserId) {
+      const currentUser = users.find((user) => user.id === expandedUserId);
+      const savedSnapshot = savedUserAccess.current.get(expandedUserId);
+      if (currentUser && savedSnapshot !== adminUserAccessSnapshot(currentUser) &&
+        !window.confirm('This administrator has unsaved access changes. Keep them unsaved and open another account?')) return;
+    }
+    setExpandedUserId(userId);
+  };
+
   const toggleInvitePermission = (section: AdminSection, action: AdminAction, enabled: boolean) => {
     setPermissions((current) => {
       const currentActions = { ...current[section], [action]: enabled };
@@ -559,7 +581,15 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     setError('');
     setNotice('');
     try {
-      const result = await api<{ message: string; currentSession: boolean }>(`/api/admin/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session) throw new Error('The selected session is no longer available. Refresh the session list.');
+      const result = await api<{ message: string; currentSession: boolean }>(`/api/admin/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+        ...(session.user_id !== identity?.id ? {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword: reauthPassword }),
+        } : {}),
+      });
       if (result.currentSession) {
         window.location.assign('/admin/login');
         return;
@@ -930,61 +960,73 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 <button type="button" className="shrink-0 rounded-lg border border-[#47594C] px-3 py-2 font-semibold text-[#C8D8CA] hover:bg-white/5" onClick={() => setAdminTab('history')}>View History</button>
               </div>
               {activeDelegatedUsers.map((user) => (
-                <article id={`admin-account-${user.id}`} key={user.id} className="rounded-xl border border-[#304135] bg-[#131D16] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0"><p className="break-all text-sm font-semibold">{user.email}</p><p className="mt-1 text-[10px] capitalize text-[#91A195]">{historyStatusLabel(user)} · {user.role.replace('_', ' ')} · {user.username ? `@${user.username}` : 'No username alias'}{user.mustChangePassword ? ' · Password change required' : ''}</p><p className="mt-1 text-[10px] text-[#819286]">Allowed sections: {Object.entries(user.permissions || {}).filter(([, actions]) => actions?.view).map(([section]) => sectionLabels[section as AdminSection]).join(', ') || 'None'}</p><p className="mt-1 text-[10px] text-[#819286]">Email verification: {user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'} · Last login: {user.lastLoginAt || user.authLastSignInAt ? new Date(user.lastLoginAt || user.authLastSignInAt || '').toLocaleString() : 'Never'} · Last password reset: {user.lastPasswordResetAt ? new Date(user.lastPasswordResetAt).toLocaleString() : 'Not recorded'}</p></div>
-                    <div className="flex flex-wrap gap-2">
-                      <select id={`admin-role-${user.id}`} aria-label={`Role for ${user.email}`} className="rounded-lg border border-[#33453A] bg-[#101913] px-2 py-2 text-xs text-[#ECF3EE]" disabled={user.isPrimaryOwner} value={user.role} onChange={(event) => changeUserRole(user, event.target.value as AdminRole)}>
-                        {user.role === 'owner' && <option value="owner">Owner</option>}<option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
-                      </select>
+                <article id={`admin-account-${user.id}`} key={user.id} className="overflow-hidden rounded-xl border border-[#304135] bg-[#131D16]">
+                  <button type="button" aria-expanded={expandedUserId === user.id} aria-controls={`admin-account-details-${user.id}`} onClick={() => toggleAccountDetails(user.id)} className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#67D8B7]">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{user.username ? `@${user.username}` : user.email}</span>
+                      <span className="mt-1 block break-all text-xs text-[#A9B8AD]">{user.email}</span>
+                    </span>
+                    <span className="text-left text-[10px] capitalize text-[#91A195] sm:min-w-24">{user.role.replace('_', ' ')}</span>
+                    <span className="text-left text-[10px] text-[#91A195] sm:min-w-32">{historyStatusLabel(user)}</span>
+                    <span className="text-left text-[10px] text-[#819286] sm:min-w-36">Last login: {user.lastLoginAt || user.authLastSignInAt ? new Date(user.lastLoginAt || user.authLastSignInAt || '').toLocaleString() : 'Never'}</span>
+                    <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 text-[#91A195] transition-transform ${expandedUserId === user.id ? 'rotate-180' : ''}`} />
+                  </button>
+                  {expandedUserId === user.id && <div id={`admin-account-details-${user.id}`} className="border-t border-[#304135] p-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_auto_auto] xl:items-end">
+                      <label className="text-[10px] font-medium text-[#A9B8AD]">Unique username
+                        <input id={`admin-username-${user.id}`} className={`${inputClass} mt-1.5`} autoComplete="off" minLength={3} maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" value={user.username || ''} disabled={user.isPrimaryOwner} onChange={(event) => changeUser(user.id, { username: event.target.value || null })} placeholder="Optional unique login alias" />
+                      </label>
+                      <label className="text-[10px] font-medium text-[#A9B8AD]">Role
+                        <select id={`admin-role-${user.id}`} aria-label={`Role for ${user.email}`} className={`${inputClass} mt-1.5`} disabled={user.isPrimaryOwner} value={user.role} onChange={(event) => changeUserRole(user, event.target.value as AdminRole)}>
+                          {user.role === 'owner' && <option value="owner">Owner</option>}<option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
+                        </select>
+                      </label>
                       <button type="button" className={buttonClass} disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
                       {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
-                      {!user.isPrimaryOwner && <details className="relative">
-                        <summary className="inline-flex min-h-10 cursor-pointer list-none items-center rounded-xl border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5">Actions</summary>
-                        <div className="absolute right-0 z-20 mt-2 flex min-w-60 flex-col rounded-xl border border-[#304135] bg-[#19241D] p-1.5 shadow-xl">
-                          <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'username')}>Edit Account</button>
-                          <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'username')}>Change Username</button>
-                          <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'role')}>Change Role</button>
-                          <button type="button" className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => focusUserSetting(user.id, 'permissions')}>Edit Permissions</button>
-                          <button type="button" disabled={busy || !reauthPassword || user.status !== 'active' || user.role === 'owner'} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : user.status !== 'active' ? 'Temporary passwords are only available for active delegated accounts.' : user.role === 'owner' ? 'Co-Owner passwords are independent and cannot be set here.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
-                            setPasswordResetUser(user);
-                            setResetPasswordValues({ newPassword: '', confirmPassword: '' });
-                            setShowResetPassword(false);
-                          }}>Set New Temporary Password</button>
-                          <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; do not create a replacement automatically.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.status === 'pending' ? 'Resend Verification / Setup Link' : 'Reset Password by Email'}</button>
-                          <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void revokeUserSessions(user)}>Revoke Sessions</button>
-                          {user.status === 'active' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void toggleUserStatus(user)}>Disable Admin</button>}
-                          {user.status === 'active' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
-                        </div>
-                      </details>}
                     </div>
-                  </div>
-                  <div className="mt-4 grid gap-3 border-t border-[#304135] pt-3 sm:grid-cols-[1fr_auto]">
-                    <label className="text-[10px] font-medium text-[#A9B8AD]">Unique username
-                      <input id={`admin-username-${user.id}`} className={`${inputClass} mt-1.5`} autoComplete="off" minLength={3} maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" value={user.username || ''} disabled={user.isPrimaryOwner} onChange={(event) => changeUser(user.id, { username: event.target.value || null })} placeholder="Optional unique login alias" />
-                    </label>
-                  </div>
-                  {(user.role === 'custom_admin' || user.role === 'super_admin') && (
-                    <div id={`admin-permissions-${user.id}`} className="mt-4 grid gap-3 border-t border-[#304135] pt-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <p className="col-span-full text-[10px] text-[#91A195]">Allowed sections and actions for this {user.role === 'super_admin' ? 'Super Admin' : 'Custom Admin'}.</p>
-                      {Object.entries(sectionLabels).map(([section, label]) => (
-                        <fieldset key={section} className="rounded-lg border border-[#304135] p-3">
-                          <legend className="px-1 text-[11px] font-semibold text-[#DCE8DD]">{label}</legend>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-2">
-                            {sectionActions[section as AdminSection].map((action) => (
-                              <label key={action} className="flex items-center gap-1.5 text-[10px] capitalize text-[#A9B8AD]">
-                                <input type="checkbox" checked={user.permissions?.[section as AdminSection]?.[action] === true} onChange={(event) => changePermission(user, section as AdminSection, action, event.target.checked)} />
-                                {action}
-                              </label>
-                            ))}
-                          </div>
-                        </fieldset>
-                      ))}
+                    <div className="mt-3 grid gap-2 border-t border-[#304135] pt-3 text-[10px] text-[#819286] sm:grid-cols-2">
+                      <p>Email verification: {user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'}{user.emailVerifiedAt ? ` · ${new Date(user.emailVerifiedAt).toLocaleString()}` : ''}</p>
+                      <p>Last password reset: {user.lastPasswordResetAt ? new Date(user.lastPasswordResetAt).toLocaleString() : 'Not recorded'}</p>
+                      <p>Created: {user.createdAt ? new Date(user.createdAt).toLocaleString() : 'Unknown'}</p>
+                      <p>Invited by: {user.invitedByEmail || 'Unknown'}</p>
+                      <p className="sm:col-span-2">Allowed sections: {Object.entries(user.permissions || {}).filter(([, actions]) => actions?.view).map(([section]) => sectionLabels[section as AdminSection]).join(', ') || 'None'}{user.mustChangePassword ? ' · Password change required' : ''}</p>
                     </div>
-                  )}
+                    {!user.isPrimaryOwner && <details className="relative mt-3 inline-block">
+                      <summary className="inline-flex min-h-10 cursor-pointer list-none items-center rounded-xl border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5">Account actions</summary>
+                      <div className="absolute left-0 z-20 mt-2 flex min-w-60 flex-col rounded-xl border border-[#304135] bg-[#19241D] p-1.5 shadow-xl">
+                        <button type="button" disabled={busy || !reauthPassword || user.status !== 'active' || user.role === 'owner'} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : user.status !== 'active' ? 'Temporary passwords are only available for active delegated accounts.' : user.role === 'owner' ? 'Co-Owner passwords are independent and cannot be set here.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
+                          setPasswordResetUser(user);
+                          setResetPasswordValues({ newPassword: '', confirmPassword: '' });
+                          setShowResetPassword(false);
+                        }}>Set New Temporary Password</button>
+                        <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; do not create a replacement automatically.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.status === 'pending' ? 'Resend Verification / Setup Link' : 'Reset Password by Email'}</button>
+                        <button type="button" disabled={busy || !reauthPassword} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void revokeUserSessions(user)}>Revoke Sessions</button>
+                        {user.status === 'active' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void toggleUserStatus(user)}>Disable Admin</button>}
+                        {user.status === 'active' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void deleteUser(user)}>Remove CMS Access</button>}
+                      </div>
+                    </details>}
+                    {(user.role === 'custom_admin' || user.role === 'super_admin') && (
+                      <div id={`admin-permissions-${user.id}`} className="mt-4 grid gap-3 border-t border-[#304135] pt-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <p className="col-span-full text-[10px] text-[#91A195]">Allowed sections and actions for this {user.role === 'super_admin' ? 'Super Admin' : 'Custom Admin'}.</p>
+                        {Object.entries(sectionLabels).map(([section, label]) => (
+                          <fieldset key={section} className="rounded-lg border border-[#304135] p-3">
+                            <legend className="px-1 text-[11px] font-semibold text-[#DCE8DD]">{label}</legend>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-2">
+                              {sectionActions[section as AdminSection].map((action) => (
+                                <label key={action} className="flex items-center gap-1.5 text-[10px] capitalize text-[#A9B8AD]">
+                                  <input type="checkbox" checked={user.permissions?.[section as AdminSection]?.[action] === true} onChange={(event) => changePermission(user, section as AdminSection, action, event.target.checked)} />
+                                  {action}
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
+                        ))}
+                      </div>
+                    )}
+                  </div>}
                 </article>
               ))}
-              {!delegatedUsers.length && <p className="text-sm text-[#A9B8AD]">No delegated alternative login accounts yet. Create one above.</p>}
+              {!activeDelegatedUsers.length && <p className="text-sm text-[#A9B8AD]">No active or pending delegated accounts. Create one above or review account history.</p>}
             </div>}
             {adminTab === 'history' && <div className="mt-5 space-y-5">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1182,17 +1224,17 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         </Panel>
       )}
 
-      <Panel title="Active Sessions" description="Revoke any session immediately. Revocation is enforced by the server for every admin API call.">
+      {isPrimaryOwner && <Panel title="Active Sessions" description="Revoke any administrator session immediately. Revocation is enforced by the server for every admin API call.">
         <div className="space-y-2">
           {sessions.filter((session) => !session.revoked_at && new Date(session.expires_at).getTime() > Date.now()).map((session) => (
             <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#304135] bg-[#131D16] px-4 py-3">
-              <div><p className="text-xs font-medium">{session.admin_users?.email || (session.user_id === identity?.id ? identity.email : 'Administrator session')}</p>              <p className="mt-1 text-[10px] text-[#91A195]">{new Date(session.created_at).toLocaleString()} · {session.current ? 'This session · ' : ''}{session.user_agent || 'Unknown device'}</p></div>
-              <button type="button" className="rounded-lg border border-[#47594C] px-3 py-2 text-[10px] text-[#C8D8CA] hover:bg-white/5" onClick={() => void revokeSession(session.id)}>Revoke</button>
+              <div><p className="text-xs font-medium">{session.admin_users?.email || 'Administrator session'}</p><p className="mt-1 text-[10px] text-[#91A195]">{new Date(session.created_at).toLocaleString()} · {session.current ? 'This session' : 'Other session'}</p></div>
+              <button type="button" disabled={busy || (!session.current && !reauthPassword)} title={!session.current && !reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-[#47594C] px-3 py-2 text-[10px] text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => void revokeSession(session.id)}>Revoke</button>
             </div>
           ))}
           {!sessions.some((session) => !session.revoked_at && new Date(session.expires_at).getTime() > Date.now()) && <p className="text-xs text-[#A9B8AD]">No active sessions found.</p>}
         </div>
-      </Panel>
+      </Panel>}
 
       {isPrimaryOwner && <Panel
         title="Security Audit Logs"

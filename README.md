@@ -27,10 +27,10 @@ The CMS authenticates each administrator with an individual, verified Supabase A
 
 ### Initial Supabase setup
 
-1. Configure Supabase Auth email confirmation and a verified SMTP sender. Add the site origin and these redirect URLs to the Supabase Auth redirect allow-list:
-   - `https://your-site.example/admin/accept-invite`
-   - `https://your-site.example/admin/password-reset`
-   - For local development, the matching `http://localhost:<port>/...` URLs.
+1. Configure Supabase Auth email confirmation and a verified SMTP sender. Set the Production Site URL to `https://www.neargrowads.com` and add these Production redirects to the Supabase Auth redirect allow-list:
+   - `https://www.neargrowads.com/admin/accept-invite`
+   - `https://www.neargrowads.com/admin/password-reset`
+   - Use the corresponding Preview origin only with a staging Supabase project. For local development, allow-list the matching `http://localhost:<port>/...` URLs only in a non-production project.
 2. Apply the SQL files in `supabase/migrations` in timestamp order. The admin tables have row-level security enabled and are accessed only by the server's service-role key.
 3. Create or invite the verified Supabase Auth user for `harsh6026435@gmail.com`. Set `ADMIN_OWNER_USER_ID` to that Auth user's UUID. The server verifies both the UUID and confirmed email before bootstrapping the initial primary Owner; it never grants Owner from a submitted email address.
 4. Configure these **server-only** variables in the hosting environment (or local `.env`, which must not be committed):
@@ -39,7 +39,7 @@ The CMS authenticates each administrator with an individual, verified Supabase A
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `ADMIN_OWNER_USER_ID`
    - `ADMIN_SESSION_SECRET` — at least 32 random characters.
-   - `SITE_URL` — canonical site origin used for Supabase email redirects.
+   - `SITE_URL` — `https://www.neargrowads.com` in Production; use the Preview origin for Preview deployments and `http://localhost:<port>` for local development.
 5. Start the Express server and sign in at `/admin` with the verified Owner's own Supabase Auth credentials. Use Settings to invite other administrators. Invitations are pending until their recipient verifies the email link and sets an individual password.
 
 The `SUPABASE_SERVICE_ROLE_KEY` and `ADMIN_SESSION_SECRET` must never be exposed to the browser. Admin session cookies are HTTP-only, SameSite strict, secure in production, persisted in Supabase, and checked against the account status on every protected API request. Password changes and administrator access changes require re-authentication. Google-only accounts must use Google for password changes; the CMS does not change Google passwords.
