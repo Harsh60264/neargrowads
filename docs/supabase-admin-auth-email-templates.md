@@ -8,8 +8,8 @@ In the Supabase Dashboard, open **Authentication → Email Templates** (the host
 
 Use the exact subject and HTML for each corresponding template:
 
-- **Invite user** is used by the Co-Owner Auth invitation endpoint.
-- **Confirm signup** is used by delegated-admin setup and verification resend. This code creates or reuses the invited Auth identity first and then requests a signup confirmation email.
+- **Invite user** is retained for any manually issued Supabase invitations; current CMS administrator creation uses the **Confirm signup** flow.
+- **Confirm signup** is used by new-admin setup and verification resend. The CMS creates or reuses the Auth identity first and requests a signup confirmation email. For a newly created identity, a separate branded application email carries the 24-hour temporary password; do not add a password or dynamic password placeholder to this template.
 - **Reset password** is used for verified-identity setup recovery and ordinary administrator password resets.
 
 All three use Supabase's `{{ .ConfirmationURL }}` variable. Supabase constructs that URL using the redirect supplied by the existing server flow, including the secure Admin callback route and invitation generation where applicable. Do not replace it with a hard-coded URL or expose the token separately.
@@ -69,13 +69,15 @@ The current delegated-admin flow uses this template when sending a verification/
             <p style="font-size:16px;line-height:1.6;">Hello,</p>
             <p style="font-size:16px;line-height:1.6;">You've been invited to join the NearGrow Ads Website CMS.</p>
             <p style="font-size:16px;line-height:1.6;">Your administrator access will allow you to manage the sections and permissions assigned by the account owner.</p>
-            <p style="font-size:16px;line-height:1.6;">To get started, please verify your email address and complete your secure account setup using the button below.</p>
+            <p style="font-size:16px;line-height:1.6;">To get started, verify your email address using the button below. If you also received a separate NearGrow Ads onboarding email with a temporary password, use it for your first sign-in and replace it immediately. If you did not receive a temporary-password email, follow the password setup instructions from the Primary Owner; existing Auth passwords are never replaced as part of this verification.</p>
             <p style="margin:28px 0;text-align:center;">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Accept Invitation &amp; Set Up Account</a>
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Verify Email &amp; Continue</a>
             </p>
             <h2 style="margin:28px 0 8px;font-size:16px;color:#173c26;">For your security</h2>
             <ul style="padding-left:22px;font-size:14px;line-height:1.7;color:#405047;">
-              <li>Create your own password.</li>
+              <li>If a temporary password was sent separately, it expires after 24 hours and must be replaced at first sign-in. CMS actions remain blocked until replacement.</li>
+              <li>Existing Auth identities are never assigned a new password by an invitation. Do not send an existing password by email.</li>
+              <li>Email is not a secure channel; treat the temporary password as exposed and never forward or reuse it.</li>
               <li>Never share your password or verification link.</li>
               <li>If you weren't expecting this invitation, you can safely ignore this email.</li>
             </ul>

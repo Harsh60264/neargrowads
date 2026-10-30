@@ -427,7 +427,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   }, [session?.authenticated]);
 
   useEffect(() => {
-    if (!session?.authenticated || sessionExpired) return;
+    if (!session?.authenticated || session.user?.mustChangePassword || sessionExpired) return;
     let active = true;
     const reportActivity = (event: Event) => {
       if (!event.isTrusted || activityRequest.current) return;
@@ -490,7 +490,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
         window.removeEventListener(eventName, reportActivity);
       }
     };
-  }, [session?.authenticated, sessionExpired]);
+  }, [session?.authenticated, session?.user?.mustChangePassword, sessionExpired]);
 
   const filteredLeads = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

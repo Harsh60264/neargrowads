@@ -330,6 +330,45 @@ test('admin account routes enforce reauthentication and archive via a soft-archi
   assert.doesNotMatch(archiveRoute, /auth\/v1\/admin\/users\/.*DELETE/i);
 });
 
+test('Primary Owner can cancel delegated Co-Owner invitations but never the Primary Owner record', () => {
+  const migration = readFileSync(new URL('../supabase/migrations/20261029230000_allow_delegated_coowner_invitation_cancellation.sql', import.meta.url), 'utf8');
+  const completionMigration = readFileSync(new URL('../supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql', import.meta.url), 'utf8');
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+  const functionStart = migration.indexOf('create or replace function public.cancel_admin_invitation');
+  const functionEnd = migration.indexOf('revoke all on function public.cancel_admin_invitation');
+  const cancellationSql = migration.slice(functionStart, functionEnd);
+  const cancelStart = serverSource.indexOf("app.post('/api/admin/users/:id/cancel'");
+  const cancelEnd = serverSource.indexOf("app.post('/api/admin/users/:id/archive'", cancelStart);
+  const cancelRoute = serverSource.slice(cancelStart, cancelEnd);
+
+  assert.match(cancellationSql, /where id = p_actor_id[\s\S]*?role = 'owner'[\s\S]*?status = 'active'[\s\S]*?is_primary_owner[\s\S]*?for share/i);
+  assert.match(cancellationSql, /where id = p_target_id[\s\S]*?for update/i);
+  assert.match(cancellationSql, /target_row\.is_primary_owner is distinct from false/i);
+  assert.doesNotMatch(cancellationSql, /target_row\.role\s*=\s*'owner'/i);
+  assert.match(cancellationSql, /target_row\.status <> 'pending'/i);
+  assert.match(cancellationSql, /set status = 'disabled'[\s\S]*?invitation_generation = gen_random_uuid\(\)/i);
+  assert.match(cancellationSql, /set revoked_at = cancelled_at[\s\S]*?where user_id = p_target_id/i);
+  assert.match(cancellationSql, /insert into public\.admin_audit_logs[\s\S]*?'admin\.invitation\.cancelled'/i);
+  assert.match(migration, /revoke all on function public\.cancel_admin_invitation\(uuid, uuid\) from public, anon, authenticated/i);
+  assert.match(migration, /grant execute on function public\.cancel_admin_invitation\(uuid, uuid\) to service_role/i);
+  assert.match(migration, /notify pgrst, 'reload schema'/i);
+
+  assert.match(completionMigration, /where id = p_user_id[\s\S]*?for update/i);
+  assert.match(completionMigration, /target_row\.invitation_generation is distinct from p_invitation_generation/i);
+  assert.match(completionMigration, /target_row\.is_primary_owner is distinct from false/i);
+  assert.match(completionMigration, /target_row\.status is distinct from 'pending'/i);
+  assert.match(cancelRoute, /reauthenticateAdminRequest\(req, res, actor/);
+  assert.match(cancelRoute, /if \(!actor\.isPrimaryOwner\)/);
+  assert.match(cancelRoute, /if \(target\.isPrimaryOwner\)/);
+  assert.doesNotMatch(cancelRoute, /target\.role === 'owner'/);
+  assert.match(cancelRoute, /p_actor_id: actor\.id,[\s\S]*?p_target_id: target\.id/);
+  assert.match(serverSource, /isPrimaryOwner: row\.is_primary_owner === true/);
+  assert.match(serverSource, /isPrimaryOwner: user\.is_primary_owner === true/);
+  assert.match(settingsSource, /user\.status === 'pending' && !user\.isPrimaryOwner/);
+  assert.doesNotMatch(settingsSource, /user\.status === 'pending' && user\.role !== 'owner'/);
+});
+
 test('admin account management surfaces direct recovery, archive state, and backend-synced statuses', () => {
   const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');

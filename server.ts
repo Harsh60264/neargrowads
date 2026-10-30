@@ -24,7 +24,15 @@ import {
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
 } from './server/adminInvitation';
+import {
+  adminCmsAccessAllowed,
+  generateTemporaryAdminPassword,
+  isTemporaryPasswordExpired,
+  sendTemporaryAdminPasswordEmail,
+  temporaryPasswordExpiresAt,
+} from './server/temporaryAdminPassword';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
+import { resolveAdminOwnerConfiguration, validatePreviewAdminConfiguration } from './server/adminOwnerConfig';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -102,6 +110,7 @@ const adminReauthAttempts = new Map<string, number[]>();
 const adminRecoveryAttempts = new Map<string, number[]>();
 const adminAccountCreateAttempts = new Map<string, number[]>();
 const adminManagedRecoveryAttempts = new Map<string, number[]>();
+const adminTemporaryPasswordCronAttempts = new Map<string, number[]>();
 const serviceEnquiryAttempts = new Map<string, number[]>();
 const serviceOrderAttempts = new Map<string, number[]>();
 const securityEventWriteAttempts = new Map<string, number[]>();
@@ -3285,6 +3294,8 @@ interface AdminIdentity {
   isPrimaryOwner: boolean;
   username?: string;
   mustChangePassword?: boolean;
+  temporaryPasswordExpiresAt?: string | null;
+  temporaryPasswordUsedAt?: string | null;
   archivedAt?: string | null;
 }
 
@@ -3323,9 +3334,14 @@ function adminConfigIssues(): string[] {
   }
   if (!process.env.SUPABASE_ANON_KEY) issues.push('SUPABASE_ANON_KEY is not set.');
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) issues.push('SUPABASE_SERVICE_ROLE_KEY is not set.');
-  if (!process.env.ADMIN_OWNER_USER_ID ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(process.env.ADMIN_OWNER_USER_ID)) {
-    issues.push('ADMIN_OWNER_USER_ID must be the verified Owner account UUID.');
+  try {
+    if (process.env.VERCEL_ENV === 'preview') {
+      validatePreviewAdminConfiguration(process.env);
+    } else {
+      resolveAdminOwnerConfiguration(process.env);
+    }
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : 'Primary Owner configuration is invalid.');
   }
   if (!process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET.length < 32) {
     issues.push('ADMIN_SESSION_SECRET must be at least 32 characters.');
@@ -3466,13 +3482,13 @@ async function readSupabaseJson<T>(response: globalThis.Response): Promise<T> {
 function isMissingAdminAccountManagementSchema(error: unknown): boolean {
   return error instanceof Error &&
     /(?:column .* (?:does not exist|not found)|could not find .* column|PGRST204|42703)/i.test(error.message) &&
-    /admin_users|username|must_change_password|last_login_at|last_password_reset_at/i.test(error.message);
+    /admin_users|username|must_change_password|temporary_password_expires_at|temporary_password_used_at|last_login_at|last_password_reset_at/i.test(error.message);
 }
 
 function warnAdminAccountMigrationMissing(error: unknown): void {
   if (warnedAdminAccountMigrationMissing) return;
   warnedAdminAccountMigrationMissing = true;
-  console.warn('[NearGrow Ads] Admin account-management migration is not applied. Email/password sign-in remains available; username aliases and Settings account-management features require supabase/migrations/20261020000000_admin_account_management.sql.');
+  console.warn('[NearGrow Ads] An administrator account-management migration is missing. Username aliases, account management, and temporary-password expiry require the corresponding admin account-management migrations.');
   if (!(error instanceof Error)) console.warn('[NearGrow Ads] Admin schema check returned an unknown error.');
 }
 
@@ -3493,22 +3509,40 @@ async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefi
     role: row.role as AdminRole,
     status: row.status as AdminIdentity['status'],
     permissions: row.permissions && typeof row.permissions === 'object' ? row.permissions as AdminPermissions : {},
-    isPrimaryOwner: row.is_primary_owner === true && row.role === 'owner',
+    isPrimaryOwner: row.is_primary_owner === true,
     archivedAt: typeof row.archived_at === 'string' ? row.archived_at : null,
   };
   const accountDetailsQuery = new URLSearchParams({
     id: `eq.${userId}`,
-    select: 'username,must_change_password',
+    select: 'username,must_change_password,temporary_password_expires_at,temporary_password_used_at',
     limit: '1',
   });
   try {
-    const details = await readSupabaseJson<Array<{ username?: string | null; must_change_password?: boolean }>>(
+    const details = await readSupabaseJson<Array<{
+      username?: string | null;
+      must_change_password?: boolean;
+      temporary_password_expires_at?: string | null;
+      temporary_password_used_at?: string | null;
+    }>>(
       await supabaseAdminRequest(`rest/v1/admin_users?${accountDetailsQuery}`),
     );
     if (typeof details[0]?.username === 'string') identity.username = details[0].username;
     identity.mustChangePassword = details[0]?.must_change_password === true;
+    identity.temporaryPasswordExpiresAt = details[0]?.temporary_password_expires_at || null;
+    identity.temporaryPasswordUsedAt = details[0]?.temporary_password_used_at || null;
   } catch (error) {
     if (!isMissingAdminAccountManagementSchema(error)) throw error;
+    if (error instanceof Error && /temporary_password_(?:expires|used)_at/i.test(error.message)) {
+      const compatibleDetails = await readSupabaseJson<Array<{ username?: string | null; must_change_password?: boolean }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${new URLSearchParams({
+          id: `eq.${userId}`,
+          select: 'username,must_change_password',
+          limit: '1',
+        })}`),
+      );
+      if (typeof compatibleDetails[0]?.username === 'string') identity.username = compatibleDetails[0].username;
+      identity.mustChangePassword = compatibleDetails[0]?.must_change_password === true;
+    }
     warnAdminAccountMigrationMissing(error);
   }
   return identity;
@@ -3525,7 +3559,12 @@ async function authenticateAdminSession(req: Request): Promise<AdminIdentity | u
   );
   if (!activeSessions.length) return undefined;
   const identity = await readAdminIdentity(token.userId);
-  return identity?.status === 'active' && !identity.archivedAt ? identity : undefined;
+  if (!identity || identity.status !== 'active' || identity.archivedAt) return undefined;
+  if (identity.mustChangePassword && isTemporaryPasswordExpired(identity.temporaryPasswordExpiresAt)) {
+    await expireTemporaryAdminPassword(identity);
+    return undefined;
+  }
+  return identity;
 }
 
 function currentAdmin(res: Response): AdminIdentity | undefined {
@@ -3878,6 +3917,10 @@ function isStrongAdminPassword(password: unknown): password is string {
       .filter(Boolean).length >= 3;
 }
 
+function isSafeTemporaryAdminPassword(password: unknown): password is string {
+  return isStrongAdminPassword(password) && !/[\u0000-\u001f\u007f]/.test(password);
+}
+
 async function setSupabaseUserPassword(userId: string, password: string): Promise<void> {
   const response = await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     method: 'PUT',
@@ -3922,6 +3965,29 @@ async function revokeSupabaseRefreshTokens(userId: string): Promise<void> {
   await readSupabaseJson<unknown>(response);
 }
 
+async function expireTemporaryAdminPassword(identity: AdminIdentity): Promise<void> {
+  await setSupabaseUserPassword(identity.id, generateTemporaryAdminPassword());
+  const userQuery = new URLSearchParams({ id: `eq.${identity.id}` });
+  await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      must_change_password: true,
+      temporary_password_expires_at: null,
+      temporary_password_used_at: null,
+      updated_at: new Date().toISOString(),
+    }),
+  }));
+  const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
+  await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+  }));
+  await revokeSupabaseRefreshTokens(identity.id);
+  await writeAdminAudit(identity.id, 'auth.password.temporary_expired', 'security');
+}
+
 async function findSupabaseUserByEmail(email: string): Promise<{ id: string; email: string; email_confirmed_at?: string } | undefined> {
   for (let page = 1; page <= 100; page += 1) {
     const query = new URLSearchParams({ page: String(page), per_page: '100' });
@@ -3940,21 +4006,28 @@ async function ensurePrimaryOwnerAccount(): Promise<void> {
     console.warn('[NearGrow Ads] Admin access is disabled until Supabase Auth, Supabase database, ADMIN_OWNER_USER_ID, and ADMIN_SESSION_SECRET are configured.');
     return;
   }
-  const ownerId = process.env.ADMIN_OWNER_USER_ID!;
+  const { ownerId, ownerEmail } = resolveAdminOwnerConfiguration(process.env);
   const authResponse = await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(ownerId)}`);
   const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(authResponse);
-  if (authUser.id !== ownerId || authUser.email?.toLowerCase() !== 'harsh6026435@gmail.com' || !authUser.email_confirmed_at) {
-    throw new Error('ADMIN_OWNER_USER_ID must identify the email-verified Supabase Auth account for harsh6026435@gmail.com.');
+  if (authUser.id !== ownerId || authUser.email?.toLowerCase() !== ownerEmail || !authUser.email_confirmed_at) {
+    throw new Error('ADMIN_OWNER_USER_ID and ADMIN_OWNER_EMAIL must identify the same email-verified Supabase Auth account.');
   }
 
-  const query = new URLSearchParams({ id: `eq.${ownerId}`, select: 'id,email,role,status', limit: '1' });
-  const existing = await readSupabaseJson<Array<{ id: string; email: string; role: AdminRole; status: AdminIdentity['status'] }>>(
+  const query = new URLSearchParams({ id: `eq.${ownerId}`, select: 'id,email,role,status,is_primary_owner', limit: '1' });
+  const existing = await readSupabaseJson<Array<{
+    id: string;
+    email: string;
+    role: AdminRole;
+    status: AdminIdentity['status'];
+    is_primary_owner: boolean;
+  }>>(
     await supabaseAdminRequest(`rest/v1/admin_users?${query}`),
   );
   if (existing.length) {
     const ownerRecord = existing[0];
     if (ownerRecord.email.toLowerCase() !== authUser.email.toLowerCase() ||
-      ownerRecord.role !== 'owner' || ownerRecord.status !== 'active') {
+      ownerRecord.role !== 'owner' || ownerRecord.status !== 'active' ||
+      ownerRecord.is_primary_owner !== true) {
       throw new Error('The verified primary Owner Auth account has an existing inactive or non-Owner CMS record. Review it in Supabase; startup will not change existing permissions automatically.');
     }
     return;
@@ -3964,7 +4037,7 @@ async function ensurePrimaryOwnerAccount(): Promise<void> {
     headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
     body: JSON.stringify({
       id: ownerId,
-      email: authUser.email.toLowerCase(),
+      email: ownerEmail,
       role: 'owner',
       status: 'active',
       permissions: {},
@@ -3973,12 +4046,12 @@ async function ensurePrimaryOwnerAccount(): Promise<void> {
   });
   await readSupabaseJson<unknown>(response);
 
-  const initialized = await readSupabaseJson<Array<{ id: string; email: string; role: AdminRole; status: AdminIdentity['status'] }>>(
+  const initialized = await readSupabaseJson<Array<{ id: string; email: string; role: AdminRole; status: AdminIdentity['status']; is_primary_owner: boolean }>>(
     await supabaseAdminRequest(`rest/v1/admin_users?${query}`),
   );
   const ownerRecord = initialized[0];
   if (!ownerRecord || ownerRecord.email.toLowerCase() !== authUser.email.toLowerCase() ||
-    ownerRecord.role !== 'owner' || ownerRecord.status !== 'active') {
+    ownerRecord.role !== 'owner' || ownerRecord.status !== 'active' || ownerRecord.is_primary_owner !== true) {
     throw new Error('The verified Owner Auth account was not safely initialized in public.admin_users. Review the existing record and migration status.');
   }
 }
@@ -4679,6 +4752,9 @@ async function findAvailablePort(startPort: number, host?: string): Promise<numb
 }
 
 async function createApplication(serverless = false): Promise<{ app: express.Express; port?: number }> {
+  if (process.env.VERCEL_ENV === 'preview') {
+    validatePreviewAdminConfiguration(process.env);
+  }
   if (process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') canonicalSiteOrigin();
   if (!serverless && process.env.NODE_ENV === 'production' && !process.env.PERSISTENT_DATA_DIR) {
     throw new Error('PERSISTENT_DATA_DIR must point to a durable mounted volume in production.');
@@ -4735,6 +4811,92 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       version: '1.0.0',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get('/api/cron/admin-temporary-password-expiry', async (req: Request, res: Response): Promise<void> => {
+      res.setHeader('Cache-Control', 'no-store');
+      const secret = process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '';
+      const authorization = req.get('authorization') || '';
+      const expectedAuthorization = `Bearer ${secret}`;
+      const suppliedBuffer = Buffer.from(authorization);
+      const expectedBuffer = Buffer.from(expectedAuthorization);
+      if (secret.length < 32 || suppliedBuffer.length !== expectedBuffer.length ||
+        !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
+        res.status(secret.length < 32 ? 503 : 401).json({
+          message: secret.length < 32
+            ? 'Temporary-password expiry scheduler is not configured.'
+            : 'Scheduler authorization is invalid.',
+        });
+        return;
+      }
+
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+      const now = Date.now();
+      const attempts = (adminTemporaryPasswordCronAttempts.get(clientIp) || []).filter((time) => now - time < 60_000);
+      if (attempts.length >= 2) {
+        res.status(429).json({ message: 'Temporary-password expiry processing is rate limited.' });
+        return;
+      }
+      attempts.push(now);
+      adminTemporaryPasswordCronAttempts.set(clientIp, attempts);
+
+      try {
+        const expiryQuery = new URLSearchParams({
+          must_change_password: 'eq.true',
+          is_primary_owner: 'eq.false',
+          temporary_password_expires_at: `lte.${new Date(now).toISOString()}`,
+          select: 'id,email,role,status,permissions,is_primary_owner,archived_at,temporary_password_expires_at,temporary_password_used_at',
+          limit: '100',
+        });
+        const expiredAccounts = await readSupabaseJson<Array<Record<string, unknown>>>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${expiryQuery}`),
+        );
+        let expired = 0;
+        let failed = 0;
+        for (const account of expiredAccounts) {
+          const identity: AdminIdentity = {
+            id: String(account.id),
+            email: String(account.email),
+            role: account.role as AdminRole,
+            status: account.status as AdminIdentity['status'],
+            permissions: account.permissions && typeof account.permissions === 'object'
+              ? account.permissions as AdminPermissions
+              : {},
+            isPrimaryOwner: false,
+            archivedAt: typeof account.archived_at === 'string' ? account.archived_at : null,
+            mustChangePassword: true,
+            temporaryPasswordExpiresAt: typeof account.temporary_password_expires_at === 'string'
+              ? account.temporary_password_expires_at
+              : null,
+            temporaryPasswordUsedAt: typeof account.temporary_password_used_at === 'string'
+              ? account.temporary_password_used_at
+              : null,
+          };
+          try {
+            await expireTemporaryAdminPassword(identity);
+            expired += 1;
+          } catch (error) {
+            failed += 1;
+            console.error('[NearGrow Ads] Temporary administrator password expiry failed.', {
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+              status: error instanceof SupabaseRequestError ? error.status : undefined,
+              code: error instanceof SupabaseRequestError ? error.code : undefined,
+            });
+          }
+        }
+        res.status(failed ? 503 : 200).json({
+          processed: expired,
+          failed,
+          ...(failed ? { message: 'Some expired temporary passwords could not be invalidated; the scheduler should retry.' } : {}),
+        });
+      } catch (error) {
+        console.error('[NearGrow Ads] Temporary administrator password expiry scan failed.', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          status: error instanceof SupabaseRequestError ? error.status : undefined,
+          code: error instanceof SupabaseRequestError ? error.code : undefined,
+        });
+        res.status(503).json({ message: 'Expired temporary passwords could not be processed.' });
+      }
   });
 
   app.get('/api/uploads/:folder/:filename', (req: Request, res: Response): void => {
@@ -4832,7 +4994,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       res.locals.adminIdentity = identity;
 
-      if (identity.mustChangePassword && req.path !== '/auth/first-password') {
+      if (!adminCmsAccessAllowed(identity) && req.path !== '/auth/first-password') {
         res.status(403).json({ message: 'Change your temporary password before using the administrator workspace.' });
         return;
       }
@@ -5130,14 +5292,25 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'This verified account does not currently have active CMS access.' });
         return;
       }
-      if (identity.status === 'disabled') {
+      if (identity.status === 'disabled' || identity.archivedAt) {
         logFailedLogin('admin_account_disabled', 403);
-        res.status(403).json({ message: 'This administrator account is disabled. Contact the Primary Owner to restore access.' });
+        res.status(403).json({ message: 'This administrator account is disabled or archived. Contact the Primary Owner to restore access.' });
         return;
       }
       if (identity.status === 'pending') {
         logFailedLogin('admin_account_pending', 403);
         res.status(403).json({ message: 'This administrator account is pending email verification or setup. Complete the email link or contact the Primary Owner.' });
+        return;
+      }
+      if (identity.mustChangePassword && isTemporaryPasswordExpired(identity.temporaryPasswordExpiresAt)) {
+        await expireTemporaryAdminPassword(identity);
+        logFailedLogin('temporary_password_expired', 403);
+        res.status(403).json({ message: 'The temporary password expired. Ask the Primary Owner to send a new secure setup link.' });
+        return;
+      }
+      if (identity.mustChangePassword && identity.temporaryPasswordExpiresAt && identity.temporaryPasswordUsedAt) {
+        logFailedLogin('temporary_password_already_used', 403);
+        res.status(403).json({ message: 'This one-time temporary password has already been used. Continue the existing setup session or ask the Primary Owner for recovery.' });
         return;
       }
       adminLoginAttempts.delete(clientIp);
@@ -5165,8 +5338,38 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const createdSessions = await readSupabaseJson<Array<{ expires_at: string }>>(insertResponse);
       const expiresAt = createdSessions[0]?.expires_at;
       if (!expiresAt) throw new Error('Supabase did not return the new admin session expiry.');
+      if (identity.mustChangePassword && identity.temporaryPasswordExpiresAt) {
+        const claimed = await readSupabaseJson<{ status?: string }>(
+          await supabaseAdminRequest('rest/v1/rpc/consume_admin_temporary_password_login', {
+            method: 'POST',
+            body: JSON.stringify({ p_user_id: identity.id }),
+          }),
+        );
+        if (claimed.status !== 'consumed') {
+          if (claimed.status === 'expired') await expireTemporaryAdminPassword(identity);
+          const createdSessionQuery = new URLSearchParams({ id: `eq.${sessionId}` });
+          await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${createdSessionQuery}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+          }));
+          logFailedLogin(claimed.status === 'already_used' ? 'temporary_password_already_used' : 'temporary_password_claim_rejected', 403);
+          res.status(403).json({ message: 'This temporary password is expired or has already been used. Ask the Primary Owner for a fresh setup link.' });
+          return;
+        }
+      }
       setAdminSessionCookie(req, res, sessionId, identity.id, expiresAt);
-      await writeAdminAudit(identity.id, 'auth.login', 'security');
+      if (identity.mustChangePassword && identity.temporaryPasswordExpiresAt) {
+        try {
+          await writeAdminAudit(identity.id, 'auth.login', 'security');
+        } catch (auditError) {
+          console.error('[NearGrow Ads] Successful temporary-password sign-in could not be audited.', {
+            errorName: auditError instanceof Error ? auditError.name : 'UnknownError',
+          });
+        }
+      } else {
+        await writeAdminAudit(identity.id, 'auth.login', 'security');
+      }
       res.json({ authenticated: true, user: identity });
     } catch (error) {
       console.error('[NearGrow Ads] Supabase admin login failed:', error);
@@ -5210,6 +5413,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const identity = await authenticateAdminSession(req);
       if (!identity) {
         res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+        return;
+      }
+      if (!adminCmsAccessAllowed(identity)) {
+        res.status(403).json({ message: 'Change your temporary password before refreshing administrator activity.' });
         return;
       }
       const response = await supabaseAdminRequest('rest/v1/rpc/touch_admin_session', {
@@ -5492,6 +5699,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             headers: { Prefer: 'return=minimal' },
             body: JSON.stringify({
               must_change_password: false,
+              temporary_password_expires_at: null,
+              temporary_password_used_at: null,
               last_password_reset_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             }),
@@ -5551,7 +5760,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           role: user.role,
           status: user.status,
           permissions: user.permissions || {},
-          isPrimaryOwner: user.is_primary_owner === true && user.role === 'owner',
+          isPrimaryOwner: user.is_primary_owner === true,
           archivedAt: typeof user.archived_at === 'string' ? user.archived_at : null,
           mustChangePassword: user.must_change_password === true,
           lastLoginAt: user.last_login_at || null,
@@ -5589,6 +5798,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const role = req.body?.role as AdminRole;
     const initialPassword = req.body?.newPassword ?? req.body?.initialPassword;
     const confirmInitialPassword = req.body?.confirmPassword ?? req.body?.confirmInitialPassword;
+    const passwordMode = req.body?.passwordMode ?? (initialPassword === undefined ? 'generated' : 'manual');
     const username = req.body?.username === '' || req.body?.username == null ? null : normalizeUsername(req.body.username);
     const permissions = role === 'owner'
       ? {}
@@ -5597,20 +5807,25 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         : validateAdminPermissions(req.body?.permissions);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254 ||
       !['owner', 'super_admin', 'custom_admin'].includes(role) ||
-      (role !== 'owner' && !username) ||
+      !username ||
       (req.body?.username != null && req.body.username !== '' && !username) ||
       (role !== 'owner' && !permissions) ||
-      (role !== 'owner' && (
-        !isStrongAdminPassword(initialPassword) ||
+      !['generated', 'manual'].includes(passwordMode) ||
+      (passwordMode === 'manual' && (
+        !isSafeTemporaryAdminPassword(initialPassword) ||
         initialPassword !== confirmInitialPassword
       )) ||
-      (role === 'owner' && (initialPassword !== undefined || confirmInitialPassword !== undefined))) {
-      res.status(400).json({ message: 'Provide a valid email, username, role, permission set, and matching strong password for delegated administrators.' });
+      (passwordMode === 'generated' && (initialPassword !== undefined || confirmInitialPassword !== undefined))) {
+      res.status(400).json({ message: 'Provide a valid email, unique username, role, permission set, and either a server-generated or matching strong temporary password.' });
       return;
     }
     if (!await reauthenticateAdminRequest(req, res, actor, req.body?.currentPassword, 'Re-enter your current password to invite an administrator.')) return;
     let newlyCreatedAuthUserId: string | undefined;
     let adminRecordCreated = false;
+    let temporaryCredentialFlow = false;
+    let temporaryPasswordEmailAccepted = false;
+    let temporaryPassword: string | undefined;
+    let temporaryPasswordExpiry: string | undefined;
     let operationStage = 'admin_count';
     try {
       const duplicateQuery = new URLSearchParams({
@@ -5661,40 +5876,39 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       let sendSignupVerification = false;
       let sendPasswordRecovery = false;
       const invitationGeneration = randomUUID();
-      const mustChangePassword = role !== 'owner';
+      const mustChangePassword = true;
       if (role === 'owner' && authUser) {
         userId = authUser.id;
         status = 'pending';
         sendSignupVerification = !authUser.email_confirmed_at;
         sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
-      } else if (role === 'owner') {
-        operationStage = 'auth_invitation';
-        const redirectTo = buildAdminInvitationRedirect(
-          adminAuthRedirectOrigin(req),
-          'invite',
-          invitationGeneration,
-        );
-        const query = new URLSearchParams({ redirect_to: redirectTo });
-        const invited = await readSupabaseJson<{ id?: string; email?: string }>(await supabaseAuthRequest(`invite?${query}`, {
-          method: 'POST',
-          body: JSON.stringify({ email }),
-        }));
-        if (!invited.id) throw new Error('Supabase invitation did not return a user identity.');
-        userId = invited.id;
-        status = 'pending';
       } else if (authUser) {
         userId = authUser.id;
         status = 'pending';
         sendSignupVerification = !authUser.email_confirmed_at;
         sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
       } else {
+        const resendApiKey = process.env.RESEND_API_KEY || '';
+        const invitationEmailFrom = process.env.ADMIN_INVITATION_EMAIL_FROM || '';
+        const expiryCronSecret = process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '';
+        if (!resendApiKey || !invitationEmailFrom || /[\r\n]/.test(invitationEmailFrom)) {
+          res.status(503).json({ message: 'Temporary-password delivery is not configured. Set RESEND_API_KEY and ADMIN_INVITATION_EMAIL_FROM before creating a new administrator.' });
+          return;
+        }
+        if (expiryCronSecret.length < 32) {
+          res.status(503).json({ message: 'Temporary-password expiry is not configured. Set ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET and schedule its protected expiry endpoint before creating a new administrator.' });
+          return;
+        }
+        temporaryCredentialFlow = true;
+        temporaryPassword = passwordMode === 'manual' ? initialPassword as string : generateTemporaryAdminPassword();
+        temporaryPasswordExpiry = temporaryPasswordExpiresAt();
         operationStage = 'auth_user_create';
         const created = await readSupabaseJson<{ id?: string; email?: string }>(
           await supabaseAdminRequest('auth/v1/admin/users', {
             method: 'POST',
             body: JSON.stringify({
               email,
-              password: initialPassword,
+              password: temporaryPassword,
               email_confirm: false,
             }),
           }),
@@ -5718,13 +5932,32 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           permissions,
           is_primary_owner: false,
           must_change_password: mustChangePassword,
+          temporary_password_expires_at: temporaryPasswordExpiry || null,
           invitation_generation: invitationGeneration,
-          ...(mustChangePassword && !authUser ? { last_password_reset_at: new Date().toISOString() } : {}),
+          ...(mustChangePassword && temporaryCredentialFlow ? { last_password_reset_at: new Date().toISOString() } : {}),
           invited_by: actor.id,
         }),
       });
       await readSupabaseJson<unknown>(createResponse);
       adminRecordCreated = true;
+      const sendTemporaryCredential = async (): Promise<void> => {
+        if (!temporaryCredentialFlow || !newlyCreatedAuthUserId || !temporaryPassword || !temporaryPasswordExpiry) return;
+        operationStage = 'temporary_password_email';
+        await sendTemporaryAdminPasswordEmail(
+          {
+            email,
+            username: username!,
+            role,
+            password: temporaryPassword,
+            signInUrl: `${adminAuthRedirectOrigin(req)}/admin/login`,
+            expiresAt: temporaryPasswordExpiry,
+          },
+          process.env.RESEND_API_KEY || '',
+          process.env.ADMIN_INVITATION_EMAIL_FROM || '',
+        );
+        temporaryPasswordEmailAccepted = true;
+        temporaryPassword = undefined;
+      };
       if (role !== 'owner') {
         if (sendSignupVerification || sendPasswordRecovery) {
           operationStage = sendPasswordRecovery ? 'password_recovery_email' : 'verification_email';
@@ -5762,10 +5995,20 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         }));
         operationStage = 'audit_log';
         await writeAdminAudit(actor.id, 'admin.created_with_temporary_password', 'settings', userId, { email, username, role, permissions });
+        if (temporaryCredentialFlow) {
+          await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
+            provider: 'resend',
+            delivery: 'temporary_password',
+            expiresAt: temporaryPasswordExpiry,
+          });
+          await sendTemporaryCredential();
+        }
         res.status(201).json({
-          message: sendPasswordRecovery
+          message: temporaryCredentialFlow
+            ? 'The administrator was created. The verification email was requested from Supabase and the temporary-password onboarding email was accepted by the delivery provider; inbox delivery is not guaranteed. The temporary password expires in 24 hours.'
+            : sendPasswordRecovery
             ? 'Delegated account is pending. A fresh password setup link was sent to the existing verified Auth identity; its existing password was not changed.'
-            : 'Delegated account created and kept pending. A verification link was sent; CMS access remains blocked until onboarding completes.',
+            : 'Delegated account created and kept pending. A verification link was sent; no existing Auth password was changed. CMS access remains blocked until onboarding completes.',
         });
         return;
       }
@@ -5796,12 +6039,66 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       operationStage = 'audit_log';
       await writeAdminAudit(actor.id, 'admin.invited', 'settings', userId, { email, username, role, permissions });
+      if (temporaryCredentialFlow) {
+        await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
+          provider: 'resend',
+          delivery: 'temporary_password',
+          expiresAt: temporaryPasswordExpiry,
+        });
+        await sendTemporaryCredential();
+      }
       res.status(201).json({ message: sendPasswordRecovery
         ? 'Co-Owner account is pending. A fresh password setup link was sent to the existing verified Auth identity; its existing password was not changed.'
-        : 'Co-Owner invitation sent. Access activates after email verification and password setup.' });
+        : temporaryCredentialFlow
+          ? 'Co-Owner account was created. The verification email was requested from Supabase and the temporary-password onboarding email was accepted by the delivery provider; inbox delivery is not guaranteed. The temporary password expires in 24 hours.'
+          : 'Co-Owner invitation sent. Access activates after email verification and password setup.' });
     } catch (error) {
+      const failedStage = operationStage;
       let authCleanupFailed = false;
-      if (newlyCreatedAuthUserId && !adminRecordCreated) {
+      if (temporaryCredentialFlow && newlyCreatedAuthUserId && !temporaryPasswordEmailAccepted) {
+        try {
+          await setSupabaseUserPassword(newlyCreatedAuthUserId, generateTemporaryAdminPassword());
+          await revokeSupabaseRefreshTokens(newlyCreatedAuthUserId);
+          if (adminRecordCreated) {
+            const cleanupQuery = new URLSearchParams({ id: `eq.${newlyCreatedAuthUserId}` });
+            await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${cleanupQuery}`, {
+              method: 'DELETE',
+              headers: { Prefer: 'return=minimal' },
+            }));
+            adminRecordCreated = false;
+          }
+          await deleteSupabaseUser(newlyCreatedAuthUserId);
+        } catch (cleanupError) {
+          authCleanupFailed = true;
+          console.error('[NearGrow Ads] Admin invite cleanup failed.', {
+            stage: 'auth_cleanup',
+            status: cleanupError instanceof SupabaseRequestError ? cleanupError.status : undefined,
+            code: cleanupError instanceof SupabaseRequestError ? cleanupError.code : undefined,
+          });
+          try {
+            const cleanupQuery = new URLSearchParams({ id: `eq.${newlyCreatedAuthUserId}` });
+            await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${cleanupQuery}`, {
+              method: 'PATCH',
+              headers: { Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                status: 'disabled',
+                username: null,
+                permissions: {},
+                must_change_password: true,
+                temporary_password_expires_at: null,
+                updated_at: new Date().toISOString(),
+              }),
+            }));
+            await revokeSupabaseRefreshTokens(newlyCreatedAuthUserId);
+          } catch (disableError) {
+            console.error('[NearGrow Ads] Failed to disable an administrator after onboarding email failure.', {
+              stage: 'auth_cleanup_disable',
+              status: disableError instanceof SupabaseRequestError ? disableError.status : undefined,
+              code: disableError instanceof SupabaseRequestError ? disableError.code : undefined,
+            });
+          }
+        }
+      } else if (newlyCreatedAuthUserId && !adminRecordCreated) {
         try {
           await deleteSupabaseUser(newlyCreatedAuthUserId);
         } catch (cleanupError) {
@@ -5810,6 +6107,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             stage: 'auth_cleanup',
             status: cleanupError instanceof SupabaseRequestError ? cleanupError.status : undefined,
             code: cleanupError instanceof SupabaseRequestError ? cleanupError.code : undefined,
+          });
+        }
+      }
+      if (temporaryCredentialFlow && failedStage === 'temporary_password_email') {
+        try {
+          await writeAdminAudit(actor.id, 'admin.invitation.delivery_failed', 'settings', undefined, {
+            provider: 'resend',
+            recipientHash: securityPseudonym(email),
+            cleanupCompleted: !authCleanupFailed,
+          });
+        } catch (auditError) {
+          console.error('[NearGrow Ads] Temporary-password delivery failure could not be audited.', {
+            errorName: auditError instanceof Error ? auditError.name : 'UnknownError',
           });
         }
       }
@@ -5830,7 +6140,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       let statusCode = 503;
       let message = 'Supabase is temporarily unavailable. Please try again.';
-      if (adminRecordCreated) {
+      if (temporaryCredentialFlow && temporaryPasswordEmailAccepted) {
+        message = 'The temporary-password onboarding email was accepted by the delivery provider, but a later setup step failed. Refresh Admin Accounts and verify the invitation status before taking action.';
+      } else if (temporaryCredentialFlow && authCleanupFailed) {
+        message = 'Temporary-password delivery failed and the new account could not be fully invalidated. Its CMS record was disabled where possible. Do not retry; contact the system administrator to verify Auth and account status.';
+      } else if (temporaryCredentialFlow) {
+        message = 'The temporary-password onboarding email was not accepted. The newly created Auth and CMS identity was invalidated and removed where possible; retry with a new password after confirming account cleanup.';
+      } else if (adminRecordCreated) {
         message = 'The administrator record was created, but account setup did not finish. Refresh the user list before retrying.';
       } else if (authCleanupFailed) {
         message = 'Database setup is incomplete and an unverified Auth identity could not be cleaned up. Do not retry with this email; contact the system administrator.';
@@ -6016,6 +6332,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           res.status(409).json({ message: 'This account state cannot be re-invited. Refresh the account list and review its history.' });
           return;
         }
+        const recoveryUserQuery = new URLSearchParams({ id: `eq.${target.id}` });
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${recoveryUserQuery}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            temporary_password_expires_at: null,
+            temporary_password_used_at: null,
+            updated_at: new Date().toISOString(),
+          }),
+        }));
         await revokeSupabaseRefreshTokens(target.id);
         if (recoveryMethod === 'signup') {
           const redirectTo = buildAdminInvitationRedirect(
@@ -6070,7 +6396,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ must_change_password: true, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          must_change_password: true,
+          temporary_password_expires_at: null,
+          updated_at: new Date().toISOString(),
+        }),
       }));
       const sessionsQuery = new URLSearchParams({ user_id: `eq.${target.id}`, revoked_at: 'is.null' });
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
@@ -6112,8 +6442,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(404).json({ message: 'Administrator record not found.' });
         return;
       }
-      if (target.isPrimaryOwner || target.role === 'owner') {
-        res.status(403).json({ message: 'Owner accounts cannot be cancelled from delegated invitation management.' });
+      if (target.isPrimaryOwner) {
+        res.status(403).json({ message: 'The Primary Owner invitation cannot be cancelled from delegated invitation management.' });
         return;
       }
       const cancellation = await readSupabaseJson<{ status?: string }>(
@@ -6225,12 +6555,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(404).json({ message: 'Administrator record not found.' });
         return;
       }
-      if (target.isPrimaryOwner || target.role === 'owner') {
-        res.status(403).json({ message: 'Temporary password resets are only available for delegated Super Admin and Custom Admin accounts.' });
+      if (target.isPrimaryOwner) {
+        res.status(403).json({ message: 'The Primary Owner password cannot be reset through delegated account management.' });
         return;
       }
       if (target.status !== 'active') {
         res.status(409).json({ message: 'Only an active, verified administrator account can receive a temporary password.' });
+        return;
+      }
+      if ((process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '').length < 32) {
+        res.status(503).json({ message: 'Temporary-password expiry is not configured. Set ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET and schedule its protected expiry endpoint first.' });
         return;
       }
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(
@@ -6241,10 +6575,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
       const userQuery = new URLSearchParams({ id: `eq.${target.id}` });
+      const passwordExpiresAt = temporaryPasswordExpiresAt();
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ must_change_password: true, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          must_change_password: true,
+          temporary_password_expires_at: passwordExpiresAt,
+          temporary_password_used_at: null,
+          updated_at: new Date().toISOString(),
+        }),
       }));
       await setSupabaseUserPassword(target.id, newPassword);
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
@@ -6260,7 +6600,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }));
       await revokeSupabaseRefreshTokens(target.id);
       await writeAdminAudit(actor.id, 'admin.password_reset.temporary', 'security', target.id);
-      res.json({ message: 'Temporary password set in Supabase Auth. Deliver it to the administrator through a secure channel; it must be changed at first sign-in. Their CMS sessions and Supabase refresh tokens were revoked.' });
+      res.json({ message: 'Temporary password set in Supabase Auth. Deliver it to the administrator through a secure channel within 24 hours; it must be changed at first sign-in. Their CMS sessions and Supabase refresh tokens were revoked.' });
     } catch (error) {
       console.error('[NearGrow Ads] Temporary administrator password reset failed.', error instanceof Error ? error.name : 'Unknown error');
       res.status(503).json({ message: 'The temporary password could not be set securely. Check the Supabase Auth Admin API configuration.' });
@@ -6270,7 +6610,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   app.post('/api/admin/auth/first-password', async (req: Request, res: Response): Promise<void> => {
     if (!requireAdmin(req, res)) return;
     const identity = currentAdmin(res)!;
-    if (identity.isPrimaryOwner || identity.role === 'owner' || identity.mustChangePassword !== true) {
+    if (identity.isPrimaryOwner || identity.mustChangePassword !== true) {
       res.status(403).json({ message: 'A forced first-login password change is not pending for this delegated account.' });
       return;
     }
@@ -6298,6 +6638,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
           must_change_password: false,
+          temporary_password_expires_at: null,
+          temporary_password_used_at: null,
           last_password_reset_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }),

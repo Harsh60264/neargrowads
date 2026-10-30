@@ -182,12 +182,18 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const [transfers, setTransfers] = useState<Array<Record<string, unknown>>>([]);
   const [owners, setOwners] = useState<Array<{ id: string; email: string; is_primary_owner: boolean }>>([]);
   const [email, setEmail] = useState('');
+  const [coOwnerEmail, setCoOwnerEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [coOwnerUsername, setCoOwnerUsername] = useState('');
   const [role, setRole] = useState<AdminRole>('custom_admin');
   const [permissions, setPermissions] = useState<Permissions>(initialPermissions);
   const [showCreateAdmin, setShowCreateAdmin] = useState(false);
   const [initialPassword, setInitialPassword] = useState('');
   const [confirmInitialPassword, setConfirmInitialPassword] = useState('');
+  const [passwordMode, setPasswordMode] = useState<'generated' | 'manual'>('generated');
+  const [coOwnerPasswordMode, setCoOwnerPasswordMode] = useState<'generated' | 'manual'>('generated');
+  const [coOwnerPassword, setCoOwnerPassword] = useState('');
+  const [coOwnerPasswordConfirm, setCoOwnerPasswordConfirm] = useState('');
   const [showInitialPassword, setShowInitialPassword] = useState(false);
   const [passwordResetUser, setPasswordResetUser] = useState<AdminUser | null>(null);
   const [resetPasswordValues, setResetPasswordValues] = useState({ newPassword: '', confirmPassword: '' });
@@ -235,6 +241,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       setInitialPassword('');
       setConfirmInitialPassword('');
       setShowInitialPassword(false);
+      setPasswordMode('generated');
     }
     setShowCreateAdmin((show) => !show);
   };
@@ -327,8 +334,11 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
             username,
             role,
             permissions,
-            newPassword: initialPassword,
-            confirmPassword: confirmInitialPassword,
+            passwordMode,
+            ...(passwordMode === 'manual' ? {
+              newPassword: initialPassword,
+              confirmPassword: confirmInitialPassword,
+            } : {}),
             currentPassword: reauthPassword,
           }),
         });
@@ -344,6 +354,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       setUsername('');
       setInitialPassword('');
       setConfirmInitialPassword('');
+      setPasswordMode('generated');
       setShowInitialPassword(false);
       setShowCreateAdmin(false);
       return result.message;
@@ -499,9 +510,23 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       const result = await api<{ message: string }>('/api/admin/users/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role: 'owner', currentPassword: reauthPassword }),
+        body: JSON.stringify({
+          email: coOwnerEmail,
+          username: coOwnerUsername,
+          role: 'owner',
+          passwordMode: coOwnerPasswordMode,
+          ...(coOwnerPasswordMode === 'manual' ? {
+            newPassword: coOwnerPassword,
+            confirmPassword: coOwnerPasswordConfirm,
+          } : {}),
+          currentPassword: reauthPassword,
+        }),
       });
-      setEmail('');
+      setCoOwnerEmail('');
+      setCoOwnerUsername('');
+      setCoOwnerPassword('');
+      setCoOwnerPasswordConfirm('');
+      setCoOwnerPasswordMode('generated');
       return result.message;
     });
   };
@@ -761,6 +786,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
 
   const ownerPasswordStrength = passwordStrength(passwordValues.newPassword);
   const initialPasswordStrength = passwordStrength(initialPassword);
+  const coOwnerPasswordStrength = passwordStrength(coOwnerPassword);
   const resetPasswordStrength = passwordStrength(resetPasswordValues.newPassword);
   const delegatedUsers = users.filter((user) => !user.isPrimaryOwner);
   const activeDelegatedUsers = delegatedUsers.filter((user) =>
@@ -896,7 +922,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
               </div>
             </div>}
             {adminTab === 'create' && showCreateAdmin && <form onSubmit={inviteAdmin} className="grid gap-3 rounded-xl border border-[#304135] bg-[#131D16] p-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_190px_auto] xl:items-end">
-              <label className="text-xs font-medium text-[#B8C7BC]">Recipient email (must be verified)
+              <label className="text-xs font-medium text-[#B8C7BC]">Recipient email (verification required before sign-in)
                 <input className={`${inputClass} mt-1.5`} type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" />
               </label>
               <label className="text-xs font-medium text-[#B8C7BC]">Unique username
@@ -904,27 +930,44 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 <span className="mt-1 block text-[10px] text-[#819286]">3–32 letters, numbers, dots, underscores or hyphens.</span>
               </label>
               <div className="col-span-full grid gap-3 rounded-xl border border-[#304135] bg-[#101913] p-4 sm:grid-cols-2">
-                <p className="col-span-full text-[11px] leading-5 text-[#A9B8AD]">New or unverified Auth identities remain pending until email verification. Existing Auth identities are reused without changing their current password; verified identities receive a fresh password-setup link. CMS access stays pending until onboarding completes.</p>
-                <label className="text-xs font-medium text-[#B8C7BC]">New Password
-                  <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3 focus-within:border-[#67D8B7]">
-                    <input className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" type={showInitialPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={200} required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} />
-                    <button type="button" aria-label={showInitialPassword ? 'Hide new password' : 'Show new password'} onClick={() => setShowInitialPassword((visible) => !visible)} className="text-[#91A195]">{showInitialPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
-                  </span>
-                </label>
-                <label className="text-xs font-medium text-[#B8C7BC]">Confirm New Password
-                  <input className={`${inputClass} mt-1.5`} type={showInitialPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={200} required value={confirmInitialPassword} onChange={(event) => setConfirmInitialPassword(event.target.value)} />
-                </label>
-                <div className="col-span-full flex flex-wrap items-center gap-3">
-                  <button type="button" className="min-h-9 rounded-lg border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => {
-                    const generated = generateStrongPassword();
-                    setInitialPassword(generated);
-                    setConfirmInitialPassword(generated);
-                    setShowInitialPassword(true);
-                  }}>Generate strong password</button>
-                  <span className="text-[10px] text-[#91A195]">Strength: {initialPasswordStrength}/5; use 12+ characters and at least three character types.</span>
-                  {initialPassword && initialPassword !== confirmInitialPassword && <span role="alert" className="text-[10px] text-rose-200">Passwords do not match.</span>}
+                  <p className="col-span-full text-[11px] leading-5 text-[#A9B8AD]">A new Auth identity receives a one-time password by branded email, expires after 24 hours, and must be replaced at first sign-in. Email-delivered passwords are exposed credentials. Existing Auth identities are never assigned or emailed a replacement password; they receive the existing secure setup/recovery link instead. All accounts stay blocked from CMS actions until setup is complete.</p>
+                  <fieldset className="col-span-full grid gap-2 sm:grid-cols-2">
+                    <legend className="mb-1 text-xs font-medium text-[#B8C7BC]">Temporary password</legend>
+                    <label className="flex items-start gap-2 rounded-lg border border-[#33453A] p-3 text-xs text-[#C8D8CA]">
+                      <input type="radio" name="admin-password-mode" value="generated" checked={passwordMode === 'generated'} onChange={() => {
+                        setPasswordMode('generated');
+                        setInitialPassword('');
+                        setConfirmInitialPassword('');
+                      }} />
+                      <span><strong>Generate securely (default)</strong><br />Generated on the server and sent in the branded onboarding email. It is never returned to the browser.</span>
+                    </label>
+                    <label className="flex items-start gap-2 rounded-lg border border-[#33453A] p-3 text-xs text-[#C8D8CA]">
+                      <input type="radio" name="admin-password-mode" value="manual" checked={passwordMode === 'manual'} onChange={() => setPasswordMode('manual')} />
+                      <span><strong>Set manually</strong><br />Choose a strong one-time password that will be sent in the onboarding email.</span>
+                    </label>
+                  </fieldset>
+                  {passwordMode === 'manual' && <>
+                    <label className="text-xs font-medium text-[#B8C7BC]">Temporary password
+                      <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3 focus-within:border-[#67D8B7]">
+                        <input className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" type={showInitialPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={200} required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} />
+                        <button type="button" aria-label={showInitialPassword ? 'Hide new password' : 'Show new password'} onClick={() => setShowInitialPassword((visible) => !visible)} className="text-[#91A195]">{showInitialPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                      </span>
+                    </label>
+                    <label className="text-xs font-medium text-[#B8C7BC]">Confirm temporary password
+                      <input className={`${inputClass} mt-1.5`} type={showInitialPassword ? 'text' : 'password'} autoComplete="new-password" minLength={12} maxLength={200} required value={confirmInitialPassword} onChange={(event) => setConfirmInitialPassword(event.target.value)} />
+                    </label>
+                    <div className="col-span-full flex flex-wrap items-center gap-3">
+                      <button type="button" className="min-h-9 rounded-lg border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5" onClick={() => {
+                        const generated = generateStrongPassword();
+                        setInitialPassword(generated);
+                        setConfirmInitialPassword(generated);
+                        setShowInitialPassword(true);
+                      }}>Generate strong password</button>
+                      <span className="text-[10px] text-[#91A195]">Strength: {initialPasswordStrength}/5; use 12+ characters and at least three character types.</span>
+                      {initialPassword && initialPassword !== confirmInitialPassword && <span role="alert" className="text-[10px] text-rose-200">Passwords do not match.</span>}
+                    </div>
+                  </>}
                 </div>
-              </div>
               <label className="text-xs font-medium text-[#B8C7BC]">Role
                 <select className={`${inputClass} mt-1.5`} value={role} onChange={(event) => {
                   const nextRole = event.target.value as AdminRole;
@@ -934,7 +977,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                   <option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
                 </select>
               </label>
-              <button className={buttonClass} disabled={busy || !reauthPassword || initialPasswordStrength < 4 || initialPassword !== confirmInitialPassword}><UserPlus className="h-4 w-4" /> Create Admin</button>
+              <button className={buttonClass} disabled={busy || !reauthPassword || (passwordMode === 'manual' && (initialPasswordStrength < 4 || initialPassword !== confirmInitialPassword))}><UserPlus className="h-4 w-4" /> Create Admin</button>
               {(role === 'custom_admin' || role === 'super_admin') && (
                 <div className="col-span-full grid gap-3 pt-2 sm:grid-cols-2 xl:grid-cols-4">
                   <p className="col-span-full text-[10px] text-[#91A195]">{role === 'super_admin' ? 'Super Admin starts with full operational access; adjust any permission before adding the account.' : 'Select the exact CMS sections and actions available to this Custom Admin.'}</p>
@@ -982,7 +1025,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                         </select>
                       </label>
                       <button type="button" className={buttonClass} disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
-                      {user.status === 'pending' && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
+                      {user.status === 'pending' && !user.isPrimaryOwner && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
                     </div>
                     <div className="mt-3 grid gap-2 border-t border-[#304135] pt-3 text-[10px] text-[#819286] sm:grid-cols-2">
                       <p>Email verification: {user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'}{user.emailVerifiedAt ? ` · ${new Date(user.emailVerifiedAt).toLocaleString()}` : ''}</p>
@@ -994,7 +1037,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                     {!user.isPrimaryOwner && <details className="relative mt-3 inline-block">
                       <summary className="inline-flex min-h-10 cursor-pointer list-none items-center rounded-xl border border-[#47594C] px-3 text-xs text-[#C8D8CA] hover:bg-white/5">Account actions</summary>
                       <div className="absolute left-0 z-20 mt-2 flex min-w-60 flex-col rounded-xl border border-[#304135] bg-[#19241D] p-1.5 shadow-xl">
-                        <button type="button" disabled={busy || !reauthPassword || user.status !== 'active' || user.role === 'owner'} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : user.status !== 'active' ? 'Temporary passwords are only available for active delegated accounts.' : user.role === 'owner' ? 'Co-Owner passwords are independent and cannot be set here.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
+                        <button type="button" disabled={busy || !reauthPassword || user.status !== 'active'} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : user.status !== 'active' ? 'Temporary passwords are only available for active delegated accounts.' : undefined} className="rounded-lg px-3 py-2 text-left text-xs text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => {
                           setPasswordResetUser(user);
                           setResetPasswordValues({ newPassword: '', confirmPassword: '' });
                           setShowResetPassword(false);
@@ -1085,7 +1128,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                             window.setTimeout(() => document.getElementById(`admin-account-${user.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
                           }}>View Details / Edit Access</button>}
                           {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; review it before retrying.' : undefined} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
-                          {user.status === 'pending' && user.role !== 'owner' && <>
+                          {user.status === 'pending' && !user.isPrimaryOwner && <>
                             <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>
                             {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
                           </>}
@@ -1129,7 +1172,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           <section role="dialog" aria-modal="true" aria-labelledby="admin-password-reset-title" className="w-full max-w-lg rounded-2xl border border-[#304135] bg-[#19241D] p-5 text-[#ECF3EE] shadow-2xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 id="admin-password-reset-title" className="text-base font-semibold">Reset delegated admin password</h2>
+                <h2 id="admin-password-reset-title" className="text-base font-semibold">Reset delegated administrator password</h2>
                 <p className="mt-1 break-all text-xs text-[#A9B8AD]">{passwordResetUser.email}</p>
               </div>
               <button type="button" aria-label="Close password reset" className="rounded-lg p-2 text-[#A9B8AD] hover:bg-white/5" onClick={() => {
@@ -1197,9 +1240,25 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           {isPrimaryOwner && <div className="grid gap-5 lg:grid-cols-2">
             <div className="space-y-3">
               <h3 className="text-sm font-semibold">Add Co-Owner</h3>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input className={inputClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="co-owner@example.com" />
-                <button type="button" className={buttonClass} disabled={busy || !email || !reauthPassword} onClick={() => void inviteCoOwner()}>Invite Co-Owner</button>
+              <div className="grid gap-2">
+                <input className={inputClass} type="email" value={coOwnerEmail} onChange={(event) => setCoOwnerEmail(event.target.value)} placeholder="co-owner@example.com" />
+                <input className={inputClass} value={coOwnerUsername} onChange={(event) => setCoOwnerUsername(event.target.value)} placeholder="Unique Co-Owner username" minLength={3} maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" />
+                <fieldset className="grid gap-2 sm:grid-cols-2">
+                  <legend className="mb-1 text-xs text-[#B8C7BC]">Temporary password</legend>
+                  <label className="flex items-center gap-2 rounded-lg border border-[#33453A] p-2 text-xs"><input type="radio" name="co-owner-password-mode" checked={coOwnerPasswordMode === 'generated'} onChange={() => {
+                    setCoOwnerPasswordMode('generated');
+                    setCoOwnerPassword('');
+                    setCoOwnerPasswordConfirm('');
+                  }} /> Generate securely (default)</label>
+                  <label className="flex items-center gap-2 rounded-lg border border-[#33453A] p-2 text-xs"><input type="radio" name="co-owner-password-mode" checked={coOwnerPasswordMode === 'manual'} onChange={() => setCoOwnerPasswordMode('manual')} /> Set manually</label>
+                </fieldset>
+                {coOwnerPasswordMode === 'manual' && <div className="grid gap-2 sm:grid-cols-2">
+                  <input className={inputClass} aria-label="Co-Owner temporary password" type="password" autoComplete="new-password" minLength={12} maxLength={200} required value={coOwnerPassword} onChange={(event) => setCoOwnerPassword(event.target.value)} placeholder="Temporary password" />
+                  <input className={inputClass} aria-label="Confirm Co-Owner temporary password" type="password" autoComplete="new-password" minLength={12} maxLength={200} required value={coOwnerPasswordConfirm} onChange={(event) => setCoOwnerPasswordConfirm(event.target.value)} placeholder="Confirm temporary password" />
+                  <p className="col-span-full text-[10px] text-[#91A195]">Strength: {coOwnerPasswordStrength}/5. Minimum 12 characters and three character types.</p>
+                </div>}
+                <p className="text-[10px] leading-5 text-[#91A195]">Co-Owners keep the existing Owner role privileges. New identities receive a 24-hour temporary password email and must replace it before any CMS action.</p>
+                <button type="button" className={buttonClass} disabled={busy || !coOwnerEmail || !coOwnerUsername || !reauthPassword || (coOwnerPasswordMode === 'manual' && (coOwnerPasswordStrength < 4 || coOwnerPassword !== coOwnerPasswordConfirm))} onClick={() => void inviteCoOwner()}>Invite Co-Owner</button>
               </div>
             </div>
             <form onSubmit={startTransfer} className="space-y-3">
