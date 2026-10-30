@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { restoreOriginalApiUrl } from './vercelFunctionHandler';
+import { getVercelInitializationDiagnostic, restoreOriginalApiUrl } from './vercelFunctionHandler';
+
+test('reports Preview configuration variable names without leaking error messages', () => {
+  const diagnostic = getVercelInitializationDiagnostic(
+    Object.assign(new Error('contains a secret value'), {
+      name: 'PreviewConfigurationError',
+      configurationVariable: 'SUPABASE_SERVICE_ROLE_KEY',
+    }),
+  );
+
+  assert.deepEqual(diagnostic, {
+    errorName: 'PreviewConfigurationError',
+    errorCategory: 'preview_configuration',
+    configurationVariable: 'SUPABASE_SERVICE_ROLE_KEY',
+  });
+  assert.equal(JSON.stringify(diagnostic).includes('secret'), false);
+});
+
+test('categorizes unknown initialization failures without logging their messages', () => {
+  const diagnostic = getVercelInitializationDiagnostic(new Error('contains a credential'));
+
+  assert.deepEqual(diagnostic, {
+    errorName: 'Error',
+    errorCategory: 'application_initialization',
+  });
+  assert.equal(JSON.stringify(diagnostic).includes('credential'), false);
+});
 
 test('restores nested API path and preserves the original query string', () => {
   const req = {

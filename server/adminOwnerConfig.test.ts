@@ -59,6 +59,31 @@ test('accepts a distinct Owner only in Preview when the Supabase URL matches the
   });
 });
 
+test('identifies the failing Preview configuration variable without exposing its value', () => {
+  const environment = previewEnvironment();
+  const cases: Array<[Partial<NodeJS.ProcessEnv>, string]> = [
+    [{ ADMIN_STAGING_SUPABASE_PROJECT_REF: '' }, 'ADMIN_STAGING_SUPABASE_PROJECT_REF'],
+    [{ SUPABASE_URL: 'https://wrong-project.supabase.co' }, 'SUPABASE_URL'],
+    [{ ADMIN_STAGING_OWNER_USER_ID: '' }, 'ADMIN_OWNER_USER_ID / ADMIN_STAGING_OWNER_USER_ID'],
+    [{ ADMIN_STAGING_OWNER_EMAIL: '' }, 'ADMIN_OWNER_EMAIL / ADMIN_STAGING_OWNER_EMAIL'],
+    [{ SUPABASE_ANON_KEY: '' }, 'SUPABASE_ANON_KEY / ADMIN_STAGING_SUPABASE_ANON_KEY'],
+    [{ SUPABASE_SERVICE_ROLE_KEY: 'different' }, 'SUPABASE_SERVICE_ROLE_KEY / ADMIN_STAGING_SUPABASE_SERVICE_ROLE_KEY'],
+    [{ SITE_URL: '' }, 'SITE_URL'],
+    [{ ADMIN_SESSION_SECRET: '' }, 'ADMIN_SESSION_SECRET'],
+    [{ ADMIN_STAGING_SESSION_SECRET: 'different-secret' }, 'ADMIN_SESSION_SECRET / ADMIN_STAGING_SESSION_SECRET'],
+  ];
+
+  for (const [changes, expectedVariable] of cases) {
+    assert.throws(
+      () => validatePreviewAdminConfiguration({ ...environment, ...changes }),
+      (error: unknown) => error instanceof Error &&
+        'configurationVariable' in error &&
+        error.configurationVariable === expectedVariable &&
+        !error.message.includes('different-secret'),
+    );
+  }
+});
+
 test('fails closed for missing, incorrect, or mutually consistent non-staging project settings', () => {
   const environment = previewEnvironment();
   for (const changes of [

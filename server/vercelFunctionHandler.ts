@@ -1,9 +1,29 @@
 import type { Express, Request, Response } from 'express';
 import { createVercelApplication } from '../serverless-build/serverless-app.mjs';
+import { getPreviewConfigurationVariable } from './adminOwnerConfig';
 
 const ORIGINAL_API_PATH_PARAMETER = '__vercel_original_api_path';
 
 let applicationPromise: Promise<Express> | undefined;
+
+export function getVercelInitializationDiagnostic(error: unknown): {
+  errorName: string;
+  errorCategory: 'preview_configuration' | 'application_initialization';
+  configurationVariable?: string;
+} {
+  const configurationVariable = getPreviewConfigurationVariable(error);
+  if (configurationVariable) {
+    return {
+      errorName: 'PreviewConfigurationError',
+      errorCategory: 'preview_configuration',
+      configurationVariable,
+    };
+  }
+  return {
+    errorName: error instanceof Error ? 'Error' : 'UnknownError',
+    errorCategory: 'application_initialization',
+  };
+}
 
 export function restoreOriginalApiUrl(req: Pick<Request, 'url'>): boolean {
   const rewrittenUrl = new URL(req.url, 'http://vercel.internal');
@@ -40,7 +60,7 @@ export async function vercelFunctionHandler(req: Request, res: Response): Promis
     app(req, res);
   } catch (error) {
     console.error('[NearGrow Ads] Vercel API initialization failed.', {
-      errorName: error instanceof Error ? error.name : 'UnknownError',
+      ...getVercelInitializationDiagnostic(error),
     });
     if (!res.headersSent) {
       res.status(503).json({ message: 'The API is temporarily unavailable.' });
