@@ -9,6 +9,7 @@ import {
   type AdminInvitationIdentity,
 } from './adminInvitation';
 import { isSameOriginHost } from './adminAuthOrigin';
+import { revokeSupabaseRefreshTokensWithAccessToken } from './supabaseAuthSessions';
 import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from '../src/components/admin/adminAuthCallback';
 
 const pendingIdentity: AdminInvitationIdentity = {
@@ -206,7 +207,9 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.match(completionRoute, /mode === 'recovery'\s*\? 'Verify this email address before resetting the password/);
   assert.match(completionRoute, /identity\.email !== authUser\.email\.toLowerCase\(\)/);
   assert.match(completionRoute, /identity\.status === 'disabled'/);
-  assert.match(completionRoute, /revokeSupabaseRefreshTokens\(identity\.id\)/);
+  assert.match(completionRoute, /revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/);
+  assert.equal((completionRoute.match(/revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/g) || []).length, 1);
+  assert.doesNotMatch(serverSource, /auth\/v1\/admin\/users\/\$\{encodeURIComponent\(userId\)\}\/logout/);
   assert.match(completionRoute, /password-reset link is invalid or expired\. Request a new recovery email\./);
   assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\) &&[\s\S]*?mode !== 'recovery' \|\| recoveryCleanupStage === 'not_started'[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
   assert.match(serverSource, /sameSite:\s*'strict'[\s\S]*?path:\s*'\/api\/admin'/);
@@ -224,14 +227,14 @@ test('recovery revokes existing sessions before password changes and reports lat
   const passwordUpdateIndex = completionRoute.indexOf("method: 'PUT'");
   const sessionsRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?");
   const finalSessionRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?", sessionsRevocationIndex + 1);
-  const refreshRevocationIndex = completionRoute.indexOf('revokeSupabaseRefreshTokens(identity.id)');
+  const refreshRevocationIndex = completionRoute.indexOf('revokeSupabaseRefreshTokens(verifiedAccessToken, identity.id)');
   const auditIndex = completionRoute.indexOf("writeAdminAudit(identity.id, 'auth.password.recovered'");
   const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
 
   assert.ok(passwordUpdateIndex > completionRoute.indexOf("supabaseAuthRequest('verify'"));
   assert.ok(sessionsRevocationIndex < passwordUpdateIndex);
   assert.ok(finalSessionRevocationIndex > passwordUpdateIndex);
-  assert.ok(refreshRevocationIndex < passwordUpdateIndex);
+  assert.ok(refreshRevocationIndex > passwordUpdateIndex && refreshRevocationIndex < finalSessionRevocationIndex);
   assert.ok(auditIndex > passwordUpdateIndex);
   assert.match(completionRoute, /recoveryPasswordUpdateStarted = mode === 'recovery'/);
   assert.match(completionRoute, /recoveryPasswordUpdated = mode === 'recovery'/);
@@ -244,6 +247,142 @@ test('recovery revokes existing sessions before password changes and reports lat
   assert.match(completionRoute, /recoveryCleanupStage,[\s\S]*?adminSessionsRevoked: recoveryAdminSessionsRevoked,[\s\S]*?finalSessionSweepComplete: recoveryFinalSessionSweepComplete,[\s\S]*?refreshTokensRevoked: recoveryRefreshTokensRevoked/);
   assert.match(authActionSource, /let recoveryOutcomeUnknown = mode === 'recovery'/);
   assert.match(authActionSource, /recoveryOutcomeUnknown[\s\S]*?could not confirm whether your password was changed or whether all Admin sessions were revoked[\s\S]*?potentially active/);
+});
+
+test('global refresh-token revocation uses the user JWT, rejects 404s, and accepts successful logout', async () => {
+  const accessToken = 'header.payload.signature';
+  const expectedUserId = pendingIdentity.id;
+  const requests: Array<{ pathname: string; method: string | undefined; token: string | undefined }> = [];
+  const readResponse = async (response: Response): Promise<unknown> => {
+    if (!response.ok) throw new Error(`Supabase request failed (${response.status}).`);
+    const body = await response.text();
+    return body ? JSON.parse(body) : undefined;
+  };
+  const request = async (pathname: string, init?: RequestInit, token?: string): Promise<Response> => {
+    requests.push({ pathname, method: init?.method, token });
+    return pathname === 'user'
+      ? new Response(JSON.stringify({ id: expectedUserId }), { status: 200 })
+      : new Response(null, { status: 204 });
+  };
+
+  await revokeSupabaseRefreshTokensWithAccessToken(accessToken, expectedUserId, request, readResponse);
+  assert.deepEqual(requests, [{
+    pathname: 'user',
+    method: 'GET',
+    token: accessToken,
+  }, {
+    pathname: 'logout?scope=global',
+    method: 'POST',
+    token: accessToken,
+  }]);
+
+  await assert.rejects(
+    revokeSupabaseRefreshTokensWithAccessToken(accessToken, expectedUserId, async (pathname) => pathname === 'user'
+      ? new Response(JSON.stringify({ id: expectedUserId }), { status: 200 })
+      : new Response(null, { status: 404 }), readResponse),
+    /Supabase request failed \(404\)/,
+  );
+  await assert.rejects(
+    revokeSupabaseRefreshTokensWithAccessToken(expectedUserId, expectedUserId, request, readResponse),
+    /access token could not be verified/,
+  );
+});
+
+test('global sign-out rejects a JWT for a different account before calling logout', async () => {
+  const accessToken = 'header.payload.signature';
+  const requests: string[] = [];
+  const request = async (pathname: string): Promise<Response> => {
+    requests.push(pathname);
+    return new Response(JSON.stringify({ id: 'f46dd026-fc56-4865-b4c7-f213f2c5076b' }), { status: 200 });
+  };
+  const readResponse = async (response: Response): Promise<unknown> => JSON.parse(await response.text());
+
+  await assert.rejects(
+    revokeSupabaseRefreshTokensWithAccessToken(accessToken, pendingIdentity.id, request, readResponse),
+    /access token could not be verified/,
+  );
+  assert.deepEqual(requests, ['user']);
+});
+
+test('cross-account lifecycle responses never claim global Auth revocation without the target JWT', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const route = (start: string, end: string): string => {
+    const routeStart = serverSource.indexOf(start);
+    const routeEnd = serverSource.indexOf(end, routeStart);
+    assert.ok(routeStart >= 0 && routeEnd > routeStart, `Could not locate route ${start}`);
+    return serverSource.slice(routeStart, routeEnd);
+  };
+  const accessUpdate = route("app.put('/api/admin/users/:id'", "app.post('/api/admin/users/:id/recovery'");
+  const recoveryRequest = route("app.post('/api/admin/users/:id/recovery'", "app.post('/api/admin/users/:id/cancel'");
+  const cancellation = route("app.post('/api/admin/users/:id/cancel'", "app.post('/api/admin/users/:id/archive'");
+  const archive = route("app.post('/api/admin/users/:id/archive'", "app.post('/api/admin/users/:id/password'");
+  const temporaryPassword = route("app.post('/api/admin/users/:id/password'", "app.post('/api/admin/auth/first-password'");
+  const sessionRevocation = route("app.post('/api/admin/users/:id/sessions/revoke'", "app.delete('/api/admin/users/:id'");
+  const deletion = route("app.delete('/api/admin/users/:id'", "app.post('/api/admin/profile/password'");
+
+  assert.doesNotMatch(serverSource, /revokeSupabaseRefreshTokens\((?:target(?:Id)?\.id|targetId|userId|newlyCreatedAuthUserId)/);
+  for (const crossAccountRoute of [accessUpdate, recoveryRequest, cancellation, archive, sessionRevocation, deletion]) {
+    assert.match(crossAccountRoute, /Supabase Auth sessions? could not be globally revoked|does not independently confirm global Supabase Auth-session revocation/);
+  }
+  assert.match(temporaryPassword, /setSupabaseUserPassword\(target\.id,\s*newPassword\)/);
+  assert.match(temporaryPassword, /invalidates the account’s existing Auth sessions/);
+  assert.doesNotMatch(temporaryPassword, /revokeSupabaseRefreshTokens/);
+  assert.match(serverSource, /async function setSupabaseUserPassword\(userId: string, password: string\)[\s\S]*?auth\/v1\/admin\/users\/\$\{encodeURIComponent\(userId\)\}[\s\S]*?method: 'PUT'/);
+  assert.match(accessUpdate, /status\(503\)/);
+  assert.match(recoveryRequest, /status\(503\)/);
+  assert.match(cancellation, /status\(503\)/);
+  assert.match(archive, /status\(503\)/);
+  assert.match(archive, /Supabase Auth sessions could not be globally revoked/);
+  assert.match(sessionRevocation, /status\(503\)/);
+  assert.match(deletion, /status\(503\)/);
+  assert.doesNotMatch(serverSource, /Supabase refresh tokens were revoked/);
+});
+
+test('protected CMS requests continue to validate the live CMS session and Admin account state', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const activeSessionMigration = readFileSync(new URL('../supabase/migrations/20261025110000_admin_session_idle_timeout.sql', import.meta.url), 'utf8');
+  const sessionStart = serverSource.indexOf('async function authenticateAdminSession');
+  const sessionEnd = serverSource.indexOf('\nasync function ', sessionStart + 1);
+  const authenticateSession = serverSource.slice(sessionStart, sessionEnd);
+  const middlewareStart = serverSource.indexOf("app.use('/api/admin'");
+  const middlewareEnd = serverSource.indexOf('\n  });', middlewareStart);
+  const adminMiddleware = serverSource.slice(middlewareStart, middlewareEnd);
+
+  assert.ok(sessionStart >= 0 && sessionEnd > sessionStart);
+  assert.match(authenticateSession, /readAdminSession/);
+  assert.match(authenticateSession, /get_active_admin_session/);
+  assert.match(authenticateSession, /status !== 'active'/);
+  assert.match(activeSessionMigration, /session\.revoked_at is null/i);
+  assert.match(activeSessionMigration, /session\.expires_at > clock_timestamp\(\)/i);
+  assert.match(adminMiddleware, /authenticateAdminSession\(req\)/);
+  assert.match(adminMiddleware, /adminCmsAccessAllowed\(identity\)/);
+});
+
+test('self-service password changes revoke CMS sessions before fallible post-update cleanup', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const firstPasswordStart = serverSource.indexOf("app.post('/api/admin/auth/first-password'");
+  const firstPasswordEnd = serverSource.indexOf("app.get('/api/admin/sessions/mine'", firstPasswordStart);
+  const firstPasswordRoute = serverSource.slice(firstPasswordStart, firstPasswordEnd);
+  const profilePasswordStart = serverSource.indexOf("app.post('/api/admin/profile/password'");
+  const profilePasswordEnd = serverSource.indexOf('\n  app.', profilePasswordStart + 1);
+  const profilePasswordRoute = serverSource.slice(profilePasswordStart, profilePasswordEnd);
+  const profilePasswordUpdateIndex = profilePasswordRoute.indexOf("method: 'PUT'");
+  const profileCmsRevocationIndex = profilePasswordRoute.indexOf("rest/v1/admin_sessions?");
+  const profileAuthRevocationIndex = profilePasswordRoute.indexOf('revokeSupabaseRefreshTokens(accessToken, identity.id)');
+  const profileMetadataIndex = profilePasswordRoute.indexOf("last_password_reset_at:");
+  const profileAuditIndex = profilePasswordRoute.indexOf("writeAdminAudit(identity.id, 'auth.password.changed'");
+
+  assert.match(firstPasswordRoute, /supabaseAuthRequest\('user'[\s\S]*?method: 'PUT'[\s\S]*?accessToken\)\)[\s\S]*?revokeSupabaseRefreshTokens\(accessToken,\s*identity\.id\)/);
+  assert.match(profilePasswordRoute, /supabaseAuthRequest\('user'[\s\S]*?method: 'PUT'[\s\S]*?accessToken\)\)[\s\S]*?revokeSupabaseRefreshTokens\(accessToken,\s*identity\.id\)/);
+  assert.ok(profilePasswordUpdateIndex < profileCmsRevocationIndex);
+  assert.ok(profileCmsRevocationIndex < profileAuthRevocationIndex);
+  assert.ok(profileCmsRevocationIndex < profileMetadataIndex && profileCmsRevocationIndex < profileAuditIndex);
+  assert.match(profilePasswordRoute, /if \(passwordUpdateStarted && !cmsSessionsRevoked\)[\s\S]*?CMS session revocation after password change failed/);
+  assert.match(profilePasswordRoute, /if \(passwordUpdateStarted\)[\s\S]*?res\.clearCookie\(ADMIN_SESSION_COOKIE/);
+  assert.match(profilePasswordRoute, /password changed, but CMS session revocation could not be confirmed[\s\S]*?other Admin sessions may still be active/);
+  assert.match(profilePasswordRoute, /password changed and CMS sessions were revoked, but Supabase Auth session revocation could not be confirmed/);
+  assert.match(profilePasswordRoute, /Administrator password change failed\.', error instanceof Error \? error\.name : 'Unknown error'/);
+  assert.doesNotMatch(profilePasswordRoute, /Administrator password change failed:', error\)/);
 });
 
 test('recovery retries require fresh one-time verification and never treat a reused token as success', () => {
@@ -494,7 +633,7 @@ test('admin account routes enforce reauthentication and archive via a soft-archi
   assert.match(archiveRoute, /actor\.isPrimaryOwner/);
   assert.match(archiveRoute, /target\.status !== 'disabled'/);
   assert.match(archiveRoute, /rpc\/archive_admin_account/);
-  assert.match(archiveRoute, /Auth identity and audit history were retained/);
+  assert.match(archiveRoute, /record was archived and CMS access remains blocked/);
   assert.doesNotMatch(archiveRoute, /auth\/v1\/admin\/users\/.*DELETE/i);
 });
 

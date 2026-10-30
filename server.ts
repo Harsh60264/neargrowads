@@ -32,6 +32,9 @@ import {
   sendTemporaryAdminPasswordEmail,
   temporaryPasswordExpiresAt,
 } from './server/temporaryAdminPassword';
+import {
+  revokeSupabaseRefreshTokensWithAccessToken,
+} from './server/supabaseAuthSessions';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import { resolveAdminOwnerConfiguration, validatePreviewAdminConfiguration } from './server/adminOwnerConfig';
 import { isSameOriginHost } from './server/adminAuthOrigin';
@@ -3954,11 +3957,13 @@ async function readAdminAuthStatus(userId: string): Promise<AdminAuthStatus | un
   }
 }
 
-async function revokeSupabaseRefreshTokens(userId: string): Promise<void> {
-  const response = await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(userId)}/logout?scope=global`, {
-    method: 'POST',
-  });
-  await readSupabaseJson<unknown>(response);
+async function revokeSupabaseRefreshTokens(accessToken: string, expectedUserId: string): Promise<void> {
+  await revokeSupabaseRefreshTokensWithAccessToken(
+    accessToken,
+    expectedUserId,
+    supabaseAuthRequest,
+    (response) => readSupabaseJson<unknown>(response),
+  );
 }
 
 async function expireTemporaryAdminPassword(identity: AdminIdentity): Promise<void> {
@@ -3980,7 +3985,6 @@ async function expireTemporaryAdminPassword(identity: AdminIdentity): Promise<vo
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify({ revoked_at: new Date().toISOString() }),
   }));
-  await revokeSupabaseRefreshTokens(identity.id);
   await writeAdminAudit(identity.id, 'auth.password.temporary_expired', 'security');
 }
 
@@ -5673,10 +5677,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           body: JSON.stringify({ revoked_at: new Date().toISOString() }),
         }));
         recoveryAdminSessionsRevoked = true;
-
-        recoveryCleanupStage = 'refresh_token_revocation';
-        await revokeSupabaseRefreshTokens(identity.id);
-        recoveryRefreshTokensRevoked = true;
       }
       if (password !== undefined) {
         if (mode === 'recovery') recoveryCleanupStage = 'password_update';
@@ -5691,6 +5691,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(400).json({ message: 'Choose a strong password to finish setting up this invitation.' });
         return;
       }
+      if (mode === 'recovery') recoveryCleanupStage = 'refresh_token_revocation';
+      await revokeSupabaseRefreshTokens(verifiedAccessToken, identity.id);
+      if (mode === 'recovery') recoveryRefreshTokensRevoked = true;
       if (mode === 'recovery') {
         recoveryCleanupStage = 'final_admin_session_revocation';
         const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
@@ -6054,7 +6057,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           });
         }
         operationStage = 'session_revocation';
-        if (!authUser) await revokeSupabaseRefreshTokens(userId);
         const sessionsQuery = new URLSearchParams({ user_id: `eq.${userId}`, revoked_at: 'is.null' });
         await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
           method: 'PATCH',
@@ -6126,7 +6128,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       if (temporaryCredentialFlow && newlyCreatedAuthUserId && !temporaryPasswordEmailAccepted) {
         try {
           await setSupabaseUserPassword(newlyCreatedAuthUserId, generateTemporaryAdminPassword());
-          await revokeSupabaseRefreshTokens(newlyCreatedAuthUserId);
           if (adminRecordCreated) {
             const cleanupQuery = new URLSearchParams({ id: `eq.${newlyCreatedAuthUserId}` });
             await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${cleanupQuery}`, {
@@ -6157,7 +6158,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
                 updated_at: new Date().toISOString(),
               }),
             }));
-            await revokeSupabaseRefreshTokens(newlyCreatedAuthUserId);
           } catch (disableError) {
             console.error('[NearGrow Ads] Failed to disable an administrator after onboarding email failure.', {
               stage: 'auth_cleanup_disable',
@@ -6336,7 +6336,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({ revoked_at: new Date().toISOString() }),
         }));
-        await revokeSupabaseRefreshTokens(targetId);
       }
       if (target.role !== role) {
         await writeAdminAudit(actor.id, 'admin.role.changed', 'settings', targetId, { oldRole: target.role, role });
@@ -6348,6 +6347,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         await writeAdminAudit(actor.id, status === 'disabled' ? 'admin.disabled' : 'admin.enabled', 'settings', targetId, { oldStatus: target.status, status });
       }
       await writeAdminAudit(actor.id, 'admin.access.updated', 'settings', targetId, { oldRole: target.role, role, status, username, permissions });
+      if (status !== 'active') {
+        res.status(503).json({ message: 'Administrator access was disabled and CMS sessions were revoked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.' });
+        return;
+      }
       res.json({ message: 'Administrator access updated.' });
     } catch (error) {
       console.error('[NearGrow Ads] Administrator access update failed:', error);
@@ -6410,7 +6413,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             updated_at: new Date().toISOString(),
           }),
         }));
-        await revokeSupabaseRefreshTokens(target.id);
         if (recoveryMethod === 'signup') {
           const redirectTo = buildAdminInvitationRedirect(
             adminAuthRedirectOrigin(req),
@@ -6428,9 +6430,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             delivery: 'dispatch_initiated',
             kind: 'verification',
           });
-          res.json({ message: prepared.previousStatus === 'disabled'
-            ? 'A fresh verification link was requested. The account remains pending; its old username and permissions were cleared and must be reassigned after onboarding.'
-            : 'A fresh verification link was requested. CMS access remains pending until secure onboarding completes.' });
+          res.status(503).json({ message: prepared.previousStatus === 'disabled'
+            ? 'A fresh verification link was requested and CMS access remains pending; the old username and permissions were cleared. Supabase Auth sessions could not be globally revoked from this Owner action, so treat Auth-session revocation as incomplete.'
+            : 'A fresh verification link was requested and CMS access remains pending. Supabase Auth sessions could not be globally revoked from this Owner action, so treat Auth-session revocation as incomplete.' });
           return;
         }
         const redirectTo = buildAdminInvitationRedirect(
@@ -6448,9 +6450,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           delivery: 'dispatch_initiated',
           kind: 'password_setup',
         });
-        res.json({ message: prepared.previousStatus === 'disabled'
-          ? 'A fresh password setup link was requested for the verified Auth identity. The account remains pending; its old username and permissions were cleared and must be reassigned after onboarding.'
-          : 'A fresh password setup link was requested for the verified Auth identity. Its CMS access remains pending until onboarding completes.' });
+        res.status(503).json({ message: prepared.previousStatus === 'disabled'
+          ? 'A fresh password setup link was requested for the verified Auth identity and CMS access remains pending; the old username and permissions were cleared. Supabase Auth sessions could not be globally revoked from this Owner action, so treat Auth-session revocation as incomplete.'
+          : 'A fresh password setup link was requested for the verified Auth identity and its CMS access remains pending. Supabase Auth sessions could not be globally revoked from this Owner action, so treat Auth-session revocation as incomplete.' });
         return;
       }
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(
@@ -6476,7 +6478,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
-      await revokeSupabaseRefreshTokens(target.id);
       const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req));
       const query = new URLSearchParams({ redirect_to: redirectTo });
       await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
@@ -6484,7 +6485,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         body: JSON.stringify({ email: target.email }),
       }));
       await writeAdminAudit(actor.id, 'admin.password_reset.requested', 'security', target.id);
-      res.json({ message: 'A secure password-reset link has been sent. The account must set a new password before signing in; existing sessions were revoked.' });
+      res.status(503).json({ message: 'The password-reset email was requested and CMS sessions were revoked, but Supabase Auth sessions could not be globally revoked from this Owner action. Treat Auth-session revocation as incomplete; the account remains protected from CMS access by the revoked CMS sessions.' });
     } catch (error) {
       if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
         res.status(503).json({ message: 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql and reload the Supabase schema before using invitation recovery.' });
@@ -6524,18 +6525,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(409).json({ message: 'This invitation is no longer pending and was not changed.' });
         return;
       }
-      let refreshTokensRevoked = true;
-      try {
-        await revokeSupabaseRefreshTokens(target.id);
-      } catch (error) {
-        refreshTokensRevoked = false;
-        console.error('[NearGrow Ads] Invitation cancellation committed, but Supabase refresh-token revocation failed:', error instanceof Error ? error.name : 'Unknown error');
-      }
       if (cancellation.status === 'already_cancelled') {
-        res.json({ message: `Invitation was already cancelled. CMS access remains revoked and the Auth identity was retained safely.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}` });
+        res.status(503).json({ message: 'Invitation was already cancelled and CMS access remains revoked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.' });
         return;
       }
-      res.json({ message: `Invitation cancelled. CMS access and username login were revoked; the Auth identity was retained safely.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}` });
+      res.status(503).json({ message: 'Invitation cancellation was applied and CMS access was revoked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.' });
     } catch (error) {
       if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
         res.status(503).json({ message: 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql and reload the Supabase schema before cancelling invitations.' });
@@ -6583,15 +6577,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(409).json({ message: 'This administrator record could not be archived in its current state.' });
         return;
       }
-      let refreshTokensRevoked = true;
-      try {
-        await revokeSupabaseRefreshTokens(target.id);
-      } catch (error) {
-        refreshTokensRevoked = false;
-        console.error('[NearGrow Ads] Administrator archive committed, but Supabase refresh-token revocation failed:', error instanceof Error ? error.name : 'Unknown error');
-      }
-      res.json({
-        message: `Administrator record archived from the active list. The Auth identity and audit history were retained.${refreshTokensRevoked ? '' : ' Supabase could not revoke Auth refresh tokens; CMS sessions remain revoked.'}`,
+      res.status(503).json({
+        message: 'Administrator record was archived and CMS access remains blocked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.',
       });
     } catch (error) {
       if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {
@@ -6666,9 +6653,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
-      await revokeSupabaseRefreshTokens(target.id);
       await writeAdminAudit(actor.id, 'admin.password_reset.temporary', 'security', target.id);
-      res.json({ message: 'Temporary password set in Supabase Auth. Deliver it to the administrator through a secure channel within 24 hours; it must be changed at first sign-in. Their CMS sessions and Supabase refresh tokens were revoked.' });
+      res.json({ message: 'Temporary password set through Supabase Auth Admin API, which invalidates the account’s existing Auth sessions. Deliver it to the administrator through a secure channel within 24 hours; it must be changed at first sign-in. Their CMS sessions were also revoked.' });
     } catch (error) {
       console.error('[NearGrow Ads] Temporary administrator password reset failed.', error instanceof Error ? error.name : 'Unknown error');
       res.status(503).json({ message: 'The temporary password could not be set securely. Check the Supabase Auth Admin API configuration.' });
@@ -6723,7 +6709,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
-      await revokeSupabaseRefreshTokens(identity.id);
+      await revokeSupabaseRefreshTokens(accessToken, identity.id);
       await writeAdminAudit(identity.id, 'auth.password.temporary_changed', 'security');
       res.json({ message: 'Password changed. Your temporary password is no longer valid.' });
     } catch (error) {
@@ -6830,9 +6816,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
-      await revokeSupabaseRefreshTokens(target.id);
       await writeAdminAudit(actor.id, 'auth.sessions.revoked', 'security', target.id);
-      res.json({ message: 'All active administrator sessions were revoked.' });
+      res.status(503).json({ message: 'CMS sessions were revoked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.' });
     } catch (error) {
       console.error('[NearGrow Ads] Administrator session revocation failed:', error);
       res.status(503).json({ message: 'Administrator sessions could not be revoked.' });
@@ -6872,13 +6857,12 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: disabledAt }),
       }));
-      await revokeSupabaseRefreshTokens(target.id);
       await writeAdminAudit(actor.id, 'admin.removed', 'settings', target.id, {
         removalPolicy: 'revoke_cms_access_keep_auth_identity_and_history',
         email: target.email,
         role: target.role,
       });
-      res.json({ message: 'Administrator CMS access was removed, sessions were revoked, and audit history was preserved. The Supabase Auth identity was retained to avoid affecting other application features.' });
+      res.status(503).json({ message: 'Administrator CMS access was removed, CMS sessions were revoked, and audit history was preserved. Supabase Auth sessions could not be globally revoked by this cross-account action; treat Auth-session revocation as incomplete.' });
     } catch (error) {
       console.error('[NearGrow Ads] Administrator deletion failed.', error instanceof Error ? error.name : 'Unknown error');
       res.status(503).json({ message: 'The administrator could not be deleted. Check Supabase Auth Admin API configuration.' });
@@ -6899,14 +6883,35 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(400).json({ message: 'Use a matching password with at least 12 characters and at least three character types.' });
       return;
     }
+    let passwordUpdateStarted = false;
+    let passwordUpdated = false;
+    let cmsSessionsRevoked = false;
+    let authSessionsRevoked = false;
+    let accessToken: string | undefined;
     try {
-      const accessToken = await reauthenticateAdminRequest(req, res, identity, currentPassword, 'The current password is incorrect. Google-only accounts must use their identity provider recovery flow.');
+      accessToken = await reauthenticateAdminRequest(req, res, identity, currentPassword, 'The current password is incorrect. Google-only accounts must use their identity provider recovery flow.');
       if (!accessToken) return;
+      passwordUpdateStarted = true;
       await readSupabaseJson<unknown>(await supabaseAuthRequest('user', {
         method: 'PUT',
         body: JSON.stringify({ password: newPassword }),
       }, accessToken));
-      await revokeSupabaseRefreshTokens(identity.id);
+      passwordUpdated = true;
+      const revokeQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
+      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${revokeQuery}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+      }));
+      cmsSessionsRevoked = true;
+      res.clearCookie(ADMIN_SESSION_COOKIE, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production' || req.secure,
+        sameSite: 'strict',
+        path: '/api/admin',
+      });
+      await revokeSupabaseRefreshTokens(accessToken, identity.id);
+      authSessionsRevoked = true;
       const userQuery = new URLSearchParams({ id: `eq.${identity.id}` });
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
         method: 'PATCH',
@@ -6914,21 +6919,46 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         body: JSON.stringify({ last_password_reset_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
       }));
       await writeAdminAudit(identity.id, 'auth.password.changed', 'security');
-      const revokeQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${revokeQuery}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-      }));
-      res.clearCookie(ADMIN_SESSION_COOKIE, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production' || req.secure,
-        sameSite: 'strict',
-        path: '/api/admin',
-      });
       res.json({ message: 'Password updated. Sign in again with your new password.' });
     } catch (error) {
-      console.error('[NearGrow Ads] Administrator password change failed:', error);
+      console.error('[NearGrow Ads] Administrator password change failed.', error instanceof Error ? error.name : 'Unknown error');
+      if (passwordUpdateStarted && !cmsSessionsRevoked) {
+        try {
+          const revokeQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
+          await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${revokeQuery}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+          }));
+          cmsSessionsRevoked = true;
+        } catch (cleanupError) {
+          console.error('[NearGrow Ads] CMS session revocation after password change failed.', cleanupError instanceof Error ? cleanupError.name : 'Unknown error');
+        }
+      }
+      if (passwordUpdateStarted) {
+        res.clearCookie(ADMIN_SESSION_COOKIE, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production' || req.secure,
+          sameSite: 'strict',
+          path: '/api/admin',
+        });
+        if (!passwordUpdated) {
+          res.status(503).json({
+            message: cmsSessionsRevoked
+              ? 'We could not confirm whether the password changed. CMS sessions were revoked. Sign in only after confirming the password state; contact the system administrator if unsure.'
+              : 'We could not confirm whether the password changed, and CMS session revocation could not be confirmed. The current browser cookie was cleared, but other Admin sessions may still be active. Contact the system administrator immediately.',
+          });
+          return;
+        }
+        res.status(503).json({
+          message: !cmsSessionsRevoked
+            ? 'The password changed, but CMS session revocation could not be confirmed. The current browser cookie was cleared, but other Admin sessions may still be active. Contact the system administrator immediately.'
+            : !authSessionsRevoked
+              ? 'The password changed and CMS sessions were revoked, but Supabase Auth session revocation could not be confirmed. The current browser cookie was cleared; contact the system administrator before continuing.'
+              : 'The password changed and CMS and Supabase Auth sessions were revoked, but the password-change metadata or audit cleanup failed. Sign in again and contact the system administrator to verify the account record.',
+        });
+        return;
+      }
       res.status(503).json({ message: 'The password could not be updated. Check that this account uses Supabase email/password authentication.' });
     }
   });
