@@ -1,1 +1,1 @@
-export { vercelFunctionHandler as default } from '../server/vercelFunctionHandler.js';
+export { vercelFunctionHandler as default } from '../serverless-build/vercel-function.mjs';
