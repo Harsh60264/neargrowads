@@ -25,7 +25,8 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
     setSessionGate('checking');
     setSessionGateError('');
     try {
-      const response = await fetch('/api/admin/auth/invitation-context', { credentials: 'same-origin', cache: 'no-store' });
+      const contextQuery = new URLSearchParams({ mode });
+      const response = await fetch(`/api/admin/auth/invitation-context?${contextQuery}`, { credentials: 'same-origin', cache: 'no-store' });
       const data = await response.json() as { hasActiveAdminSession?: boolean; message?: string };
       if (!response.ok) throw new Error(data.message || `Request failed (${response.status}).`);
       const hasSession = data.hasActiveAdminSession === true;

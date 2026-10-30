@@ -4978,7 +4978,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       });
     }
     const authExemptPaths = ['/login', '/session', '/activity', '/logout', '/auth/recovery', '/auth/complete'];
-    if (authExemptPaths.includes(req.path)) {
+    const isRecoveryContextCheck = req.method === 'GET' &&
+      req.path === '/auth/invitation-context' &&
+      req.query.mode === 'recovery';
+    if (authExemptPaths.includes(req.path) || isRecoveryContextCheck) {
       next();
       return;
     }

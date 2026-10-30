@@ -145,6 +145,24 @@ test('accepts a one-time token hash in a fresh browser without a PKCE verifier',
   assert.equal(callback.error, undefined);
 });
 
+test('a recovery callback without a token is rejected before setup can be submitted', () => {
+  const callback = readAdminAuthCallback(
+    '?mode=recovery',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'recovery',
+  );
+
+  assert.equal(callback.tokenHash, undefined);
+  assert.equal(callback.accessToken, undefined);
+  assert.equal(callback.authorizationCode, undefined);
+  assert.equal(callback.error, undefined);
+
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+  assert.match(authActionSource, /!hasCallback && !callback\.error[\s\S]*?This password-reset link is missing or expired/);
+  assert.match(authActionSource, /disabled=\{!hasCallback \|\| busy \|\| password !== confirmPassword\}/);
+});
+
 test('recovery callback failures ask for a new recovery email, not invitation setup', () => {
   const callback = readAdminAuthCallback(
     '?error=access_denied&error_code=otp_expired',
@@ -154,6 +172,24 @@ test('recovery callback failures ask for a new recovery email, not invitation se
   );
 
   assert.match(callback.error || '', /password-reset link.*invalid, or expired.*new recovery email/i);
+});
+
+test('only recovery-mode GET invitation-context checks bypass CMS-session middleware', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const middlewareStart = serverSource.indexOf("const authExemptPaths = ['/login'");
+  const middlewareEnd = serverSource.indexOf('try {', middlewareStart);
+  const middleware = serverSource.slice(middlewareStart, middlewareEnd);
+  const contextStart = serverSource.indexOf("app.get('/api/admin/auth/invitation-context'");
+  const contextEnd = serverSource.indexOf("app.post('/api/admin/auth/recovery'", contextStart);
+  const contextRoute = serverSource.slice(contextStart, contextEnd);
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+
+  assert.match(middleware, /req\.method === 'GET'[\s\S]*?req\.path === '\/auth\/invitation-context'[\s\S]*?req\.query\.mode === 'recovery'/);
+  assert.match(middleware, /authExemptPaths\.includes\(req\.path\) \|\| isRecoveryContextCheck/);
+  assert.match(authActionSource, /new URLSearchParams\(\{ mode \}\)/);
+  assert.match(contextRoute, /authenticateAdminSession\(req\)/);
+  assert.match(contextRoute, /hasActiveAdminSession:\s*Boolean\(identity\)/);
+  assert.doesNotMatch(contextRoute, /email|invitation_generation|permissions|role/i);
 });
 
 test('callback completion verifies token hashes server-side without requiring a CMS session', () => {
@@ -166,6 +202,9 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.doesNotMatch(completionRoute, /requireAdmin\(req,\s*res\)/);
   assert.match(completionRoute, /supabaseAuthRequest\('verify'[\s\S]*?token_hash:\s*tokenHash,\s*type:\s*tokenType/);
   assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+  assert.match(completionRoute, /identity\.email !== authUser\.email\.toLowerCase\(\)/);
+  assert.match(completionRoute, /identity\.status === 'disabled'/);
+  assert.match(completionRoute, /revokeSupabaseRefreshTokens\(identity\.id\)/);
   assert.match(completionRoute, /password-reset link is invalid or expired\. Request a new recovery email\./);
   assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\)\)[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
   assert.match(serverSource, /sameSite:\s*'strict'[\s\S]*?path:\s*'\/api\/admin'/);
@@ -173,6 +212,21 @@ test('callback completion verifies token hashes server-side without requiring a 
     serverSource.indexOf('function setAdminSessionCookie'),
     serverSource.indexOf('function safeStringEqual'),
   ), /domain:/i);
+});
+
+test('recovery rejects incorrect identities and inactive account states', () => {
+  assert.equal(decideAdminInvitationRecovery({
+    ...pendingIdentity,
+    email: 'different@example.com',
+  }, verifiedAuthUser), 'reject');
+  assert.equal(decideAdminInvitationRecovery({
+    ...pendingIdentity,
+    id: 'f46dd026-fc56-4865-b4c7-f213f2c5076b',
+  }, verifiedAuthUser), 'reject');
+  assert.equal(decideAdminInvitationRecovery({
+    ...pendingIdentity,
+    status: 'active',
+  }, verifiedAuthUser), 'reject');
 });
 
 test('callback retains the current invitation generation and rejects expired callbacks', () => {
