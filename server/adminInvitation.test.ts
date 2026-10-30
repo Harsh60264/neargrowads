@@ -202,16 +202,64 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.doesNotMatch(completionRoute, /requireAdmin\(req,\s*res\)/);
   assert.match(completionRoute, /supabaseAuthRequest\('verify'[\s\S]*?token_hash:\s*tokenHash,\s*type:\s*tokenType/);
   assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+  assert.match(completionRoute, /mode === 'recovery'\s*\? 'The password-reset request is incomplete or invalid/);
+  assert.match(completionRoute, /mode === 'recovery'\s*\? 'Verify this email address before resetting the password/);
   assert.match(completionRoute, /identity\.email !== authUser\.email\.toLowerCase\(\)/);
   assert.match(completionRoute, /identity\.status === 'disabled'/);
   assert.match(completionRoute, /revokeSupabaseRefreshTokens\(identity\.id\)/);
   assert.match(completionRoute, /password-reset link is invalid or expired\. Request a new recovery email\./);
-  assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\)\)[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
+  assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\) &&[\s\S]*?mode !== 'recovery' \|\| recoveryCleanupStage === 'not_started'[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
   assert.match(serverSource, /sameSite:\s*'strict'[\s\S]*?path:\s*'\/api\/admin'/);
   assert.doesNotMatch(serverSource.slice(
     serverSource.indexOf('function setAdminSessionCookie'),
     serverSource.indexOf('function safeStringEqual'),
   ), /domain:/i);
+});
+
+test('recovery revokes existing sessions before password changes and reports later cleanup failures', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const end = serverSource.indexOf("app.get('/api/admin/users'", start);
+  const completionRoute = serverSource.slice(start, end);
+  const passwordUpdateIndex = completionRoute.indexOf("method: 'PUT'");
+  const sessionsRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?");
+  const finalSessionRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?", sessionsRevocationIndex + 1);
+  const refreshRevocationIndex = completionRoute.indexOf('revokeSupabaseRefreshTokens(identity.id)');
+  const auditIndex = completionRoute.indexOf("writeAdminAudit(identity.id, 'auth.password.recovered'");
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+
+  assert.ok(passwordUpdateIndex > completionRoute.indexOf("supabaseAuthRequest('verify'"));
+  assert.ok(sessionsRevocationIndex < passwordUpdateIndex);
+  assert.ok(finalSessionRevocationIndex > passwordUpdateIndex);
+  assert.ok(refreshRevocationIndex < passwordUpdateIndex);
+  assert.ok(auditIndex > passwordUpdateIndex);
+  assert.match(completionRoute, /recoveryPasswordUpdateStarted = mode === 'recovery'/);
+  assert.match(completionRoute, /recoveryPasswordUpdated = mode === 'recovery'/);
+  assert.match(completionRoute, /recoveryPasswordUpdated\)[\s\S]*?password was changed and existing CMS sessions were revoked, but recovery cleanup did not finish/);
+  assert.match(completionRoute, /recoveryPasswordUpdateStarted\)[\s\S]*?could not confirm whether your password was changed\. Existing CMS sessions were revoked/);
+  assert.match(completionRoute, /recoveryAdminSessionsRevoked[\s\S]*?system could not confirm that existing CMS sessions were revoked/);
+  assert.match(completionRoute, /finalSessionSweepComplete: recoveryFinalSessionSweepComplete/);
+  assert.match(completionRoute, /recoveryFinalSessionSweepComplete[\s\S]*?Treat any existing Admin session as potentially active/);
+  assert.match(completionRoute, /recoveryCleanupStage === 'not_started'/);
+  assert.match(completionRoute, /recoveryCleanupStage,[\s\S]*?adminSessionsRevoked: recoveryAdminSessionsRevoked,[\s\S]*?finalSessionSweepComplete: recoveryFinalSessionSweepComplete,[\s\S]*?refreshTokensRevoked: recoveryRefreshTokensRevoked/);
+  assert.match(authActionSource, /let recoveryOutcomeUnknown = mode === 'recovery'/);
+  assert.match(authActionSource, /recoveryOutcomeUnknown[\s\S]*?could not confirm whether your password was changed or whether all Admin sessions were revoked[\s\S]*?potentially active/);
+});
+
+test('recovery retries require fresh one-time verification and never treat a reused token as success', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const end = serverSource.indexOf("app.get('/api/admin/users'", start);
+  const completionRoute = serverSource.slice(start, end);
+  const verifyIndex = completionRoute.indexOf("supabaseAuthRequest('verify'");
+  const passwordUpdateIndex = completionRoute.indexOf("method: 'PUT'");
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+
+  assert.ok(verifyIndex >= 0 && verifyIndex < passwordUpdateIndex);
+  assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+  assert.match(completionRoute, /error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\)/);
+  assert.match(authActionSource, /if \(busy \|\| notice \|\| sessionGate !== 'ready'\) return/);
+  assert.match(authActionSource, /recoveryOutcomeUnknown[\s\S]*?request a new recovery email/);
 });
 
 test('recovery rejects incorrect identities and inactive account states', () => {

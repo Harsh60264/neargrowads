@@ -5564,9 +5564,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       (mode !== 'invite' && mode !== 'recovery') ||
       (typeof password !== 'string' && !(mode === 'invite' && password === undefined)) ||
       (password !== undefined && (!isStrongAdminPassword(password) || password !== confirmPassword))) {
-      res.status(400).json({ message: 'The setup request is incomplete or invalid. Check the link and password requirements.' });
+      res.status(400).json({
+        message: mode === 'recovery'
+          ? 'The password-reset request is incomplete or invalid. Check the link and password requirements.'
+          : 'The setup request is incomplete or invalid. Check the link and password requirements.',
+      });
       return;
     }
+    let recoveryPasswordUpdateStarted = false;
+    let recoveryPasswordUpdated = false;
+    let recoveryAdminSessionsRevoked = false;
+    let recoveryFinalSessionSweepComplete = false;
+    let recoveryRefreshTokensRevoked = false;
+    let recoveryCleanupStage = 'not_started';
     try {
       let verifiedAccessToken = accessToken as string | undefined;
       if (typeof authorizationCode === 'string' && typeof codeVerifier === 'string') {
@@ -5596,7 +5606,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const authResponse = await supabaseAuthRequest('user', { method: 'GET' }, verifiedAccessToken);
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(authResponse);
       if (!authUser.id || !authUser.email || !authUser.email_confirmed_at) {
-        res.status(401).json({ message: 'Verify the invited email address before completing setup.' });
+        res.status(401).json({
+          message: mode === 'recovery'
+            ? 'Verify this email address before resetting the password.'
+            : 'Verify the invited email address before completing setup.',
+        });
         return;
       }
       const identity = await readAdminIdentity(authUser.id);
@@ -5650,15 +5664,42 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.json({ message: 'Admin setup is already complete. Sign in with your own password.' });
         return;
       }
+      if (mode === 'recovery') {
+        recoveryCleanupStage = 'admin_session_revocation';
+        const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+        }));
+        recoveryAdminSessionsRevoked = true;
+
+        recoveryCleanupStage = 'refresh_token_revocation';
+        await revokeSupabaseRefreshTokens(identity.id);
+        recoveryRefreshTokensRevoked = true;
+      }
       if (password !== undefined) {
+        if (mode === 'recovery') recoveryCleanupStage = 'password_update';
+        recoveryPasswordUpdateStarted = mode === 'recovery';
         const updateResponse = await supabaseAuthRequest('user', {
           method: 'PUT',
           body: JSON.stringify({ password }),
         }, verifiedAccessToken);
         await readSupabaseJson<unknown>(updateResponse);
+        recoveryPasswordUpdated = mode === 'recovery';
       } else if (!identity.mustChangePassword) {
         res.status(400).json({ message: 'Choose a strong password to finish setting up this invitation.' });
         return;
+      }
+      if (mode === 'recovery') {
+        recoveryCleanupStage = 'final_admin_session_revocation';
+        const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+        }));
+        recoveryFinalSessionSweepComplete = true;
       }
       if (mode === 'invite') {
         const completion = await readSupabaseJson<{ status?: string }>(
@@ -5679,6 +5720,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         }
       } else {
         if (identity.status === 'pending') {
+          recoveryCleanupStage = 'invitation_activation';
           const completion = await readSupabaseJson<{ status?: string }>(
             await supabaseAdminRequest('rest/v1/rpc/complete_admin_invitation', {
               method: 'POST',
@@ -5695,6 +5737,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             return;
           }
         } else {
+          recoveryCleanupStage = 'admin_recovery_metadata';
           const query = new URLSearchParams({ id: `eq.${identity.id}` });
           await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${query}`, {
             method: 'PATCH',
@@ -5710,14 +5753,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         }
       }
       if (mode === 'recovery') {
-        const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
-        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
-          method: 'PATCH',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-        }));
-        await revokeSupabaseRefreshTokens(identity.id);
         if (identity.status !== 'pending') {
+          recoveryCleanupStage = 'audit_log';
           await writeAdminAudit(identity.id, 'auth.password.recovered', 'security', identity.id);
         }
       }
@@ -5727,12 +5764,41 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         status: error instanceof SupabaseRequestError ? error.status : undefined,
         code: error instanceof SupabaseRequestError ? error.code : undefined,
         errorName: error instanceof Error ? error.name : 'UnknownError',
+        ...(mode === 'recovery' ? {
+          recoveryCleanupStage,
+          adminSessionsRevoked: recoveryAdminSessionsRevoked,
+          finalSessionSweepComplete: recoveryFinalSessionSweepComplete,
+          refreshTokensRevoked: recoveryRefreshTokensRevoked,
+        } : {}),
       });
-      if (error instanceof SupabaseRequestError && [400, 401, 403].includes(error.status)) {
+      if (mode === 'recovery' && recoveryPasswordUpdated) {
+        res.status(503).json({
+          message: recoveryFinalSessionSweepComplete
+            ? 'Your password was changed and existing CMS sessions were revoked, but recovery cleanup did not finish. Request a new recovery email and complete it again to finish securely.'
+            : 'Your password was changed, but the final Admin session cleanup could not be confirmed. Treat any existing Admin session as potentially active, request a new recovery email, and contact your established administrator support channel.',
+        });
+        return;
+      }
+      if (mode === 'recovery' && recoveryPasswordUpdateStarted) {
+        res.status(503).json({
+          message: recoveryFinalSessionSweepComplete
+            ? 'We could not confirm whether your password was changed. Existing CMS sessions were revoked. Request a new recovery email before retrying; the fresh link will be verified before any further changes.'
+            : 'We could not confirm whether your password was changed. Earlier CMS sessions were revoked, but a final session check did not complete. Treat any existing Admin session as potentially active, request a new recovery email, and contact your established administrator support channel.',
+        });
+        return;
+      }
+      if (error instanceof SupabaseRequestError && [400, 401, 403].includes(error.status) &&
+        (mode !== 'recovery' || recoveryCleanupStage === 'not_started')) {
         res.status(401).json({ message: invalidLinkMessage });
         return;
       }
-      res.status(503).json({ message: 'Setup could not be completed right now. Retry, or ask the Primary Owner to resend setup.' });
+      res.status(503).json({
+        message: mode === 'recovery'
+          ? recoveryAdminSessionsRevoked
+            ? 'Your password was not changed. Existing CMS sessions were revoked, but recovery could not be completed. Request a new recovery email and try again.'
+            : 'Your password was not changed, and the system could not confirm that existing CMS sessions were revoked. Request a new recovery email and contact your established administrator support channel.'
+          : 'Setup could not be completed right now. Retry, or ask the Primary Owner to resend setup.',
+      });
     }
   });
 

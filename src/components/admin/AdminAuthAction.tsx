@@ -82,6 +82,7 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
     setBusy(true);
     setError('');
     setNotice('');
+    let recoveryOutcomeUnknown = mode === 'recovery';
     try {
       const response = await fetch('/api/admin/auth/complete', {
         method: 'POST',
@@ -93,13 +94,20 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
         }),
       });
       const data = await response.json() as { message?: string };
+      recoveryOutcomeUnknown = false;
       if (!response.ok) throw new Error(data.message || `Request failed (${response.status}).`);
       clearAdminAuthCallbackVerifier(window.localStorage, callback.codeVerifier);
       setNotice(data.message || 'Your account was updated. Sign in to continue.');
       setPassword('');
       setConfirmPassword('');
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : 'Setup could not be completed. Retry or ask the Primary Owner to resend setup.';
+      const message = recoveryOutcomeUnknown
+        ? 'We could not confirm whether your password was changed or whether all Admin sessions were revoked. Treat any existing Admin session as potentially active, request a new recovery email, and contact your established administrator support channel.'
+        : reason instanceof Error
+          ? reason.message
+          : mode === 'recovery'
+            ? 'Password recovery could not be completed. Request a new recovery email and try again.'
+            : 'Setup could not be completed. Retry or ask the Primary Owner to resend setup.';
       setError(message);
       if (message.includes('Sign out the existing administrator session')) {
         await checkInvitationBrowserSession();
