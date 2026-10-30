@@ -8,12 +8,17 @@ export interface AdminAuthCallback {
   error?: string;
 }
 
-const invalidLinkMessage = 'This verification link is missing, invalid, or expired. Ask the Primary Owner to resend setup.';
+function invalidLinkMessage(mode: 'invite' | 'recovery'): string {
+  return mode === 'recovery'
+    ? 'This password-reset link is missing, invalid, or expired. Request a new recovery email.'
+    : 'This verification link is missing, invalid, or expired. Ask the Primary Owner to resend setup.';
+}
 
 export function readAdminAuthCallback(
   search: string,
   hash: string,
   storage: Pick<Storage, 'length' | 'key' | 'getItem'>,
+  mode: 'invite' | 'recovery' = 'invite',
 ): AdminAuthCallback {
   const query = new URLSearchParams(search);
   const fragment = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
@@ -22,7 +27,7 @@ export function readAdminAuthCallback(
     ? invitationGeneration
     : undefined;
   if (query.has('error') || query.has('error_code') || fragment.has('error') || fragment.has('error_code')) {
-    return { error: invalidLinkMessage };
+    return { error: invalidLinkMessage(mode) };
   }
 
   const accessToken = query.get('access_token') || fragment.get('access_token');
@@ -32,7 +37,7 @@ export function readAdminAuthCallback(
   if (tokenHash) {
     const tokenType = query.get('type') || fragment.get('type') || '';
     if (['signup', 'invite', 'recovery'].includes(tokenType)) return { tokenHash, tokenType, invitationGeneration: validGeneration };
-    return { error: invalidLinkMessage };
+    return { error: invalidLinkMessage(mode) };
   }
 
   const authorizationCode = query.get('code');
@@ -48,7 +53,7 @@ export function readAdminAuthCallback(
   const distinctVerifiers = [...new Set(verifierEntries)];
   return distinctVerifiers.length === 1
     ? { authorizationCode, codeVerifier: distinctVerifiers[0], invitationGeneration: validGeneration }
-    : { error: invalidLinkMessage };
+    : { error: invalidLinkMessage(mode) };
 }
 
 export function clearAdminAuthCallbackVerifier(

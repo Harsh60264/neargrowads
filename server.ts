@@ -21,6 +21,7 @@ import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
 import {
   buildAdminInvitationRedirect,
+  buildAdminPasswordResetRedirect,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
 } from './server/adminInvitation';
@@ -33,6 +34,7 @@ import {
 } from './server/temporaryAdminPassword';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import { resolveAdminOwnerConfiguration, validatePreviewAdminConfiguration } from './server/adminOwnerConfig';
+import { isSameOriginHost } from './server/adminAuthOrigin';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -3572,13 +3574,7 @@ function currentAdmin(res: Response): AdminIdentity | undefined {
 }
 
 function isSameOriginRequest(req: Request): boolean {
-  const origin = req.header('origin');
-  if (!origin) return false;
-  try {
-    return new URL(origin).host === req.get('host');
-  } catch {
-    return false;
-  }
+  return isSameOriginHost(req.header('origin'), req.get('host'));
 }
 
 function requireAdmin(_req: Request, res: Response): boolean {
@@ -5503,7 +5499,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const redirectTo = `${adminAuthRedirectOrigin(req)}/admin/password-reset`;
+      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req));
       const query = new URLSearchParams({ redirect_to: redirectTo });
       const response = await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',
@@ -5551,6 +5547,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const hasAccessToken = typeof accessToken === 'string';
     const hasCodeCallback = typeof authorizationCode === 'string' || typeof codeVerifier === 'string';
     const hasTokenHash = typeof tokenHash === 'string' || typeof tokenType === 'string';
+    const invalidLinkMessage = mode === 'recovery'
+      ? 'The password-reset link is invalid or expired. Request a new recovery email.'
+      : 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.';
     if ([hasAccessToken, hasCodeCallback, hasTokenHash].filter(Boolean).length !== 1 ||
       (hasAccessToken && (accessToken.length < 20 || accessToken.length > 10_000)) ||
       (typeof authorizationCode === 'string' && (authorizationCode.length < 8 || authorizationCode.length > 2_000)) ||
@@ -5577,7 +5576,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       } else if (typeof tokenHash === 'string' && typeof tokenType === 'string') {
         const allowedTypes = mode === 'invite' ? ['signup', 'invite'] : ['recovery'];
         if (!allowedTypes.includes(tokenType)) {
-          res.status(401).json({ message: 'This email link is not valid for the requested account action.' });
+          res.status(401).json({ message: invalidLinkMessage });
           return;
         }
         const verifyResponse = await supabaseAuthRequest('verify', {
@@ -5588,7 +5587,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         verifiedAccessToken = verified.access_token;
       }
       if (!verifiedAccessToken || verifiedAccessToken.length > 10_000) {
-        res.status(401).json({ message: 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.' });
+        res.status(401).json({ message: invalidLinkMessage });
         return;
       }
       const authResponse = await supabaseAuthRequest('user', { method: 'GET' }, verifiedAccessToken);
@@ -5727,7 +5726,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
       if (error instanceof SupabaseRequestError && [400, 401, 403].includes(error.status)) {
-        res.status(401).json({ message: 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.' });
+        res.status(401).json({ message: invalidLinkMessage });
         return;
       }
       res.status(503).json({ message: 'Setup could not be completed right now. Retry, or ask the Primary Owner to resend setup.' });
@@ -6409,7 +6408,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
       await revokeSupabaseRefreshTokens(target.id);
-      const redirectTo = `${adminAuthRedirectOrigin(req)}/admin/password-reset`;
+      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req));
       const query = new URLSearchParams({ redirect_to: redirectTo });
       await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',

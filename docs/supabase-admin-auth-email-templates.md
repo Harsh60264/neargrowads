@@ -12,7 +12,7 @@ Use the exact subject and HTML for each corresponding template:
 - **Confirm signup** is used by new-admin setup and verification resend. The CMS creates or reuses the Auth identity first and requests a signup confirmation email. For a newly created identity, a separate branded application email carries the 24-hour temporary password; do not add a password or dynamic password placeholder to this template.
 - **Reset password** is used for verified-identity setup recovery and ordinary administrator password resets.
 
-All three use Supabase's `{{ .ConfirmationURL }}` variable. Supabase constructs that URL using the redirect supplied by the existing server flow, including the secure Admin callback route and invitation generation where applicable. Do not replace it with a hard-coded URL or expose the token separately.
+The manually issued **Invite user** template uses Supabase's `{{ .ConfirmationURL }}` variable. The CMS **Confirm signup** and **Reset password** flows use the requested, allow-listed `{{ .RedirectTo }}` plus `{{ .TokenHash }}` so the callback can verify the one-time token on the server. Their redirect URLs always include a query parameter; preserve the `&token_hash=...&type=...` suffix exactly. Do not substitute a hard-coded host. The callback immediately removes token parameters from browser history, and the site's `Referrer-Policy: no-referrer` prevents forwarding them to other origins.
 
 ## Invite user
 
@@ -71,7 +71,7 @@ The current delegated-admin flow uses this template when sending a verification/
             <p style="font-size:16px;line-height:1.6;">Your administrator access will allow you to manage the sections and permissions assigned by the account owner.</p>
             <p style="font-size:16px;line-height:1.6;">To get started, verify your email address using the button below. If you also received a separate NearGrow Ads onboarding email with a temporary password, use it for your first sign-in and replace it immediately. If you did not receive a temporary-password email, follow the password setup instructions from the Primary Owner; existing Auth passwords are never replaced as part of this verification.</p>
             <p style="margin:28px 0;text-align:center;">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Verify Email &amp; Continue</a>
+              <a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=signup" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Verify Email &amp; Continue</a>
             </p>
             <h2 style="margin:28px 0 8px;font-size:16px;color:#173c26;">For your security</h2>
             <ul style="padding-left:22px;font-size:14px;line-height:1.7;color:#405047;">
@@ -110,7 +110,7 @@ Keep recovery visually branded but clearly distinct from an invitation.
             <p style="font-size:16px;line-height:1.6;">A secure password setup or reset was requested for your NearGrow Ads CMS identity.</p>
             <p style="font-size:16px;line-height:1.6;">Use the button below to continue. If you are completing an administrator invitation, your CMS access remains pending until secure setup is complete.</p>
             <p style="margin:28px 0;text-align:center;">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Set or Reset Password</a>
+              <a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=recovery" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Set or Reset Password</a>
             </p>
             <p style="font-size:14px;line-height:1.7;color:#405047;">For your security, create your own password and never share your password or this link. If you did not request this, you can safely ignore this email.</p>
             <p style="margin-top:28px;font-size:14px;line-height:1.6;">Regards,<br><strong>NearGrow Ads Team</strong><br><a href="https://www.neargrowads.com" style="color:#286d3b;">www.neargrowads.com</a></p>
@@ -124,7 +124,7 @@ Keep recovery visually branded but clearly distinct from an invitation.
 
 ## Safe rollout
 
-1. Install and preview the three templates in staging first. Send test messages through the actual Invite user, Confirm signup, and Reset password routes and verify each CTA returns to the expected NearGrow callback without exposing the token in analytics or third-party resources.
+1. Install and preview the templates in staging first. Send test messages through the actual Invite user, Confirm signup, and Reset password routes. Confirm the application-generated redirect contains the appropriate callback path and query before using the `RedirectTo` templates. Verify each CTA returns to that exact origin, token-hash verification succeeds only once, and token parameters are removed from the address bar without being sent to third-party resources.
 2. Verify SMTP sender/domain authentication and invitation delivery before production use.
 3. Configure the matching templates in the production Supabase Dashboard only after review. Template and SMTP changes are separate from application deployment; this repository does not update hosted Supabase configuration.
-4. Test one new invite, one unverified resend, and one verified identity recovery. The recovery email must not be presented as a fresh invitation, and invitation templates must use the secure confirmation URL rather than embedding a token.
+4. Test one new invite, one unverified resend, and one verified identity recovery. The recovery email must not be presented as a fresh invitation. The CMS Confirm signup and Reset password templates must use the supplied RedirectTo and TokenHash variables; do not use ConfirmationURL for these server-verified callback flows.

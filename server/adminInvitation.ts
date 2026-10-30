@@ -41,6 +41,12 @@ export function buildAdminInvitationRedirect(
   return redirect.toString();
 }
 
+export function buildAdminPasswordResetRedirect(siteUrl: string): string {
+  const redirect = new URL('/admin/password-reset', siteUrl);
+  redirect.searchParams.set('mode', 'recovery');
+  return redirect.toString();
+}
+
 export function decideAdminInvitationCompletion(
   identity: AdminInvitationIdentity | undefined,
   authUser: VerifiedAdminAuthUser,

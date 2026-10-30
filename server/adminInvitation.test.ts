@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   buildAdminInvitationRedirect,
+  buildAdminPasswordResetRedirect,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
   type AdminInvitationIdentity,
 } from './adminInvitation';
+import { isSameOriginHost } from './adminAuthOrigin';
 import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from '../src/components/admin/adminAuthCallback';
 
 const pendingIdentity: AdminInvitationIdentity = {
@@ -107,6 +109,70 @@ test('invitation recovery redirects to the production onboarding route with a ge
     buildAdminInvitationRedirect('https://www.neargrowads.com/', 'invite', '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62', true),
     'https://www.neargrowads.com/admin/accept-invite?mode=invite&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&setup=temporary',
   );
+});
+
+test('builds password reset redirects for the configured custom domain with a template query separator', () => {
+  assert.equal(
+    buildAdminPasswordResetRedirect('https://staging.neargrowads.com'),
+    'https://staging.neargrowads.com/admin/password-reset?mode=recovery',
+  );
+  assert.equal(
+    buildAdminPasswordResetRedirect('https://www.neargrowads.com'),
+    'https://www.neargrowads.com/admin/password-reset?mode=recovery',
+  );
+});
+
+test('accepts same-origin callbacks on the custom staging and production domains only', () => {
+  assert.equal(isSameOriginHost('https://staging.neargrowads.com', 'staging.neargrowads.com'), true);
+  assert.equal(isSameOriginHost('https://www.neargrowads.com', 'www.neargrowads.com'), true);
+  assert.equal(isSameOriginHost('https://staging.neargrowads.com', 'www.neargrowads.com'), false);
+  assert.equal(isSameOriginHost('https://www.neargrowads.com', 'staging.neargrowads.com'), false);
+  assert.equal(isSameOriginHost('https://attacker.example', 'staging.neargrowads.com'), false);
+  assert.equal(isSameOriginHost(undefined, 'staging.neargrowads.com'), false);
+});
+
+test('accepts a one-time token hash in a fresh browser without a PKCE verifier', () => {
+  const callback = readAdminAuthCallback(
+    '?mode=recovery&token_hash=one-time-token-hash-value&type=recovery',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'recovery',
+  );
+
+  assert.equal(callback.tokenHash, 'one-time-token-hash-value');
+  assert.equal(callback.tokenType, 'recovery');
+  assert.equal(callback.codeVerifier, undefined);
+  assert.equal(callback.error, undefined);
+});
+
+test('recovery callback failures ask for a new recovery email, not invitation setup', () => {
+  const callback = readAdminAuthCallback(
+    '?error=access_denied&error_code=otp_expired',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'recovery',
+  );
+
+  assert.match(callback.error || '', /password-reset link.*invalid, or expired.*new recovery email/i);
+});
+
+test('callback completion verifies token hashes server-side without requiring a CMS session', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const end = serverSource.indexOf("app.get('/api/admin/users'", start);
+  const completionRoute = serverSource.slice(start, end);
+
+  assert.match(completionRoute, /if \(await authenticateAdminSession\(req\)\)[\s\S]*?status\(409\)/);
+  assert.doesNotMatch(completionRoute, /requireAdmin\(req,\s*res\)/);
+  assert.match(completionRoute, /supabaseAuthRequest\('verify'[\s\S]*?token_hash:\s*tokenHash,\s*type:\s*tokenType/);
+  assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+  assert.match(completionRoute, /password-reset link is invalid or expired\. Request a new recovery email\./);
+  assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\)\)[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
+  assert.match(serverSource, /sameSite:\s*'strict'[\s\S]*?path:\s*'\/api\/admin'/);
+  assert.doesNotMatch(serverSource.slice(
+    serverSource.indexOf('function setAdminSessionCookie'),
+    serverSource.indexOf('function safeStringEqual'),
+  ), /domain:/i);
 });
 
 test('callback retains the current invitation generation and rejects expired callbacks', () => {
@@ -452,9 +518,15 @@ test('branded email instructions configure the distinct Supabase invitation and 
   assert.match(templateGuide, /## Invite user/);
   assert.match(templateGuide, /## Confirm signup/);
   assert.match(templateGuide, /## Reset password/);
-  assert.match(templateGuide, /{{ \.ConfirmationURL }}/);
+  assert.match(templateGuide, /href="\{\{ \.RedirectTo \}\}&amp;token_hash=\{\{ \.TokenHash \}\}&amp;type=signup"/);
+  assert.match(templateGuide, /href="\{\{ \.RedirectTo \}\}&amp;token_hash=\{\{ \.TokenHash \}\}&amp;type=recovery"/);
+  assert.match(templateGuide, /The manually issued \*\*Invite user\*\* template uses Supabase's `\{\{ \.ConfirmationURL \}\}`/);
+  assert.match(templateGuide, /token-hash verification succeeds only once/);
   assert.match(templateGuide, /Accept Invitation &amp; Set Up Account/);
   assert.match(templateGuide, /Reset your NearGrow Ads CMS password/);
+
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  assert.equal((serverSource.match(/buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\)\)/g) || []).length, 2);
 });
 
 test('consumed PKCE verifier is removed without touching unrelated Supabase Auth storage', () => {

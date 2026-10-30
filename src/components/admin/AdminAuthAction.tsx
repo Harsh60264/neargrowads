@@ -6,7 +6,12 @@ import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from './adminAu
 export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: 'invite' | 'recovery'; temporaryCredential?: boolean }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [callback] = useState(() => readAdminAuthCallback(window.location.search, window.location.hash, window.localStorage));
+  const [callback] = useState(() => readAdminAuthCallback(
+    window.location.search,
+    window.location.hash,
+    window.localStorage,
+    mode,
+  ));
   const [sessionGate, setSessionGate] = useState<'checking' | 'signout_required' | 'ready' | 'error'>('checking');
   const [sessionGateError, setSessionGateError] = useState('');
   const [isolationBusy, setIsolationBusy] = useState(false);
@@ -135,7 +140,9 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
           <button type="button" disabled={isolationBusy} onClick={() => void checkInvitationBrowserSession()} className="mt-3 min-h-9 rounded-lg border border-rose-200/30 px-3 text-xs font-semibold disabled:opacity-50">Check again</button>
         </div>}
         {callback.error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{callback.error}</div>}
-        {!hasCallback && !callback.error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">This verification link is missing or expired. Ask the Primary Owner to resend setup.</div>}
+        {!hasCallback && !callback.error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{mode === 'recovery'
+          ? 'This password-reset link is missing or expired. Request a new recovery email.'
+          : 'This verification link is missing or expired. Ask the Primary Owner to resend setup.'}</div>}
         {error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{error}</div>}
         {notice ? <div role="status" className="mt-5 rounded-xl border border-[#67D8B7]/30 bg-[#67D8B7]/10 p-3 text-sm text-[#B8F1DC]">{notice}<a href="/admin/login" className="ml-2 underline">Go to sign in</a></div> : sessionGate === 'ready' && (
           usesTemporaryCredential ? (
