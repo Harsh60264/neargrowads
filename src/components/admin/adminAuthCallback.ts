@@ -45,19 +45,31 @@ export function readAdminAuthCallback(
   if ((mode === 'invite' || invitationSetup) && !validGeneration) {
     return { error: 'This invitation is missing or invalid. Ask the Primary Owner to resend setup.' };
   }
+  if (mode === 'recovery' && !validGeneration) {
+    return { error: 'This password-reset link is missing its current recovery state. Request a new recovery email.' };
+  }
 
   const accessToken = query.get('access_token') || fragment.get('access_token');
-  if (accessToken) return { accessToken, invitationGeneration: validGeneration };
+  if (accessToken) {
+    return mode === 'recovery'
+      ? { error: 'A signed-in session cannot authorize password recovery. Request a fresh recovery email.' }
+      : { accessToken, invitationGeneration: validGeneration };
+  }
 
   const tokenHash = query.get('token_hash') || query.get('token') || fragment.get('token_hash') || fragment.get('token');
   if (tokenHash) {
     const tokenType = query.get('type') || fragment.get('type') || '';
-    if (['signup', 'invite', 'recovery'].includes(tokenType)) return { tokenHash, tokenType, invitationGeneration: validGeneration };
+    if ((mode === 'recovery' ? tokenType === 'recovery' : ['signup', 'invite', 'recovery'].includes(tokenType))) {
+      return { tokenHash, tokenType, invitationGeneration: validGeneration };
+    }
     return { error: invalidLinkMessage(mode) };
   }
 
   const authorizationCode = query.get('code');
   if (!authorizationCode) return {};
+  if (mode === 'recovery') {
+    return { error: 'This password-reset link does not contain a fresh recovery token. Request a new recovery email.' };
+  }
 
   const verifierEntries: string[] = [];
   for (let index = 0; index < storage.length; index += 1) {

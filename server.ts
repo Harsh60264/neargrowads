@@ -20,10 +20,14 @@ import { normalizeTeamUrl } from './src/data/teamLinks';
 import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
 import {
+  type AdminRecoveryGeneration,
   buildAdminInvitationRedirect,
   buildAdminPasswordResetRedirect,
+  canCompleteAdminPasswordRecovery,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
+  hasPurposeBoundAdminRecoveryProof,
+  isCurrentAdminRecoveryGeneration,
   isCurrentPendingAdminInvitation,
   isValidAdminInvitationGeneration,
 } from './server/adminInvitation';
@@ -5394,7 +5398,49 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req));
+      const recoveryGeneration = randomUUID();
+      const accountQuery = new URLSearchParams({
+        email: `eq.${email}`,
+        status: 'in.(active,pending)',
+        archived_at: 'is.null',
+        select: 'id,status,invitation_generation,is_primary_owner',
+        limit: '2',
+      });
+      const accounts = await readSupabaseJson<Array<{
+        id: string;
+        status: 'active' | 'pending';
+        invitation_generation: string | null;
+        is_primary_owner: boolean;
+      }>>(await supabaseAdminRequest(`rest/v1/admin_users?${accountQuery}`));
+      let callbackGeneration: string = recoveryGeneration;
+      const account = accounts.length === 1 ? accounts[0] : undefined;
+      if (account?.status === 'active') {
+        const generationQuery = new URLSearchParams({
+          id: `eq.${account.id}`,
+          status: 'eq.active',
+          archived_at: 'is.null',
+          select: 'id',
+        });
+        const rotated = await readSupabaseJson<Array<{ id: string }>>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${generationQuery}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({
+              invitation_generation: recoveryGeneration,
+              updated_at: new Date().toISOString(),
+            }),
+          }),
+        );
+        if (rotated.length !== 1 || rotated[0].id !== account.id) {
+          res.json({ message: 'If this address has an administrator account, a recovery email has been sent.' });
+          return;
+        }
+      } else if (account?.status === 'pending' &&
+        !account.is_primary_owner &&
+        isValidAdminInvitationGeneration(account.invitation_generation)) {
+        callbackGeneration = account.invitation_generation;
+      }
+      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req), callbackGeneration);
       const query = new URLSearchParams({ redirect_to: redirectTo });
       const response = await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',
@@ -5446,6 +5492,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const invalidLinkMessage = mode === 'recovery'
       ? 'The password-reset link is invalid, expired, or already used. Request a new recovery email.'
       : 'The verification link is invalid, expired, or already used. Ask the Primary Owner to resend setup.';
+    const recoveryProofValid = mode !== 'recovery' || hasPurposeBoundAdminRecoveryProof({
+      accessToken,
+      authorizationCode,
+      codeVerifier,
+      tokenHash,
+      tokenType,
+    }) && isValidAdminInvitationGeneration(invitationGeneration);
     if ([hasAccessToken, hasCodeCallback, hasTokenHash].filter(Boolean).length !== 1 ||
       (hasAccessToken && (accessToken.length < 20 || accessToken.length > 10_000)) ||
       (typeof authorizationCode === 'string' && (authorizationCode.length < 8 || authorizationCode.length > 2_000)) ||
@@ -5455,6 +5508,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       (hasTokenHash && (typeof tokenHash !== 'string' || typeof tokenType !== 'string' ||
         !['signup', 'invite', 'recovery'].includes(tokenType))) ||
       (mode !== 'invite' && mode !== 'recovery') ||
+      !recoveryProofValid ||
       (invitationSetup !== undefined && typeof invitationSetup !== 'boolean') ||
       (typeof password !== 'string' && !(mode === 'invite' && password === undefined)) ||
       (password !== undefined && (!isStrongAdminPassword(password) || password !== confirmPassword))) {
@@ -5480,7 +5534,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         status: 'pending';
         is_primary_owner: false;
       } | undefined;
-      if (mode === 'invite' || invitationSetup === true || invitationGeneration !== undefined) {
+      let recoveryGenerationRecord: AdminRecoveryGeneration | undefined;
+      let recoveryCompletionGeneration: string | undefined = invitationGeneration;
+      if (mode === 'invite' || invitationSetup === true) {
         const invalidInvitationMessage = 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.';
         if (!isValidAdminInvitationGeneration(invitationGeneration)) {
           res.status(401).json({ message: invalidInvitationMessage });
@@ -5506,6 +5562,24 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           return;
         }
         pendingInvitation = currentInvitation;
+      }
+      if (mode === 'recovery') {
+        const recoveryGenerationQuery = new URLSearchParams({
+          invitation_generation: `eq.${invitationGeneration}`,
+          status: 'in.(active,pending)',
+          archived_at: 'is.null',
+          select: 'id,email,invitation_generation,status,is_primary_owner,archived_at',
+          limit: '2',
+        });
+        const recoveryGenerations = await readSupabaseJson<AdminRecoveryGeneration[]>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${recoveryGenerationQuery}`),
+        );
+        const currentRecoveryGeneration = recoveryGenerations.length === 1 ? recoveryGenerations[0] : undefined;
+        if (!isCurrentAdminRecoveryGeneration(currentRecoveryGeneration, invitationGeneration)) {
+          res.status(401).json({ message: invalidLinkMessage });
+          return;
+        }
+        recoveryGenerationRecord = currentRecoveryGeneration;
       }
 
       let verifiedAccessToken = accessToken as string | undefined;
@@ -5580,7 +5654,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
         return;
       }
-      if (identity.status === 'pending' && !pendingInvitation) {
+      if (mode === 'invite' && identity.status === 'pending' && !pendingInvitation) {
         res.status(401).json({
           message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.',
         });
@@ -5593,13 +5667,65 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(401).json({ message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.' });
         return;
       }
+      if (mode === 'recovery' && recoveryGenerationRecord) {
+        const recoveryGenerationQuery = new URLSearchParams({
+          invitation_generation: `eq.${invitationGeneration}`,
+          status: 'in.(active,pending)',
+          archived_at: 'is.null',
+          select: 'id,email,invitation_generation,status,is_primary_owner,archived_at',
+          limit: '2',
+        });
+        const recoveryGenerations = await readSupabaseJson<AdminRecoveryGeneration[]>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${recoveryGenerationQuery}`),
+        );
+        const currentRecoveryGeneration = recoveryGenerations.length === 1 ? recoveryGenerations[0] : undefined;
+        if (!isCurrentAdminRecoveryGeneration(currentRecoveryGeneration, invitationGeneration)) {
+          res.status(401).json({ message: invalidLinkMessage });
+          return;
+        }
+        const recoveryRecordEmail = recoveryGenerationRecord.email;
+        if (typeof recoveryRecordEmail !== 'string' ||
+          currentRecoveryGeneration.id !== recoveryGenerationRecord.id ||
+          currentRecoveryGeneration.email.toLowerCase() !== recoveryRecordEmail.toLowerCase() ||
+          currentRecoveryGeneration.status !== recoveryGenerationRecord.status ||
+          currentRecoveryGeneration.is_primary_owner !== recoveryGenerationRecord.is_primary_owner) {
+          res.status(401).json({ message: invalidLinkMessage });
+          return;
+        }
+        recoveryGenerationRecord = currentRecoveryGeneration;
+      }
       if ((mode === 'invite' && identity.status !== 'active' && decideAdminInvitationCompletion(identity, authUser) === 'reject') ||
         (mode === 'invite' && identity.status === 'active' &&
           (identity.email !== authUser.email.toLowerCase() || identity.isPrimaryOwner)) ||
-        (mode === 'recovery' && (identity.email !== authUser.email.toLowerCase() ||
-          identity.status === 'disabled' || (identity.status !== 'active' && identity.status !== 'pending')))) {
+        (mode === 'recovery' &&
+          !canCompleteAdminPasswordRecovery(identity, authUser, recoveryGenerationRecord, invitationGeneration))) {
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
         return;
+      }
+      if (mode === 'recovery' && recoveryGenerationRecord) {
+        recoveryCompletionGeneration = randomUUID();
+        const claimQuery = new URLSearchParams({
+          id: `eq.${identity.id}`,
+          invitation_generation: `eq.${invitationGeneration}`,
+          status: `eq.${identity.status}`,
+          is_primary_owner: identity.isPrimaryOwner ? 'eq.true' : 'eq.false',
+          archived_at: 'is.null',
+          select: 'id',
+        });
+        const claimed = await readSupabaseJson<Array<{ id: string }>>(
+          await supabaseAdminRequest(`rest/v1/admin_users?${claimQuery}`, {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({
+              invitation_generation: recoveryCompletionGeneration,
+              updated_at: new Date().toISOString(),
+            }),
+          }),
+        );
+        if (claimed.length !== 1 || claimed[0].id !== identity.id) {
+          res.status(401).json({ message: invalidLinkMessage });
+          return;
+        }
       }
       if (mode === 'invite' && identity.status === 'active') {
         const replayResult = await readSupabaseJson<{ status?: string }>(
@@ -5694,7 +5820,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
                 p_user_id: identity.id,
                 p_email: identity.email,
                 p_must_change_password: false,
-                p_invitation_generation: invitationGeneration,
+                p_invitation_generation: recoveryCompletionGeneration,
               }),
             }),
           );
@@ -5755,7 +5881,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(503).json({
           message: recoveryFinalSessionSweepComplete
             ? 'We could not confirm whether your password was changed. Existing CMS sessions were revoked. Request a new recovery email before retrying; the fresh link will be verified before any further changes.'
-            : 'We could not confirm whether your password was changed. The account remains pending and existing CMS sessions were revoked. Do not retry this link; ask the Primary Owner to send a fresh recovery link. Treat any existing Admin session as potentially active until the fresh recovery is completed.',
+            : 'We could not confirm whether your password was changed. Recovery remains incomplete, and existing CMS sessions were revoked. Do not retry this link; ask the Primary Owner to send a fresh recovery link. Treat existing Supabase Auth sessions as potentially active until the fresh recovery is completed.',
         });
         return;
       }
@@ -6427,22 +6553,33 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
       const userQuery = new URLSearchParams({ id: `eq.${target.id}` });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
+      const recoveryGeneration = randomUUID();
+      userQuery.set('status', 'eq.active');
+      userQuery.set('archived_at', 'is.null');
+      userQuery.set('is_primary_owner', 'eq.false');
+      userQuery.set('select', 'id');
+      const updatedAccounts = await readSupabaseJson<Array<{ id: string }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
         method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
+        headers: { Prefer: 'return=representation' },
         body: JSON.stringify({
           must_change_password: true,
-          temporary_password_expires_at: null,
+          temporary_password_expires_at: new Date(0).toISOString(),
+          invitation_generation: recoveryGeneration,
           updated_at: new Date().toISOString(),
         }),
-      }));
+      }),
+      );
+      if (updatedAccounts.length !== 1 || updatedAccounts[0].id !== target.id) {
+        throw new Error('The active administrator recovery generation could not be claimed.');
+      }
       const sessionsQuery = new URLSearchParams({ user_id: `eq.${target.id}`, revoked_at: 'is.null' });
       await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       }));
-      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req));
+      const redirectTo = buildAdminPasswordResetRedirect(adminAuthRedirectOrigin(req), recoveryGeneration);
       const query = new URLSearchParams({ redirect_to: redirectTo });
       await readSupabaseJson<unknown>(await supabaseAuthRequest(`recover?${query}`, {
         method: 'POST',

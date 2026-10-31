@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   buildAdminInvitationRedirect,
   buildAdminPasswordResetRedirect,
+  canCompleteAdminPasswordRecovery,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
+  hasPurposeBoundAdminRecoveryProof,
   isCurrentPendingAdminInvitation,
   isValidAdminInvitationGeneration,
   type AdminInvitationIdentity,
@@ -139,13 +141,14 @@ test('invitation recovery redirects to the production onboarding route with a ge
 });
 
 test('builds password reset redirects for the configured custom domain with a template query separator', () => {
+  const generation = '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62';
   assert.equal(
-    buildAdminPasswordResetRedirect('https://staging.neargrowads.com'),
-    'https://staging.neargrowads.com/admin/password-reset?mode=recovery',
+    buildAdminPasswordResetRedirect('https://staging.neargrowads.com', generation),
+    `https://staging.neargrowads.com/admin/password-reset?mode=recovery&invitation_generation=${generation}`,
   );
   assert.equal(
-    buildAdminPasswordResetRedirect('https://www.neargrowads.com'),
-    'https://www.neargrowads.com/admin/password-reset?mode=recovery',
+    buildAdminPasswordResetRedirect('https://www.neargrowads.com', generation),
+    `https://www.neargrowads.com/admin/password-reset?mode=recovery&invitation_generation=${generation}`,
   );
 });
 
@@ -160,7 +163,7 @@ test('accepts same-origin callbacks on the custom staging and production domains
 
 test('accepts a one-time token hash in a fresh browser without a PKCE verifier', () => {
   const callback = readAdminAuthCallback(
-    '?mode=recovery&token_hash=one-time-token-hash-value&type=recovery',
+    '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&token_hash=one-time-token-hash-value&type=recovery',
     '',
     { length: 0, key: () => null, getItem: () => null },
     'recovery',
@@ -170,6 +173,74 @@ test('accepts a one-time token hash in a fresh browser without a PKCE verifier',
   assert.equal(callback.tokenType, 'recovery');
   assert.equal(callback.codeVerifier, undefined);
   assert.equal(callback.error, undefined);
+});
+
+test('recovery requires a fresh purpose-bound token hash, never an existing JWT or PKCE session', () => {
+  const validProof = {
+    tokenHash: 'synthetic-one-time-recovery-token',
+    tokenType: 'recovery',
+  };
+  assert.equal(hasPurposeBoundAdminRecoveryProof(validProof), true);
+  assert.equal(hasPurposeBoundAdminRecoveryProof({
+    accessToken: 'synthetic.existing.auth.jwt',
+  }), false);
+  assert.equal(hasPurposeBoundAdminRecoveryProof({
+    authorizationCode: 'synthetic-pkce-code',
+    codeVerifier: 'a'.repeat(43),
+  }), false);
+  assert.equal(hasPurposeBoundAdminRecoveryProof({
+    ...validProof,
+    tokenType: 'signup',
+  }), false);
+  assert.equal(hasPurposeBoundAdminRecoveryProof({
+    ...validProof,
+    accessToken: 'synthetic.existing.auth.jwt',
+  }), false);
+
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const end = serverSource.indexOf("app.get('/api/admin/users'", start);
+  const completionRoute = serverSource.slice(start, end);
+  const proofCheckIndex = completionRoute.indexOf('!recoveryProofValid');
+  const verifyIndex = completionRoute.indexOf("supabaseAuthRequest('verify'");
+  const passwordUpdateIndex = completionRoute.indexOf("method: 'PUT'");
+  assert.ok(proofCheckIndex >= 0 && proofCheckIndex < verifyIndex && verifyIndex < passwordUpdateIndex);
+  assert.match(completionRoute, /allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+});
+
+test('recovery callback rejects existing access tokens, PKCE codes, expired and reused links', () => {
+  const storage = { length: 1, key: () => 'sb-project-auth-token-code-verifier', getItem: () => 'a'.repeat(43) };
+  const existingSession = readAdminAuthCallback(
+    '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&access_token=synthetic.existing.auth.jwt',
+    '',
+    storage,
+    'recovery',
+  );
+  const pkceCallback = readAdminAuthCallback(
+    '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&code=synthetic-pkce-code',
+    '',
+    storage,
+    'recovery',
+  );
+  const expiredCallback = readAdminAuthCallback(
+    '?mode=recovery&error=access_denied&error_code=otp_expired',
+    '',
+    storage,
+    'recovery',
+  );
+  const reusedCallback = readAdminAuthCallback(
+    '?mode=recovery&error=access_denied&error_code=otp_already_used',
+    '',
+    storage,
+    'recovery',
+  );
+
+  assert.match(existingSession.error || '', /signed-in session cannot authorize password recovery/i);
+  assert.match(pkceCallback.error || '', /does not contain a fresh recovery token/i);
+  assert.match(expiredCallback.error || '', /invalid, expired, or already used/i);
+  assert.match(reusedCallback.error || '', /invalid, expired, or already used/i);
+  assert.equal(existingSession.accessToken, undefined);
+  assert.equal(pkceCallback.authorizationCode, undefined);
 });
 
 test('a recovery callback without a token is rejected before setup can be submitted', () => {
@@ -183,7 +254,7 @@ test('a recovery callback without a token is rejected before setup can be submit
   assert.equal(callback.tokenHash, undefined);
   assert.equal(callback.accessToken, undefined);
   assert.equal(callback.authorizationCode, undefined);
-  assert.equal(callback.error, undefined);
+  assert.match(callback.error || '', /missing its current recovery state/i);
 
   const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
   assert.match(authActionSource, /!hasCallback && !callback\.error[\s\S]*?This password-reset link is missing, expired, or already used/);
@@ -237,10 +308,10 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.match(completionRoute, /invitationSetup === true/);
   assert.match(completionRoute, /identity\.id !== pendingInvitation\.id[\s\S]*?identity\.status !== 'pending'/);
   assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
+  assert.match(completionRoute, /hasPurposeBoundAdminRecoveryProof/);
   assert.match(completionRoute, /mode === 'recovery'\s*\? 'The password-reset request is incomplete or invalid/);
   assert.match(completionRoute, /mode === 'recovery'\s*\? 'Verify this email address before resetting the password/);
-  assert.match(completionRoute, /identity\.email !== authUser\.email\.toLowerCase\(\)/);
-  assert.match(completionRoute, /identity\.status === 'disabled'/);
+  assert.match(completionRoute, /canCompleteAdminPasswordRecovery\(identity,\s*authUser,\s*recoveryGenerationRecord,\s*invitationGeneration\)/);
   assert.match(completionRoute, /revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/);
   assert.equal((completionRoute.match(/revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/g) || []).length, 1);
   assert.doesNotMatch(serverSource, /auth\/v1\/admin\/users\/\$\{encodeURIComponent\(userId\)\}\/logout/);
@@ -320,7 +391,7 @@ test('Primary Owner sign-in and ordinary password recovery remain separate and a
 
   assert.match(pageSource, /fetch\('\/api\/admin\/login'/);
   assert.match(loginRoute, /supabaseAuthRequest\('token\?grant_type=password'/);
-  assert.match(recoveryRoute, /buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\)\)/);
+  assert.match(recoveryRoute, /buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\),\s*callbackGeneration\)/);
   assert.match(recoveryRoute, /supabaseAuthRequest\(`recover\?\$\{query\}`/);
   assert.match(pageSource, /Forgot password\? Send a secure recovery email/);
   assert.match(pageSource, /aria-label=\{showLoginPassword \? 'Hide password' : 'Show password'\}/);
@@ -360,10 +431,10 @@ test('recovery completes pending CMS setup despite failed global Auth-session re
   assert.match(completionRoute, /recoveryPasswordUpdateStarted = mode === 'recovery'/);
   assert.match(completionRoute, /recoveryPasswordUpdated = mode === 'recovery'/);
   assert.match(completionRoute, /recoveryPasswordUpdated\)[\s\S]*?password was changed and existing CMS sessions were revoked, but recovery cleanup did not finish/);
-  assert.match(completionRoute, /recoveryPasswordUpdateStarted\)[\s\S]*?could not confirm whether your password was changed\. The account remains pending[\s\S]*?Do not retry this link/);
+  assert.match(completionRoute, /recoveryPasswordUpdateStarted\)[\s\S]*?could not confirm whether your password was changed\. Recovery remains incomplete[\s\S]*?Do not retry this link/);
   assert.match(completionRoute, /recoveryAdminSessionsRevoked[\s\S]*?system could not confirm that existing CMS sessions were revoked/);
   assert.match(completionRoute, /finalSessionSweepComplete: recoveryFinalSessionSweepComplete/);
-  assert.match(completionRoute, /recoveryFinalSessionSweepComplete[\s\S]*?account remains pending[\s\S]*?Treat any existing Admin session as potentially active/);
+  assert.match(completionRoute, /recoveryFinalSessionSweepComplete[\s\S]*?Recovery remains incomplete[\s\S]*?Treat existing Supabase Auth sessions as potentially active/);
   assert.match(completionRoute, /recoveryCleanupStage === 'not_started'/);
   assert.match(completionRoute, /recoveryCleanupStage,[\s\S]*?adminSessionsRevoked: recoveryAdminSessionsRevoked,[\s\S]*?finalSessionSweepComplete: recoveryFinalSessionSweepComplete,[\s\S]*?refreshTokensRevoked: recoveryRefreshTokensRevoked/);
   assert.match(authActionSource, /let recoveryOutcomeUnknown = mode === 'recovery'/);
@@ -384,7 +455,7 @@ test('verified pending Co-Owner recovery activates by invitation generation, not
     invitationMigration.indexOf('create or replace function public.prepare_admin_invitation_recovery'),
   );
 
-  assert.match(completionRoute, /if \(identity\.status === 'pending'\)[\s\S]*?complete_admin_invitation[\s\S]*?p_must_change_password: false,[\s\S]*?p_invitation_generation: invitationGeneration/);
+  assert.match(completionRoute, /if \(identity\.status === 'pending'\)[\s\S]*?complete_admin_invitation[\s\S]*?p_must_change_password: false,[\s\S]*?p_invitation_generation: recoveryCompletionGeneration/);
   assert.match(invitationRpc, /target_row\.is_primary_owner is distinct from false/i);
   assert.match(invitationRpc, /target_row\.invitation_generation is distinct from p_invitation_generation/i);
   assert.doesNotMatch(invitationRpc, /target_row\.role|role\s*=\s*'owner'/i);
@@ -558,13 +629,78 @@ test('recovery rejects incorrect identities and inactive account states', () => 
   }, verifiedAuthUser), 'reject');
 });
 
-test('callback retains the current invitation generation and rejects expired callbacks', () => {
+test('recovery identity is bound to the verified account and current pending invitation generation', () => {
+  const pendingInvitation = {
+    id: pendingIdentity.id,
+    email: pendingIdentity.email,
+    invitation_generation: '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
+    status: 'pending',
+    is_primary_owner: false,
+    archived_at: null,
+  };
+  assert.equal(canCompleteAdminPasswordRecovery(
+    pendingIdentity,
+    verifiedAuthUser,
+    pendingInvitation,
+    pendingInvitation.invitation_generation,
+  ), true);
+  assert.equal(canCompleteAdminPasswordRecovery(
+    pendingIdentity,
+    { ...verifiedAuthUser, id: 'f46dd026-fc56-4865-b4c7-f213f2c5076b' },
+    pendingInvitation,
+    pendingInvitation.invitation_generation,
+  ), false);
+  assert.equal(canCompleteAdminPasswordRecovery(pendingIdentity, verifiedAuthUser), false);
+  assert.equal(canCompleteAdminPasswordRecovery(
+    pendingIdentity,
+    verifiedAuthUser,
+    { ...pendingInvitation, invitation_generation: 'f46dd026-fc56-4865-b4c7-f213f2c5076b' },
+    pendingInvitation.invitation_generation,
+  ), false);
+  assert.equal(canCompleteAdminPasswordRecovery(
+    { ...pendingIdentity, archivedAt: '2026-10-30T00:00:00.000Z' },
+    verifiedAuthUser,
+    pendingInvitation,
+    pendingInvitation.invitation_generation,
+  ), false);
+
+  const activePrimaryOwner = {
+    ...pendingIdentity,
+    role: 'owner' as const,
+    status: 'active' as const,
+    isPrimaryOwner: true,
+  };
+  assert.equal(canCompleteAdminPasswordRecovery(activePrimaryOwner, {
+    ...verifiedAuthUser,
+    id: activePrimaryOwner.id,
+  }, {
+    id: activePrimaryOwner.id,
+    email: activePrimaryOwner.email,
+    invitation_generation: 'f46dd026-fc56-4865-b4c7-f213f2c5076b',
+    status: 'active',
+    is_primary_owner: true,
+    archived_at: null,
+  }, 'f46dd026-fc56-4865-b4c7-f213f2c5076b'), true);
+});
+
+test('callback retains pending recovery generation and rejects existing JWT proof', () => {
   const callback = readAdminAuthCallback(
+    '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&token_hash=synthetic-one-time-recovery-token&type=recovery',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'recovery',
+  );
+  assert.equal(callback.invitationGeneration, '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62');
+  assert.equal(callback.tokenType, 'recovery');
+  assert.equal(callback.error, undefined);
+  const existingSession = readAdminAuthCallback(
     '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&access_token=abcdefghijklmnopqrstuvwxyz123456',
     '',
     { length: 0, key: () => null, getItem: () => null },
+    'recovery',
   );
-  assert.equal(callback.invitationGeneration, '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62');
+  assert.equal(existingSession.accessToken, undefined);
+  assert.match(existingSession.error || '', /signed-in session cannot authorize password recovery/i);
   assert.equal(readAdminAuthCallback(
     '?invitation_generation=not-a-uuid&access_token=abcdefghijklmnopqrstuvwxyz',
     '',
@@ -609,7 +745,7 @@ test('pre-existing NULL-generation invitations require owner reissue before setu
   assert.match(migration, /target_row\.status is distinct from 'pending' and target_row\.status is distinct from 'disabled'/i);
   assert.match(recoveryRoute, /p_invitation_generation: invitationGeneration/);
   assert.match(recoveryRoute, /buildAdminInvitationRedirect\([\s\S]*?'recovery',\s*invitationGeneration/);
-  assert.match(completionRoute, /mode === 'invite' \|\| invitationSetup === true \|\| invitationGeneration !== undefined/);
+  assert.match(completionRoute, /if \(mode === 'invite' \|\| invitationSetup === true\)[\s\S]*?if \(!isValidAdminInvitationGeneration\(invitationGeneration\)\)/);
 });
 
 test('active invitation retries require current-generation acceptance audit and reach the idempotent RPC', () => {
@@ -733,7 +869,7 @@ test('pending password recovery uses the same atomic invitation completion RPC',
   assert.match(pendingRecoveryBranch, /p_user_id: identity\.id/);
   assert.match(pendingRecoveryBranch, /p_email: identity\.email/);
   assert.match(pendingRecoveryBranch, /p_must_change_password: false/);
-  assert.match(pendingRecoveryBranch, /p_invitation_generation: invitationGeneration/);
+  assert.match(pendingRecoveryBranch, /p_invitation_generation: recoveryCompletionGeneration/);
   assert.match(pendingRecoveryBranch, /completion\.status !== 'accepted'/);
 });
 
@@ -909,7 +1045,7 @@ test('branded email instructions configure the distinct Supabase invitation and 
   assert.match(templateGuide, /Reset your NearGrow Ads CMS password/);
 
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
-  assert.equal((serverSource.match(/buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\)\)/g) || []).length, 2);
+  assert.equal((serverSource.match(/buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\),/g) || []).length, 2);
 });
 
 test('consumed PKCE verifier is removed without touching unrelated Supabase Auth storage', () => {

@@ -70,6 +70,32 @@ test('temporary-password login consumption is atomic, expiring, and one-time', (
   assert.match(identityMigration, /alter table public\.admin_users enable row level security/i);
 });
 
+test('Owner-requested recovery blocks any prior temporary password until verified recovery completes', () => {
+  const recoveryStart = serverSource.indexOf("app.post('/api/admin/users/:id/recovery'");
+  const recoveryEnd = serverSource.indexOf("app.post('/api/admin/users/:id/cancel'", recoveryStart);
+  const recoveryRoute = serverSource.slice(recoveryStart, recoveryEnd);
+  const activeResetStart = recoveryRoute.indexOf("const authUser = await readSupabaseJson");
+  const activeResetRoute = recoveryRoute.slice(activeResetStart);
+  const lockIndex = activeResetRoute.indexOf('temporary_password_expires_at: new Date(0).toISOString()');
+  const sessionRevokeIndex = activeResetRoute.indexOf('rest/v1/admin_sessions?');
+  const recoveryEmailIndex = activeResetRoute.indexOf('buildAdminPasswordResetRedirect');
+  const completionStart = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const completionEnd = serverSource.indexOf("app.get('/api/admin/users'", completionStart);
+  const completionRoute = serverSource.slice(completionStart, completionEnd);
+  const passwordUpdateIndex = completionRoute.indexOf("method: 'PUT'");
+  const temporaryStateClearIndex = completionRoute.indexOf('temporary_password_expires_at: null');
+  const firstPasswordStart = serverSource.indexOf("app.post('/api/admin/auth/first-password'");
+  const firstPasswordEnd = serverSource.indexOf("app.get('/api/admin/sessions/mine'", firstPasswordStart);
+  const firstPasswordRoute = serverSource.slice(firstPasswordStart, firstPasswordEnd);
+
+  assert.ok(lockIndex >= 0 && lockIndex < sessionRevokeIndex && sessionRevokeIndex < recoveryEmailIndex);
+  assert.equal(activeResetRoute.includes('temporary_password_expires_at: null'), false);
+  assert.equal(isTemporaryPasswordExpired(new Date(0).toISOString()), true);
+  assert.ok(passwordUpdateIndex >= 0 && passwordUpdateIndex < temporaryStateClearIndex);
+  assert.match(completionRoute, /await readSupabaseJson<unknown>\(updateResponse\);\s*recoveryPasswordUpdated = mode === 'recovery'/);
+  assert.match(firstPasswordRoute, /isTemporaryPasswordExpired\(currentIdentity\.temporaryPasswordExpiresAt\)/);
+});
+
 test('concurrent logins can consume one temporary credential only once', async () => {
   const expiry = Date.parse('2026-10-31T00:00:00.000Z');
   let usedAt: number | null = null;
