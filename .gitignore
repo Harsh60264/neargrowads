@@ -37,3 +37,5 @@ service-account*.json
 *.backup
 *.sql.bak
 *.sql.gz
+
+.vercel/
