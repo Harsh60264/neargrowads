@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { getAdminArchiveOutcome } from './adminArchiveOutcome';
 import { canCancelAdminInvitation } from './adminInvitationPolicy';
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
@@ -137,6 +138,8 @@ class SettingsApiError extends Error {
   }
 }
 
+type AdminActionOutcome = string | { message: string; warning?: boolean };
+
 function adminUserAccessSnapshot(user: AdminUser): string {
   return JSON.stringify({
     role: user.role,
@@ -207,6 +210,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [noticeIsWarning, setNoticeIsWarning] = useState(false);
   const [adminTab, setAdminTab] = useState<'create' | 'accounts' | 'history'>('create');
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const savedUserAccess = useRef(new Map<string, string>());
@@ -309,12 +313,15 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const runAction = async (action: () => Promise<string>) => {
+  const runAction = async (action: () => Promise<AdminActionOutcome>) => {
     setBusy(true);
     setError('');
     setNotice('');
+    setNoticeIsWarning(false);
     try {
-      setNotice(await action());
+      const outcome = await action();
+      setNotice(typeof outcome === 'string' ? outcome : outcome.message);
+      setNoticeIsWarning(typeof outcome !== 'string' && outcome.warning === true);
       setReauthPassword('');
       await loadData();
     } catch (reason) {
@@ -479,12 +486,17 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const archiveUser = async (user: AdminUser) => {
     if (!window.confirm(`Archive ${user.email} from the active administrator list? This is a soft archive; the Supabase Auth identity and audit history will be retained. Only disabled or cancelled accounts can be archived.`)) return;
     await runAction(async () => {
-      const result = await api<{ message: string }>(`/api/admin/users/${encodeURIComponent(user.id)}/archive`, {
+      const result = await api<{
+        status: 'success' | 'partial_success';
+        cmsAccess: 'removed';
+        authSessionRevocation: 'confirmed' | 'not_confirmed';
+        message: string;
+      }>(`/api/admin/users/${encodeURIComponent(user.id)}/archive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword: reauthPassword }),
       });
-      return result.message;
+      return getAdminArchiveOutcome(result);
     });
   };
 
@@ -493,6 +505,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     setBusy(true);
     setError('');
     setNotice('');
+    setNoticeIsWarning(false);
     try {
       const result = await api<{ message: string }>('/api/admin/profile/password', {
         method: 'POST',
@@ -609,6 +622,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     setBusy(true);
     setError('');
     setNotice('');
+    setNoticeIsWarning(false);
     try {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) throw new Error('The selected session is no longer available. Refresh the session list.');
@@ -865,7 +879,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
           window.setTimeout(() => document.getElementById(`admin-history-${existingAccountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
         }}>View Existing Account</button>}
       </div>}
-      {notice && <div role="status" className="rounded-xl border border-[#67D8B7]/30 bg-[#67D8B7]/10 px-4 py-3 text-sm text-[#B8F1DC]">{notice}</div>}
+      {notice && <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${noticeIsWarning ? 'border-amber-300/30 bg-amber-950/25 text-amber-100' : 'border-[#67D8B7]/30 bg-[#67D8B7]/10 text-[#B8F1DC]'}`}>{notice}</div>}
 
       <Panel title="My Profile" description="Your identity comes from the verified Supabase Auth account.">
         <div className="grid gap-4 sm:grid-cols-3">

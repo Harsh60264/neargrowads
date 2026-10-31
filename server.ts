@@ -6681,8 +6681,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(409).json({ message: 'This administrator record could not be archived in its current state.' });
         return;
       }
-      res.status(503).json({
-        message: 'Administrator record was archived and CMS access remains blocked, but Supabase Auth sessions could not be globally revoked by this cross-account action. Treat Auth-session revocation as incomplete.',
+      res.status(200).json({
+        status: 'partial_success',
+        cmsAccess: 'removed',
+        authSessionRevocation: 'not_confirmed',
+        message: 'CMS access removed. Supabase Auth global session revocation could not be confirmed',
       });
     } catch (error) {
       if (error instanceof SupabaseRequestError && ['PGRST202', 'PGRST204', '42703', '42883'].includes(error.code || '')) {

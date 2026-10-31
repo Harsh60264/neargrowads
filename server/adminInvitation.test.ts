@@ -536,7 +536,7 @@ test('cross-account lifecycle responses never claim global Auth revocation witho
 
   assert.doesNotMatch(serverSource, /revokeSupabaseRefreshTokens\((?:target(?:Id)?\.id|targetId|userId|newlyCreatedAuthUserId)/);
   for (const crossAccountRoute of [accessUpdate, recoveryRequest, cancellation, archive, sessionRevocation, deletion]) {
-    assert.match(crossAccountRoute, /Supabase Auth sessions? could not be globally revoked|does not independently confirm global Supabase Auth-session revocation/);
+    assert.match(crossAccountRoute, /Supabase Auth sessions? could not be globally revoked|does not independently confirm global Supabase Auth-session revocation|CMS access removed\. Supabase Auth global session revocation could not be confirmed/);
   }
   assert.match(temporaryPassword, /setSupabaseUserPassword\(target\.id,\s*newPassword\)/);
   assert.match(temporaryPassword, /invalidates the account’s existing Auth sessions/);
@@ -545,8 +545,8 @@ test('cross-account lifecycle responses never claim global Auth revocation witho
   assert.match(accessUpdate, /status\(503\)/);
   assert.match(recoveryRequest, /status\(503\)/);
   assert.match(cancellation, /status\(503\)/);
-  assert.match(archive, /status\(503\)/);
-  assert.match(archive, /Supabase Auth sessions could not be globally revoked/);
+  assert.match(archive, /status\(200\)\.json\(\{\s*status: 'partial_success',\s*cmsAccess: 'removed',\s*authSessionRevocation: 'not_confirmed'/);
+  assert.match(archive, /CMS access removed\. Supabase Auth global session revocation could not be confirmed/);
   assert.match(sessionRevocation, /status\(503\)/);
   assert.match(deletion, /status\(503\)/);
   assert.doesNotMatch(serverSource, /Supabase refresh tokens were revoked/);
@@ -912,7 +912,8 @@ test('admin account routes enforce reauthentication and archive via a soft-archi
   assert.match(archiveRoute, /actor\.isPrimaryOwner/);
   assert.match(archiveRoute, /target\.status !== 'disabled'/);
   assert.match(archiveRoute, /rpc\/archive_admin_account/);
-  assert.match(archiveRoute, /record was archived and CMS access remains blocked/);
+  assert.match(archiveRoute, /status\(200\)\.json\(\{\s*status: 'partial_success'/);
+  assert.match(archiveRoute, /catch \(error\)[\s\S]*?status\(503\)\.json\(\{\s*message: 'The administrator record could not be archived\.'/);
   assert.doesNotMatch(archiveRoute, /auth\/v1\/admin\/users\/.*DELETE/i);
 });
 
