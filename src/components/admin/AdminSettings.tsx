@@ -845,12 +845,41 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const latestInvitationActivity = (user: AdminUser) => logs.find((log) =>
     log.target_id === user.id && [
       'admin.invitation.dispatch_initiated',
+      'admin.invitation.provider_accepted',
+      'admin.invitation.provider_rejected',
+      'admin.invitation.provider_outcome_unknown',
+      'admin.invitation.delivery_not_configured',
       'admin.invitation.reissued',
       'admin.invitation.resent',
       'admin.invitation.setup_link_resent',
       'admin.invited',
     ].includes(log.action),
   );
+  const invitationHistoryEvents = logs.filter((log) => {
+    const invitationUserId = typeof log.details.invitationUserId === 'string'
+      ? log.details.invitationUserId
+      : undefined;
+    const accountEvent = Boolean(
+      (log.target_id && delegatedUsers.some((user) => user.id === log.target_id)) ||
+      (typeof log.details.deletedUserId === 'string' && delegatedUsers.some((user) => user.id === log.details.deletedUserId)) ||
+      invitationUserId,
+    );
+    return accountEvent && (!historyTargetId ||
+      log.target_id === historyTargetId ||
+      log.details.deletedUserId === historyTargetId ||
+      invitationUserId === historyTargetId);
+  });
+  const invitationActivityLabel = (action: string, details?: Record<string, unknown>): string => {
+    if (action === 'admin.invitation.provider_accepted') return 'Temporary-password request accepted by Resend; inbox delivery unconfirmed';
+    if (action === 'admin.invitation.provider_rejected') {
+      const providerStatus = typeof details?.providerStatus === 'number' ? ` (HTTP ${details.providerStatus})` : '';
+      return `Temporary-password request rejected by Resend${providerStatus}`;
+    }
+    if (action === 'admin.invitation.provider_outcome_unknown') return 'Temporary-password request outcome unknown';
+    if (action === 'admin.invitation.delivery_not_configured') return 'Temporary-password email delivery not configured';
+    if (action === 'admin.invitation.delivery_failed') return 'Temporary-password delivery failure recorded; provider outcome unavailable';
+    return action;
+  };
   const invitationCounts = {
     pending: delegatedUsers.filter((user) => historyStatus(user) === 'pending').length,
     active: delegatedUsers.filter((user) => historyStatus(user) === 'active').length,
@@ -1128,6 +1157,20 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                     {filteredHistoryUsers.map((user) => {
                       const inviteActivity = latestInvitationActivity(user);
                       const deliveryInitiated = Boolean(inviteActivity || user.confirmationSentAt || user.invitedAt);
+                      const deliveryStatus = logs.find((log) =>
+                        log.target_id === user.id && [
+                          'admin.invitation.provider_accepted',
+                          'admin.invitation.provider_rejected',
+                          'admin.invitation.provider_outcome_unknown',
+                          'admin.invitation.delivery_not_configured',
+                          'admin.invitation.delivery_failed',
+                        ].includes(log.action),
+                      );
+                      const deliveryLabel = deliveryStatus
+                        ? invitationActivityLabel(deliveryStatus.action, deliveryStatus.details)
+                        : inviteActivity?.details.outcome === 'provider_accepted'
+                          ? 'Supabase Auth accepted request; inbox delivery unconfirmed'
+                          : deliveryInitiated ? 'Dispatch initiated; delivery unconfirmed' : 'Not recorded';
                       const acceptedAt = logs.find((log) => log.target_id === user.id && log.action === 'admin.invitation.accepted')?.created_at;
                       const dispatchAt = inviteActivity?.created_at || user.confirmationSentAt || user.invitedAt;
                       const permissionSummary = Object.entries(user.permissions || {})
@@ -1138,7 +1181,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                         <td className="px-3 py-3"><p className="break-all font-semibold">{user.email}</p><p className="mt-1 text-[10px] text-[#91A195]">{user.username ? `@${user.username}` : 'No username'}</p></td>
                         <td className="px-3 py-3"><p className="capitalize">{user.role.replace('_', ' ')}</p><p className="mt-1 text-[10px] text-[#91A195]">{historyStatusLabel(user)}</p></td>
                         <td className="px-3 py-3">{user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'}{user.emailVerifiedAt && <time className="mt-1 block text-[10px] text-[#91A195]">{new Date(user.emailVerifiedAt).toLocaleString()}</time>}</td>
-                        <td className="px-3 py-3">{deliveryInitiated ? 'Dispatch initiated' : 'Not recorded'}{dispatchAt && <time className="mt-1 block text-[10px] text-[#91A195]">{new Date(dispatchAt).toLocaleString()}</time>}<span className="mt-1 block text-[10px] text-[#819286]">Delivery unconfirmed</span></td>
+                        <td className="px-3 py-3">{deliveryLabel}{dispatchAt && <time className="mt-1 block text-[10px] text-[#91A195]">{new Date(dispatchAt).toLocaleString()}</time>}</td>
                         <td className="px-3 py-3"><time>{user.createdAt ? new Date(user.createdAt).toLocaleString() : 'Unknown'}</time><span className="mt-1 block text-[10px] text-[#91A195]">Expiry: not available</span></td>
                         <td className="px-3 py-3">{acceptedAt ? new Date(acceptedAt).toLocaleString() : 'Not recorded'}<time className="mt-1 block text-[10px] text-[#91A195]">{user.lastLoginAt || user.authLastSignInAt ? `Last login ${new Date(user.lastLoginAt || user.authLastSignInAt || '').toLocaleString()}` : 'No login recorded'}</time></td>
                         <td className="px-3 py-3">{user.invitedByEmail || 'Unknown'}</td>
@@ -1175,15 +1218,15 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                   </select>
                 </div>
                 <div className="mt-4 max-h-80 space-y-2 overflow-y-auto">
-                  {logs.filter((log) => {
-                    const accountEvent = log.target_id && (delegatedUsers.some((user) => user.id === log.target_id) ||
-                      (typeof log.details.deletedUserId === 'string' && delegatedUsers.some((user) => user.id === log.details.deletedUserId)));
-                    return accountEvent && (!historyTargetId || log.target_id === historyTargetId || log.details.deletedUserId === historyTargetId);
-                  }).map((log) => <article key={log.id} className="rounded-lg border border-[#304135] bg-[#101913] px-3 py-2">
-                    <div className="flex flex-wrap justify-between gap-2"><span className="font-medium text-[#DCE8DD]">{log.action}</span><time className="text-[10px] text-[#91A195]">{new Date(log.created_at).toLocaleString()}</time></div>
-                    <p className="mt-1 text-[10px] text-[#91A195]">{log.actor?.email || 'System'}{log.target?.email ? ` → ${log.target.email}` : ''} · {log.section}</p>
-                  </article>)}
-                  {!logs.some((log) => log.target_id && (!historyTargetId || log.target_id === historyTargetId)) && <p className="text-xs text-[#91A195]">No matching invitation/admin activity is recorded in the loaded audit history.</p>}
+                  {invitationHistoryEvents.map((log) => {
+                    const recipientEmail = log.target?.email ||
+                      (typeof log.details.recipientEmail === 'string' ? log.details.recipientEmail : '');
+                    return <article key={log.id} className="rounded-lg border border-[#304135] bg-[#101913] px-3 py-2">
+                      <div className="flex flex-wrap justify-between gap-2"><span className="font-medium text-[#DCE8DD]">{invitationActivityLabel(log.action, log.details)}</span><time className="text-[10px] text-[#91A195]">{new Date(log.created_at).toLocaleString()}</time></div>
+                      <p className="mt-1 text-[10px] text-[#91A195]">{log.actor?.email || 'System'}{recipientEmail ? ` → ${recipientEmail}` : ''} · {log.section}</p>
+                    </article>;
+                  })}
+                  {!invitationHistoryEvents.length && <p className="text-xs text-[#91A195]">No matching invitation/admin activity is recorded in the loaded audit history.</p>}
                 </div>
               </section>
             </div>}

@@ -7,6 +7,7 @@ import {
   generateTemporaryAdminPassword,
   isTemporaryPasswordExpired,
   sendTemporaryAdminPasswordEmail,
+  TemporaryAdminEmailDeliveryError,
   TEMPORARY_ADMIN_PASSWORD_TTL_MS,
   temporaryPasswordExpiresAt,
 } from './temporaryAdminPassword';
@@ -257,7 +258,7 @@ test('branded email names the role and onboarding details while escaping content
   assert.match(unsafeEmail.html, /&lt;unsafe&amp;password&gt;/);
 });
 
-test('email delivery sends one provider request, reports failures, and does not retry', async () => {
+test('Resend acceptance records only provider acceptance and does not imply inbox delivery', async () => {
   const input = {
     email: 'admin@example.com',
     username: 'admin.user',
@@ -276,16 +277,67 @@ test('email delivery sends one provider request, reports failures, and does not 
   await sendTemporaryAdminPasswordEmail(input, 'test-api-key', 'NearGrow Ads <no-reply@neargrowads.com>', send);
   assert.equal(requests, 1);
   assert.match(sentBody, /Temp!Password1234/);
+});
 
-  requests = 0;
+test('Resend rejection reports the provider status without retrying', async () => {
+  const input = {
+    email: 'admin@example.com',
+    username: 'admin.user',
+    role: 'super_admin' as const,
+    password: 'Temp!Password1234',
+    signInUrl: 'https://www.neargrowads.com/admin/login',
+    expiresAt: '2026-10-30T12:00:00.000Z',
+  };
+  let requests = 0;
   await assert.rejects(
     sendTemporaryAdminPasswordEmail(input, 'test-api-key', 'NearGrow Ads <no-reply@neargrowads.com>', async () => {
       requests += 1;
-      return new Response('', { status: 503 });
+      return new Response('', { status: 422 });
     }),
-    /provider returned 503/,
+    (error: unknown) => error instanceof TemporaryAdminEmailDeliveryError &&
+      error.outcome === 'rejected' && error.providerStatus === 422,
   );
   assert.equal(requests, 1);
+});
+
+test('Resend timeout is reported as an unknown outcome without retrying', async () => {
+  const input = {
+    email: 'admin@example.com',
+    username: 'admin.user',
+    role: 'custom_admin' as const,
+    password: 'Temp!Password1234',
+    signInUrl: 'https://www.neargrowads.com/admin/login',
+    expiresAt: '2026-10-30T12:00:00.000Z',
+  };
+  let requests = 0;
+  await assert.rejects(
+    sendTemporaryAdminPasswordEmail(input, 'test-api-key', 'NearGrow Ads <no-reply@neargrowads.com>', async () => {
+      requests += 1;
+      throw new DOMException('Request timed out', 'TimeoutError');
+    }),
+    (error: unknown) => error instanceof TemporaryAdminEmailDeliveryError && error.outcome === 'unknown',
+  );
+  assert.equal(requests, 1);
+});
+
+test('missing Resend configuration is reported before making a provider request', async () => {
+  const input = {
+    email: 'admin@example.com',
+    username: 'admin.user',
+    role: 'owner' as const,
+    password: 'Temp!Password1234',
+    signInUrl: 'https://www.neargrowads.com/admin/login',
+    expiresAt: '2026-10-30T12:00:00.000Z',
+  };
+  let requests = 0;
+  await assert.rejects(
+    sendTemporaryAdminPasswordEmail(input, '', 'NearGrow Ads <no-reply@neargrowads.com>', async () => {
+      requests += 1;
+      return new Response('', { status: 202 });
+    }),
+    (error: unknown) => error instanceof TemporaryAdminEmailDeliveryError && error.outcome === 'not_configured',
+  );
+  assert.equal(requests, 0);
 });
 
 test('Admin invitation retains 24-hour expiry without requiring any scheduler', () => {

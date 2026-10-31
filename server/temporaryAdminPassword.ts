@@ -50,6 +50,20 @@ export interface TemporaryAdminEmail {
   expiresAt: string;
 }
 
+export class TemporaryAdminEmailDeliveryError extends Error {
+  constructor(
+    readonly outcome: 'not_configured' | 'rejected' | 'unknown',
+    readonly providerStatus?: number,
+  ) {
+    super(outcome === 'not_configured'
+      ? 'Temporary administrator email delivery is not configured.'
+      : outcome === 'rejected'
+        ? `Temporary administrator email provider rejected the request (${providerStatus}).`
+        : 'Temporary administrator email provider outcome could not be confirmed.');
+    this.name = 'TemporaryAdminEmailDeliveryError';
+  }
+}
+
 export function buildTemporaryAdminEmail(input: TemporaryAdminEmail): { subject: string; html: string; text: string } {
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
     '&': '&amp;',
@@ -102,16 +116,23 @@ export async function sendTemporaryAdminPasswordEmail(
   from: string,
   fetcher: typeof fetch = fetch,
 ): Promise<void> {
-  if (!apiKey || !from || /[\r\n]/.test(from)) throw new Error('Temporary administrator email delivery is not configured.');
+  if (!apiKey || !from || /[\r\n]/.test(from)) {
+    throw new TemporaryAdminEmailDeliveryError('not_configured');
+  }
   const message = buildTemporaryAdminEmail(input);
-  const response = await fetcher('https://api.resend.com/emails', {
+  let response: Response;
+  try {
+    response = await fetcher('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ from, to: [input.email], ...message }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`Temporary administrator email provider returned ${response.status}.`);
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    throw new TemporaryAdminEmailDeliveryError('unknown');
+  }
+  if (!response.ok) throw new TemporaryAdminEmailDeliveryError('rejected', response.status);
 }

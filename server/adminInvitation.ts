@@ -16,6 +16,24 @@ export interface VerifiedAdminAuthUser {
 
 export type AdminInvitationCompletionDecision = 'complete' | 'already_accepted' | 'reject';
 export type AdminInvitationRecoveryMethod = 'signup' | 'password_recovery' | 'reject';
+export type AdminInvitationVerificationMethod = 'signup' | 'password_recovery';
+
+export interface AdminInvitationDeliveryPlan {
+  temporaryCredential: boolean;
+  verificationMethod: AdminInvitationVerificationMethod;
+}
+
+export function planAdminInvitationDelivery(
+  authUser: VerifiedAdminAuthUser | undefined,
+): AdminInvitationDeliveryPlan {
+  if (!authUser) {
+    return { temporaryCredential: true, verificationMethod: 'signup' };
+  }
+  return {
+    temporaryCredential: false,
+    verificationMethod: authUser.email_confirmed_at ? 'password_recovery' : 'signup',
+  };
+}
 
 export interface AdminRecoveryCompletionProof {
   accessToken?: unknown;

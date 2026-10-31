@@ -10,6 +10,7 @@ import {
   hasPurposeBoundAdminRecoveryProof,
   isCurrentPendingAdminInvitation,
   isValidAdminInvitationGeneration,
+  planAdminInvitationDelivery,
   type AdminInvitationIdentity,
 } from './adminInvitation';
 import { canCancelAdminInvitation } from '../src/components/admin/adminInvitationPolicy';
@@ -848,7 +849,56 @@ test('new invitations stay pending when reusing verified Auth identities without
   assert.match(inviteRoute, /\} else if \(authUser\) \{[\s\S]*?status = 'pending'/);
   assert.match(inviteRoute, /invitation_generation: invitationGeneration/);
   assert.doesNotMatch(inviteRoute, /setSupabaseUserPassword\(userId, initialPassword/);
-  assert.match(inviteRoute, /sendPasswordRecovery = Boolean\(authUser\.email_confirmed_at\)/);
+  assert.match(inviteRoute, /sendPasswordRecovery = deliveryPlan\.verificationMethod === 'password_recovery'/);
+});
+
+test('all delegated roles choose the correct flow for new and existing Auth identities', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const inviteStart = serverSource.indexOf("app.post('/api/admin/users/invite'");
+  const inviteEnd = serverSource.indexOf("app.put('/api/admin/users/:id'", inviteStart);
+  const inviteRoute = serverSource.slice(inviteStart, inviteEnd);
+  const roles = ['owner', 'super_admin', 'custom_admin'] as const;
+  const identityCases = [
+    { authUser: undefined, expected: { temporaryCredential: true, verificationMethod: 'signup' } },
+    { authUser: { id: 'existing-unverified', email: 'admin@example.com' }, expected: { temporaryCredential: false, verificationMethod: 'signup' } },
+    { authUser: { id: 'existing-verified', email: 'admin@example.com', email_confirmed_at: '2026-10-28T12:00:00.000Z' }, expected: { temporaryCredential: false, verificationMethod: 'password_recovery' } },
+  ] as const;
+
+  for (const role of roles) {
+    for (const { authUser, expected } of identityCases) {
+      const plan = planAdminInvitationDelivery(authUser);
+      assert.deepEqual(plan, expected, `${role}: ${authUser?.id || 'new identity'}`);
+      const mode = plan.verificationMethod === 'password_recovery' ? 'recovery' : 'invite';
+      const redirect = new URL(buildAdminInvitationRedirect(
+        'https://www.neargrowads.com',
+        mode,
+        '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
+        plan.temporaryCredential,
+      ));
+      assert.equal(redirect.searchParams.get('mode'), mode);
+      assert.equal(redirect.searchParams.get('setup') === 'temporary', plan.temporaryCredential);
+    }
+  }
+  assert.match(inviteRoute, /temporaryCredentialFlow = deliveryPlan\.temporaryCredential/);
+  const redirectCalls = inviteRoute.match(/buildAdminInvitationRedirect\([\s\S]*?\n\s+\);/g) || [];
+  assert.equal(redirectCalls.length, 2);
+  for (const redirectCall of redirectCalls) assert.match(redirectCall, /temporaryCredentialFlow/);
+  assert.match(inviteRoute, /must_change_password: temporaryCredentialFlow/);
+  assert.doesNotMatch(inviteRoute, /sendSignupVerification && mustChangePassword/);
+  assert.match(inviteRoute, /sendPasswordRecovery = deliveryPlan\.verificationMethod === 'password_recovery'/);
+});
+
+test('Resend invitation outcomes are correlated to the attempted Admin in account history', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+  assert.match(serverSource, /invitationUserId: newlyCreatedAuthUserId,[\s\S]*?recipientEmail: email/);
+  assert.match(serverSource, /admin\.invitation\.provider_accepted/);
+  assert.match(serverSource, /admin\.invitation\.provider_rejected/);
+  assert.match(serverSource, /admin\.invitation\.provider_outcome_unknown/);
+  assert.match(settingsSource, /log\.details\.invitationUserId/);
+  assert.match(settingsSource, /log\.details\.recipientEmail/);
+  assert.match(settingsSource, /inbox delivery unconfirmed/);
+  assert.doesNotMatch(settingsSource, /Delivered|Bounced/);
 });
 
 test('recovery requires Owner reauthentication and login remains status-gated', () => {

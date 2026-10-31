@@ -30,12 +30,14 @@ import {
   isCurrentAdminRecoveryGeneration,
   isCurrentPendingAdminInvitation,
   isValidAdminInvitationGeneration,
+  planAdminInvitationDelivery,
 } from './server/adminInvitation';
 import {
   adminCmsAccessAllowed,
   generateTemporaryAdminPassword,
   isTemporaryPasswordExpired,
   sendTemporaryAdminPasswordEmail,
+  TemporaryAdminEmailDeliveryError,
   temporaryPasswordExpiresAt,
 } from './server/temporaryAdminPassword';
 import {
@@ -6044,22 +6046,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
       operationStage = 'auth_identity_lookup';
       const authUser = await findSupabaseUserByEmail(email);
+      const deliveryPlan = planAdminInvitationDelivery(authUser);
+      temporaryCredentialFlow = deliveryPlan.temporaryCredential;
       let userId: string;
       let status: AdminIdentity['status'];
-      let sendSignupVerification = false;
-      let sendPasswordRecovery = false;
+      const sendSignupVerification = deliveryPlan.verificationMethod === 'signup';
+      const sendPasswordRecovery = deliveryPlan.verificationMethod === 'password_recovery';
       const invitationGeneration = randomUUID();
-      const mustChangePassword = true;
       if (role === 'owner' && authUser) {
         userId = authUser.id;
         status = 'pending';
-        sendSignupVerification = !authUser.email_confirmed_at;
-        sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
       } else if (authUser) {
         userId = authUser.id;
         status = 'pending';
-        sendSignupVerification = !authUser.email_confirmed_at;
-        sendPasswordRecovery = Boolean(authUser.email_confirmed_at);
       } else {
         const resendApiKey = process.env.RESEND_API_KEY || '';
         const invitationEmailFrom = process.env.ADMIN_INVITATION_EMAIL_FROM || '';
@@ -6085,7 +6084,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         userId = created.id;
         newlyCreatedAuthUserId = userId;
         status = 'pending';
-        sendSignupVerification = true;
       }
       operationStage = 'admin_record_insert';
       const createResponse = await supabaseAdminRequest('rest/v1/admin_users', {
@@ -6099,10 +6097,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           status,
           permissions,
           is_primary_owner: false,
-          must_change_password: mustChangePassword,
+          must_change_password: temporaryCredentialFlow,
           temporary_password_expires_at: temporaryPasswordExpiry || null,
           invitation_generation: invitationGeneration,
-          ...(mustChangePassword && temporaryCredentialFlow ? { last_password_reset_at: new Date().toISOString() } : {}),
+          ...(temporaryCredentialFlow ? { last_password_reset_at: new Date().toISOString() } : {}),
           invited_by: actor.id,
         }),
       });
@@ -6125,6 +6123,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         );
         temporaryPasswordEmailAccepted = true;
         temporaryPassword = undefined;
+        operationStage = 'temporary_password_provider_accepted';
+        await writeAdminAudit(actor.id, 'admin.invitation.provider_accepted', 'settings', newlyCreatedAuthUserId, {
+          provider: 'resend',
+          delivery: 'temporary_password',
+          outcome: 'provider_accepted',
+          deliveryConfirmed: false,
+        });
       };
       if (role !== 'owner') {
         if (sendSignupVerification || sendPasswordRecovery) {
@@ -6133,7 +6138,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             adminAuthRedirectOrigin(req),
             sendPasswordRecovery ? 'recovery' : 'invite',
             invitationGeneration,
-            sendSignupVerification && mustChangePassword,
+            temporaryCredentialFlow,
           );
           if (sendPasswordRecovery) {
             const query = new URLSearchParams({ redirect_to: redirectTo });
@@ -6151,6 +6156,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
             provider: 'supabase_auth',
             accountStatus: status,
+            outcome: 'provider_accepted',
+            deliveryConfirmed: false,
           });
         }
         operationStage = 'session_revocation';
@@ -6185,6 +6192,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           adminAuthRedirectOrigin(req),
           sendPasswordRecovery ? 'recovery' : 'invite',
           invitationGeneration,
+          temporaryCredentialFlow,
         );
         if (sendPasswordRecovery) {
           const query = new URLSearchParams({ redirect_to: redirectTo });
@@ -6202,6 +6210,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         await writeAdminAudit(actor.id, 'admin.invitation.dispatch_initiated', 'settings', userId, {
           provider: 'supabase_auth',
           accountStatus: status,
+          outcome: 'provider_accepted',
+          deliveryConfirmed: false,
         });
       }
       operationStage = 'audit_log';
@@ -6277,9 +6287,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       if (temporaryCredentialFlow && failedStage === 'temporary_password_email') {
         try {
-          await writeAdminAudit(actor.id, 'admin.invitation.delivery_failed', 'settings', undefined, {
+          const deliveryError = error instanceof TemporaryAdminEmailDeliveryError ? error : undefined;
+          const outcome = deliveryError?.outcome || 'unknown';
+          const action = outcome === 'rejected'
+            ? 'admin.invitation.provider_rejected'
+            : outcome === 'not_configured'
+              ? 'admin.invitation.delivery_not_configured'
+              : 'admin.invitation.provider_outcome_unknown';
+          await writeAdminAudit(actor.id, action, 'settings', undefined, {
             provider: 'resend',
-            recipientHash: securityPseudonym(email),
+            invitationUserId: newlyCreatedAuthUserId,
+            recipientEmail: email,
+            outcome,
+            ...(deliveryError?.providerStatus !== undefined ? { providerStatus: deliveryError.providerStatus } : {}),
             cleanupCompleted: !authCleanupFailed,
           });
         } catch (auditError) {
