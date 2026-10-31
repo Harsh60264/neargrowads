@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { canCancelAdminInvitation } from './adminInvitationPolicy';
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
 type AdminStatus = 'pending' | 'active' | 'disabled';
@@ -226,6 +227,9 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
 
   const isOwner = identity?.role === 'owner';
   const isPrimaryOwner = identity?.isPrimaryOwner === true;
+  const invitationCancellationActor = identity?.status === 'active' && identity.isPrimaryOwner
+    ? identity
+    : undefined;
   const activeOwners = useMemo(() => owners.filter((owner) => owner.id !== identity?.id), [owners, identity?.id]);
 
   const passwordStrength = (value: string) => [
@@ -1025,7 +1029,10 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                         </select>
                       </label>
                       <button type="button" className={buttonClass} disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : undefined} onClick={() => void saveUser(user)}><Save className="h-3.5 w-3.5" /> Save access</button>
-                      {user.status === 'pending' && !user.isPrimaryOwner && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
+                      {canCancelAdminInvitation(
+                        invitationCancellationActor,
+                        user,
+                      ) && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="min-h-10 rounded-xl border border-rose-300/20 px-3 text-xs text-rose-200 hover:bg-rose-950/30 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>}
                     </div>
                     <div className="mt-3 grid gap-2 border-t border-[#304135] pt-3 text-[10px] text-[#819286] sm:grid-cols-2">
                       <p>Email verification: {user.emailVerified ? 'Verified' : user.authIdentityExists ? 'Not verified' : 'Auth identity missing'}{user.emailVerifiedAt ? ` · ${new Date(user.emailVerifiedAt).toLocaleString()}` : ''}</p>
@@ -1128,7 +1135,10 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                             window.setTimeout(() => document.getElementById(`admin-account-${user.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
                           }}>View Details / Edit Access</button>}
                           {user.status === 'pending' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists} title={!reauthPassword ? 'Enter the Owner re-authentication password above first.' : !user.authIdentityExists ? 'The matching Supabase Auth identity is missing; review it before retrying.' : undefined} className="rounded-lg border border-[#47594C] px-2 py-1.5 text-left text-[10px] hover:bg-white/5 disabled:opacity-50" onClick={() => void requestReset(user)}>Resend setup link</button>}
-                          {user.status === 'pending' && !user.isPrimaryOwner && <>
+                          {canCancelAdminInvitation(
+                            invitationCancellationActor,
+                            user,
+                          ) && <>
                             <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void cancelInvitation(user)}>Cancel Invitation</button>
                             {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
                           </>}

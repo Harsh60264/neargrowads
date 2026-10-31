@@ -12,6 +12,7 @@ import {
   isValidAdminInvitationGeneration,
   type AdminInvitationIdentity,
 } from './adminInvitation';
+import { canCancelAdminInvitation } from '../src/components/admin/adminInvitationPolicy';
 import { isSameOriginHost } from './adminAuthOrigin';
 import { revokeSupabaseRefreshTokensWithAccessToken } from './supabaseAuthSessions';
 import {
@@ -950,8 +951,22 @@ test('Primary Owner can cancel delegated Co-Owner invitations but never the Prim
   assert.match(cancelRoute, /p_actor_id: actor\.id,[\s\S]*?p_target_id: target\.id/);
   assert.match(serverSource, /isPrimaryOwner: row\.is_primary_owner === true/);
   assert.match(serverSource, /isPrimaryOwner: user\.is_primary_owner === true/);
-  assert.match(settingsSource, /user\.status === 'pending' && !user\.isPrimaryOwner/);
+  assert.match(settingsSource, /canCancelAdminInvitation\(/);
+  assert.match(settingsSource, /identity\?\.status === 'active' && identity\.isPrimaryOwner/);
   assert.doesNotMatch(settingsSource, /user\.status === 'pending' && user\.role !== 'owner'/);
+
+  const pendingDelegatedInvitation = {
+    status: 'pending' as const,
+    isPrimaryOwner: false,
+  };
+  assert.equal(canCancelAdminInvitation({
+    status: 'active',
+    isPrimaryOwner: true,
+  }, pendingDelegatedInvitation), true);
+  assert.equal(canCancelAdminInvitation({
+    status: 'active',
+    isPrimaryOwner: false,
+  }, pendingDelegatedInvitation), false);
 });
 
 test('admin account management surfaces direct recovery, archive state, and backend-synced statuses', () => {
