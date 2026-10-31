@@ -2,7 +2,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SUPABASE_PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
 export const STAGING_SUPABASE_PROJECT_REF = 'kdaixomygsuxadofoieb';
-const PRODUCTION_SUPABASE_PROJECT_REF = 'axbjzmdokfoftzfgwiql';
+export const PRODUCTION_SUPABASE_PROJECT_REF = 'axbjzmdokfoftzfgwiql';
 
 export class PreviewConfigurationError extends Error {
   constructor(
@@ -217,4 +217,36 @@ export function validatePreviewAdminConfiguration(environment: NodeJS.ProcessEnv
       'Preview ADMIN_OWNER_EMAIL must not match ADMIN_PRODUCTION_OWNER_EMAIL.',
     );
   }
+}
+
+export function validateProductionSupabaseConfiguration(environment: NodeJS.ProcessEnv): void {
+  if (environment.VERCEL_ENV !== 'production') return;
+
+  const rawUrl = environment.SUPABASE_URL || '';
+  let supabaseUrl: URL;
+  try {
+    supabaseUrl = new URL(rawUrl);
+  } catch {
+    throw new Error('Production SUPABASE_URL must identify the approved Production Supabase project.');
+  }
+
+  const expectedHostname = `${PRODUCTION_SUPABASE_PROJECT_REF}.supabase.co`;
+  const authority = /^https:\/\/([^/?#]*)/i.exec(rawUrl)?.[1];
+  if (rawUrl !== rawUrl.trim() ||
+    supabaseUrl.protocol !== 'https:' ||
+    supabaseUrl.hostname !== expectedHostname ||
+    authority !== expectedHostname ||
+    (supabaseUrl.pathname !== '/' && supabaseUrl.pathname !== '') ||
+    rawUrl.includes('?') ||
+    rawUrl.includes('#') ||
+    supabaseUrl.username ||
+    supabaseUrl.password ||
+    supabaseUrl.port) {
+    throw new Error('Production SUPABASE_URL must identify the approved Production Supabase project.');
+  }
+}
+
+export function validateSupabaseProjectConfiguration(environment: NodeJS.ProcessEnv): void {
+  validateProductionSupabaseConfiguration(environment);
+  validatePreviewAdminConfiguration(environment);
 }

@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
+  PRODUCTION_SUPABASE_PROJECT_REF,
   resolveAdminOwnerConfiguration,
   STAGING_SUPABASE_PROJECT_REF,
   validatePreviewAdminConfiguration,
+  validateProductionSupabaseConfiguration,
+  validateSupabaseProjectConfiguration,
 } from './adminOwnerConfig';
 
 const ownerId = '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62';
@@ -50,9 +53,54 @@ test('accepts a configured Production Owner identity without modifying its sourc
   });
 });
 
+test('accepts only the canonical Production Supabase URL in Vercel Production', () => {
+  validateProductionSupabaseConfiguration({
+    SUPABASE_URL: `https://${PRODUCTION_SUPABASE_PROJECT_REF}.supabase.co`,
+    VERCEL_ENV: 'production',
+  });
+});
+
+test('rejects Staging, other projects, malformed and missing Production Supabase URLs', () => {
+  const rejectedUrls = [
+    `https://${STAGING_SUPABASE_PROJECT_REF}.supabase.co`,
+    'https://another-project.supabase.co',
+    'not-a-url',
+    '',
+  ];
+
+  for (const SUPABASE_URL of rejectedUrls) {
+    assert.throws(
+      () => validateProductionSupabaseConfiguration({ SUPABASE_URL, VERCEL_ENV: 'production' }),
+      (error: unknown) => error instanceof Error &&
+        error.message.includes('approved Production Supabase project') &&
+        (!SUPABASE_URL || !error.message.includes(SUPABASE_URL)),
+    );
+  }
+});
+
+test('rejects credentials, explicit ports, paths, query strings, and fragments in Production URLs', () => {
+  const baseUrl = `https://${PRODUCTION_SUPABASE_PROJECT_REF}.supabase.co`;
+  for (const SUPABASE_URL of [
+    `https://user:password@${PRODUCTION_SUPABASE_PROJECT_REF}.supabase.co`,
+    `${baseUrl}:443`,
+    `${baseUrl}:8443`,
+    `${baseUrl}/custom-path`,
+    `${baseUrl}?query=value`,
+    `${baseUrl}?`,
+    `${baseUrl}#fragment`,
+    `${baseUrl}#`,
+  ]) {
+    assert.throws(
+      () => validateProductionSupabaseConfiguration({ SUPABASE_URL, VERCEL_ENV: 'production' }),
+      /approved Production Supabase project/i,
+    );
+  }
+});
+
 test('accepts a distinct Owner only in Preview when the Supabase URL matches the staging project ref', () => {
   const environment = previewEnvironment();
   validatePreviewAdminConfiguration(environment);
+  validateSupabaseProjectConfiguration(environment);
   assert.deepEqual(resolveAdminOwnerConfiguration(environment), {
     ownerId,
     ownerEmail: stagingOwnerEmail,
@@ -209,12 +257,20 @@ test('bootstrap binds only the configured verified Auth identity and respects th
   assert.doesNotMatch(bootstrap, /setSupabaseUserPassword|revokeSupabaseRefreshTokens/);
 });
 
-test('Vercel Preview validates its pinned environment before application routes can access Supabase', () => {
+test('deployment Supabase configuration is validated before application routes can access Supabase', () => {
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const createApplicationStart = serverSource.indexOf('async function createApplication(');
   const createApplication = serverSource.slice(createApplicationStart);
 
-  assert.match(createApplication, /if \(process\.env\.VERCEL_ENV === 'preview'\)\s*\{\s*validatePreviewAdminConfiguration\(process\.env\);/);
-  assert.ok(createApplication.indexOf('validatePreviewAdminConfiguration(process.env)') <
+  assert.ok(createApplication.indexOf('validateSupabaseProjectConfiguration(process.env)') >= 0);
+  assert.ok(createApplication.indexOf('validateSupabaseProjectConfiguration(process.env)') <
     createApplication.indexOf('ensurePrimaryOwnerAccount()'));
+
+  for (const functionName of ['supabaseAdminRequest', 'supabaseAuthRequest', 'supabaseRequest']) {
+    const functionStart = serverSource.indexOf(`async function ${functionName}(`);
+    const functionBody = serverSource.slice(functionStart, serverSource.indexOf('\n}', functionStart));
+    assert.ok(functionBody.indexOf('validateSupabaseProjectConfiguration(process.env)') >= 0);
+    assert.ok(functionBody.indexOf('validateSupabaseProjectConfiguration(process.env)') <
+      functionBody.indexOf('fetch('));
+  }
 });

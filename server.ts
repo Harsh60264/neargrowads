@@ -42,7 +42,10 @@ import {
   revokeSupabaseRefreshTokensWithAccessToken,
 } from './server/supabaseAuthSessions';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
-import { resolveAdminOwnerConfiguration, validatePreviewAdminConfiguration } from './server/adminOwnerConfig';
+import {
+  resolveAdminOwnerConfiguration,
+  validateSupabaseProjectConfiguration,
+} from './server/adminOwnerConfig';
 import { isSameOriginHost } from './server/adminAuthOrigin';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
@@ -3345,9 +3348,8 @@ function adminConfigIssues(): string[] {
   if (!process.env.SUPABASE_ANON_KEY) issues.push('SUPABASE_ANON_KEY is not set.');
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) issues.push('SUPABASE_SERVICE_ROLE_KEY is not set.');
   try {
-    if (process.env.VERCEL_ENV === 'preview') {
-      validatePreviewAdminConfiguration(process.env);
-    } else {
+    validateSupabaseProjectConfiguration(process.env);
+    if (process.env.VERCEL_ENV !== 'preview') {
       resolveAdminOwnerConfiguration(process.env);
     }
   } catch (error) {
@@ -3417,6 +3419,7 @@ function readAdminSession(req: Request): AdminSessionToken | undefined {
 }
 
 async function supabaseAdminRequest(pathname: string, init: RequestInit = {}): Promise<globalThis.Response> {
+  validateSupabaseProjectConfiguration(process.env);
   const baseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!baseUrl || !serviceKey) throw new Error('Supabase Auth and database are not configured on the server.');
@@ -3432,6 +3435,7 @@ async function supabaseAdminRequest(pathname: string, init: RequestInit = {}): P
 }
 
 async function supabaseAuthRequest(pathname: string, init: RequestInit = {}, accessToken?: string): Promise<globalThis.Response> {
+  validateSupabaseProjectConfiguration(process.env);
   const baseUrl = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!baseUrl || !anonKey) throw new Error('Supabase Auth is not configured on the server.');
@@ -4062,6 +4066,7 @@ function fromSupabaseLead(row: Record<string, unknown>): StoredLead {
 }
 
 async function supabaseRequest(pathname: string, init: RequestInit = {}): Promise<globalThis.Response> {
+  validateSupabaseProjectConfiguration(process.env);
   const baseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!baseUrl || !serviceKey) {
@@ -4732,9 +4737,7 @@ async function findAvailablePort(startPort: number, host?: string): Promise<numb
 }
 
 async function createApplication(serverless = false): Promise<{ app: express.Express; port?: number }> {
-  if (process.env.VERCEL_ENV === 'preview') {
-    validatePreviewAdminConfiguration(process.env);
-  }
+  validateSupabaseProjectConfiguration(process.env);
   if (process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') canonicalSiteOrigin();
   if (!serverless && process.env.NODE_ENV === 'production' && !process.env.PERSISTENT_DATA_DIR) {
     throw new Error('PERSISTENT_DATA_DIR must point to a durable mounted volume in production.');
