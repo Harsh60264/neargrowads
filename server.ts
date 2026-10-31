@@ -1959,6 +1959,10 @@ function validateBlogImageVariants(value: unknown, maxAltText = 300): ThemeImage
       if (typeof field !== 'number' || !Number.isFinite(field) || field < 0 || field > 100) return undefined;
       variant[key] = field;
     }
+    if (item.imageZoom !== undefined) {
+      if (typeof item.imageZoom !== 'number' || !Number.isFinite(item.imageZoom) || item.imageZoom < 100 || item.imageZoom > 300) return undefined;
+      variant.imageZoom = item.imageZoom;
+    }
     if (item.backgroundEnabled !== undefined) {
       if (typeof item.backgroundEnabled !== 'boolean') return undefined;
       variant.backgroundEnabled = item.backgroundEnabled;

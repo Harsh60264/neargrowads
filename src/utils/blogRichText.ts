@@ -1,6 +1,7 @@
 import { resolveBlogImage, type BlogPost } from '../data/blogData';
 import type { PublicImageTheme } from '../data/themeImages';
 import { isSupportedBlogImageWidth } from '../data/blogImagePlacement';
+import { normalizeBlogImageAdjustment } from '../data/blogImageAdjustments';
 
 const allowedTags = new Set([
   'a', 'b', 'blockquote', 'br', 'caption', 'code', 'del', 'div', 'em', 'figure', 'figcaption', 'h2', 'h3', 'h4',
@@ -173,6 +174,7 @@ export function renderBlogInlineImage(image: InlineImage, theme: PublicImageThem
     : '50%';
   const alignment = image.alignment || 'center';
   const layout = image.layout || 'standalone';
+  const adjustment = normalizeBlogImageAdjustment(resolved, 'contain');
   const above = Number.isInteger(image.spacingAbove) ? Math.max(0, Math.min(120, image.spacingAbove!)) : 16;
   const below = Number.isInteger(image.spacingBelow) ? Math.max(0, Math.min(120, image.spacingBelow!)) : 16;
   const flow = layout === 'wrap-left' ? 'float:left;margin-right:1rem' : layout === 'wrap-right' ? 'float:right;margin-left:1rem' : '';
@@ -181,11 +183,19 @@ export function renderBlogInlineImage(image: InlineImage, theme: PublicImageThem
       : alignment === 'right' ? 'margin-left:auto;margin-right:0'
         : 'margin-left:auto;margin-right:auto'
     : '';
-  const figureStyle = `width:fit-content;max-width:min(${width},100%);margin-top:${above}px;margin-bottom:${below}px;${flow};${alignMargins}`;
+  const hasCropFrame = adjustment.fit === 'cover' || adjustment.zoom > 100 ||
+    adjustment.positionX !== 50 || adjustment.positionY !== 50;
+  const figureStyle = `${hasCropFrame ? `width:min(${width},100%)` : `width:fit-content;max-width:min(${width},100%)`};margin-top:${above}px;margin-bottom:${below}px;${flow};${alignMargins}`;
+  const imageStyle = hasCropFrame
+    ? `display:block;width:100%;height:100%;object-fit:${adjustment.fit};object-position:${adjustment.positionX}% ${adjustment.positionY}%;transform:scale(${adjustment.zoom / 100});transform-origin:${adjustment.positionX}% ${adjustment.positionY}%`
+    : 'display:block;width:auto;max-width:100%;height:auto;object-fit:contain';
+  const imageMarkup = hasCropFrame
+    ? `<span class="blog-inline-image-viewport" style="display:block;width:100%;aspect-ratio:16/8;overflow:hidden"><img src="${escapeHtml(resolved.url)}" alt="${escapeHtml(resolved.altText || '')}" loading="lazy" style="${imageStyle}"></span>`
+    : `<img src="${escapeHtml(resolved.url)}" alt="${escapeHtml(resolved.altText || '')}" loading="lazy" style="${imageStyle}">`;
   const caption = image.caption.trim()
     ? `<figcaption class="blog-inline-image-caption">${escapeHtml(image.caption.trim().slice(0, 500))}</figcaption>`
     : '';
-  return `<figure class="blog-inline-image" data-blog-image-id="${escapeHtml(image.id || '')}" style="${figureStyle}"><img src="${escapeHtml(resolved.url)}" alt="${escapeHtml(resolved.altText || '')}" loading="lazy" style="display:block;width:auto;max-width:100%;height:auto;object-fit:contain">${caption}</figure>`;
+  return `<figure class="blog-inline-image" data-blog-image-id="${escapeHtml(image.id || '')}" style="${figureStyle}">${imageMarkup}${caption}</figure>`;
 }
 
 function markdownInline(value: string): string {

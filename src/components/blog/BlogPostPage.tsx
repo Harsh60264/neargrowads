@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, Calendar, Check, ChevronRight, Clock, Copy, List
 import { blogImageMarker, sanitizeBlogHtml } from '../../utils/blogRichText';
 import { BLOG_FEATURED_IMAGE_CLASS_NAME } from './blogImagePresentation';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
+import { normalizeBlogImageAdjustment } from '../../data/blogImageAdjustments';
 
 interface BlogPostPageProps {
   post: BlogPost;
@@ -93,6 +94,8 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
   const [copied, setCopied] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
+  const featuredImage = resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image;
+  const featuredImageAdjustment = normalizeBlogImageAdjustment(featuredImage, 'cover');
   const sections = useMemo(
     () => post.contentSections.map((section, index) => ({ ...section, id: headingId(section.heading, index), contentId: section.id })),
     [post.contentSections],
@@ -265,9 +268,20 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
         </div>
       </header>
 
-      {resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.url && (
-        <div className="mx-auto max-w-6xl px-4 pt-8 sm:px-6 md:pt-12 lg:px-8">
-          <img src={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.url} alt={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.altText ?? ''} fetchPriority="high" className={BLOG_FEATURED_IMAGE_CLASS_NAME} />
+      {featuredImage.url && (
+        <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl px-4 pt-8 sm:rounded-3xl sm:px-6 md:pt-12 lg:px-8">
+          <img
+            src={featuredImage.url}
+            alt={featuredImage.altText ?? ''}
+            fetchPriority="high"
+            className={BLOG_FEATURED_IMAGE_CLASS_NAME}
+            style={{
+              objectFit: featuredImageAdjustment.fit,
+              objectPosition: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
+              transform: `scale(${featuredImageAdjustment.zoom / 100})`,
+              transformOrigin: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
+            }}
+          />
         </div>
       )}
 

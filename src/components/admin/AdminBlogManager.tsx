@@ -8,8 +8,10 @@ import { blogImageMarker, blogTextToEditorHtml, normalizeBlogTextColor, renderBl
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSupportedBlogImageWidth } from '../../data/blogImagePlacement';
+import { BLOG_ARTICLE_IMAGE_RATIO_HELPER, BLOG_ARTICLE_IMAGE_SIZE_HELPER, normalizeBlogImageAdjustment } from '../../data/blogImageAdjustments';
 import { BlogPostPage } from '../blog/BlogPostPage';
 import { BLOG_FEATURED_IMAGE_CLASS_NAME } from '../blog/blogImagePresentation';
+import { BlogImageAdjustControls } from './BlogImageAdjustControls';
 import { AdminBlogSeoHealth } from './AdminBlogSeoHealth';
 import { uploadAdminMedia } from './uploadAdminMedia';
 
@@ -195,6 +197,10 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     layout: 'standalone' | 'wrap-left' | 'wrap-right';
     spacingAbove: number;
     spacingBelow: number;
+    imageSize: 'cover' | 'contain';
+    imagePositionX: number;
+    imagePositionY: number;
+    imageZoom: number;
   } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<PublicImageTheme>('dark');
@@ -209,6 +215,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     post.featuredImageVariants,
     imageTheme,
   );
+  const featuredImageAdjustment = normalizeBlogImageAdjustment(featuredImagePreview.image, 'cover');
   const socialImagePreview = resolveBlogImage(post.socialImage, '', post.socialImageVariants, imageTheme);
   const authorImagePreview = resolveBlogImage(
     post.author.imageUrl,
@@ -228,7 +235,20 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: imageDialog.layout,
       spacingAbove: imageDialog.spacingAbove,
       spacingBelow: imageDialog.spacingBelow,
+      imageVariants: {
+        ...post.inlineImages?.[imageDialog.imageIndex ?? -1]?.imageVariants,
+        [imageTheme]: {
+          ...post.inlineImages?.[imageDialog.imageIndex ?? -1]?.imageVariants?.[imageTheme],
+          imageSize: imageDialog.imageSize,
+          imagePositionX: imageDialog.imagePositionX,
+          imagePositionY: imageDialog.imagePositionY,
+          imageZoom: imageDialog.imageZoom,
+        },
+      },
     }
+    : undefined;
+  const imageDialogImage = imageDialog && imageDialogPreview
+    ? resolveBlogImage(imageDialog.source, imageDialog.altText, imageDialogPreview.imageVariants, imageTheme).image
     : undefined;
 
   const dark = true;
@@ -420,6 +440,10 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
   const openImageConfiguration = (sectionIndex: number, imageIndex?: number, destination?: ImageDestination) => {
     setUploadError('');
     const image = imageIndex === undefined ? undefined : post.inlineImages?.[imageIndex];
+    const resolvedImage = image
+      ? resolveBlogImage(image.url, image.altText, image.imageVariants, imageTheme).image
+      : undefined;
+    const imageAdjustment = normalizeBlogImageAdjustment(resolvedImage, 'contain');
     const selection = window.getSelection();
     const active = activeEditor.current;
     if (imageIndex === undefined && active && selection?.rangeCount && active.element.contains(selection.getRangeAt(0).commonAncestorContainer)) {
@@ -445,6 +469,10 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: image?.layout || 'standalone',
       spacingAbove: image?.spacingAbove ?? 16,
       spacingBelow: image?.spacingBelow ?? 16,
+      imageSize: imageAdjustment.fit,
+      imagePositionX: imageAdjustment.positionX,
+      imagePositionY: imageAdjustment.positionY,
+      imageZoom: imageAdjustment.zoom,
     });
   };
 
@@ -605,6 +633,16 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: imageDialog.layout,
       spacingAbove: imageDialog.spacingAbove,
       spacingBelow: imageDialog.spacingBelow,
+      imageVariants: {
+        ...currentImage?.imageVariants,
+        [imageTheme]: {
+          ...currentImage?.imageVariants?.[imageTheme],
+          imageSize: imageDialog.imageSize,
+          imagePositionX: imageDialog.imagePositionX,
+          imagePositionY: imageDialog.imagePositionY,
+          imageZoom: imageDialog.imageZoom,
+        },
+      },
     };
     if (imageDialog.imageIndex === undefined) images.push(updatedImage);
     else images[imageDialog.imageIndex] = updatedImage;
@@ -1381,8 +1419,18 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                     <p className={`mb-3 text-xs ${muted}`}>Featured image · JPG, PNG or WebP up to 15 MB.</p>
                     <ImageThemeTabs theme={imageTheme} source={featuredImagePreview.source} onChange={setImageTheme} />
                     {featuredImagePreview.image.url && (
-                      <div className="relative mb-3">
-                        <img src={featuredImagePreview.image.url} alt={featuredImagePreview.image.altText || 'Featured article preview'} className={BLOG_FEATURED_IMAGE_CLASS_NAME} />
+                      <div className="relative mb-3 overflow-hidden rounded-2xl sm:rounded-3xl">
+                        <img
+                          src={featuredImagePreview.image.url}
+                          alt={featuredImagePreview.image.altText || 'Featured article preview'}
+                          className={BLOG_FEATURED_IMAGE_CLASS_NAME}
+                          style={{
+                            objectFit: featuredImageAdjustment.fit,
+                            objectPosition: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
+                            transform: `scale(${featuredImageAdjustment.zoom / 100})`,
+                            transformOrigin: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
+                          }}
+                        />
                         {post.featuredImageVariants?.[imageTheme]?.url && (
                           <button type="button" onClick={() => setField('featuredImageVariants', {
                             ...post.featuredImageVariants,
@@ -1396,6 +1444,27 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                       <span className={`text-[10px] font-normal ${muted}`}>Click to browse · Max 15 MB</span>
                       <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/pjpeg,image/png,image/x-png,image/webp" disabled={uploadingImage !== null} className="sr-only" onChange={(event) => { void uploadImage(event.target.files?.[0], 'featured', undefined, imageTheme); event.currentTarget.value = ''; }} />
                     </label>
+                    <p className={`mt-2 text-[10px] leading-5 ${muted}`}>{BLOG_ARTICLE_IMAGE_RATIO_HELPER}<br />{BLOG_ARTICLE_IMAGE_SIZE_HELPER}</p>
+                    {featuredImagePreview.image.url && (
+                      <BlogImageAdjustControls
+                        src={featuredImagePreview.image.url}
+                        alt={featuredImagePreview.image.altText || 'Featured article preview'}
+                        value={{
+                          imageSize: featuredImagePreview.image.imageSize,
+                          imagePositionX: featuredImagePreview.image.imagePositionX,
+                          imagePositionY: featuredImagePreview.image.imagePositionY,
+                          imageZoom: featuredImagePreview.image.imageZoom,
+                        }}
+                        defaultFit="cover"
+                        onChange={(adjustment) => setField('featuredImageVariants', {
+                          ...post.featuredImageVariants,
+                          [imageTheme]: {
+                            ...post.featuredImageVariants?.[imageTheme],
+                            ...adjustment,
+                          },
+                        })}
+                      />
+                    )}
                     {uploadError && <p role="alert" className="mt-2 text-xs text-rose-400">{uploadError}</p>}
                     <label className="mt-3 block">
                       <span className={fieldLabel}>{imageTheme === 'light' ? 'Light' : 'Dark'} Mode image URL</span>
@@ -1574,6 +1643,21 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                   Upload JPG, PNG or WebP
                   <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/pjpeg,image/png,image/x-png,image/webp" disabled={uploadingImage !== null} className="sr-only" onChange={(event) => { void uploadImage(event.target.files?.[0], 'pending-inline'); event.currentTarget.value = ''; }} />
                 </label>
+                <p className="text-[10px] leading-5 text-[#A9B8AD]">{BLOG_ARTICLE_IMAGE_RATIO_HELPER}<br />{BLOG_ARTICLE_IMAGE_SIZE_HELPER}</p>
+                {imageDialog.source && (
+                  <BlogImageAdjustControls
+                    src={imageDialogImage?.url || imageDialog.source}
+                    alt={imageDialogImage?.altText || imageDialog.altText}
+                    value={{
+                      imageSize: imageDialog.imageSize,
+                      imagePositionX: imageDialog.imagePositionX,
+                      imagePositionY: imageDialog.imagePositionY,
+                      imageZoom: imageDialog.imageZoom,
+                    }}
+                    defaultFit="contain"
+                    onChange={(adjustment) => setImageDialog((current) => current ? { ...current, ...adjustment } : current)}
+                  />
+                )}
 
                 <label className="block">
                   <span className={fieldLabel}>Section</span>

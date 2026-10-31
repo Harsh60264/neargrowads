@@ -13,6 +13,7 @@ export interface ThemeImageFields {
   imagePositionX?: number;
   imagePositionY?: number;
   imageSize?: 'cover' | 'contain';
+  imageZoom?: number;
   imageOpacity?: number;
 }
 

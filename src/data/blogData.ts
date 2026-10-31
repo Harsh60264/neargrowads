@@ -1,12 +1,20 @@
-import { resolveThemeImage, type PublicImageTheme, type ThemeImageVariants } from './themeImages';
+import { resolveThemeImage, type PublicImageTheme, type ThemeImageFields, type ThemeImageSource, type ThemeImageVariants } from './themeImages';
 
 export function resolveBlogImage(
   url: string | undefined,
   altText: string,
   variants: ThemeImageVariants | undefined,
   theme: PublicImageTheme,
-) {
-  return resolveThemeImage({ url: url ?? '', altText }, variants, theme);
+): { image: ThemeImageFields & { url: string; altText: string }; source: ThemeImageSource } {
+ const resolved = resolveThemeImage<ThemeImageFields>({ url: url ?? '', altText }, variants, theme);
+ return {
+   ...resolved,
+   image: {
+     ...resolved.image,
+     url: resolved.image.url || '',
+     altText: resolved.image.altText ?? altText,
+   },
+ };
 }
 
 export function blogAuthorDisplayName(author: { name?: string } | null | undefined): string {
