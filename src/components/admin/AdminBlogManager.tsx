@@ -3,12 +3,13 @@ import { BLOG_POSTS, blogAuthorDisplayName, resolveBlogImage, type BlogPost } fr
 import { SERVICES } from '../../data/servicesData';
 import { BLOG_CATEGORIES } from '../../data/blogCategories';
 import type { BlogCategory } from '../../data/blogCategories';
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowLeft, ArrowUp, BookOpen, Bold, CalendarDays, Check, CircleCheck, Clock3, Code2, Eye, FileText, Heading2, Heading3, Heading4, ImagePlus, Italic, Link as LinkIcon, List, ListOrdered, LoaderCircle, PenLine, Plus, Quote, Redo2, Search, Send, Strikethrough, Table2, Tag, Trash2, Underline, Undo2 } from 'lucide-react';
-import { blogImageMarker, blogTextToEditorHtml, sanitizeBlogHtml } from '../../utils/blogRichText';
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowLeft, ArrowUp, BookOpen, Bold, CalendarDays, Check, CircleCheck, Clock3, Code2, Eye, FileText, Heading2, Heading3, Heading4, ImagePlus, Italic, Link as LinkIcon, List, ListOrdered, LoaderCircle, Paintbrush, PenLine, Plus, Quote, Redo2, Search, Send, Strikethrough, Table2, Tag, Trash2, Underline, Undo2 } from 'lucide-react';
+import { blogImageMarker, blogTextToEditorHtml, normalizeBlogTextColor, renderBlogInlineImage, sanitizeBlogHtml } from '../../utils/blogRichText';
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSupportedBlogImageWidth } from '../../data/blogImagePlacement';
 import { BlogPostPage } from '../blog/BlogPostPage';
+import { BLOG_FEATURED_IMAGE_CLASS_NAME } from '../blog/blogImagePresentation';
 import { AdminBlogSeoHealth } from './AdminBlogSeoHealth';
 import { uploadAdminMedia } from './uploadAdminMedia';
 
@@ -107,6 +108,17 @@ const formattingTools = [
   { label: 'Insert table', icon: Table2, action: 'table' },
 ] as const;
 
+const blogTextColors = [
+  { label: 'Red', value: '#DC2626' },
+  { label: 'Orange', value: '#EA580C' },
+  { label: 'Yellow', value: '#CA8A04' },
+  { label: 'Green', value: '#16A34A' },
+  { label: 'Cyan', value: '#0891B2' },
+  { label: 'Blue', value: '#2563EB' },
+  { label: 'Purple', value: '#7C3AED' },
+  { label: 'Pink', value: '#DB2777' },
+] as const;
+
 type InlineImage = NonNullable<BlogPost['inlineImages']>[number];
 type ImageDestination = 'cursor' | 'before-heading' | 'after-heading' | 'section-end' | `paragraph-start:${number}` | `paragraph-end:${number}`;
 
@@ -166,6 +178,9 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
   const [imageTheme, setImageTheme] = useState<PublicImageTheme>('dark');
   const activeEditor = useRef<{ sectionIndex: number; paragraphIndex: number; element: HTMLDivElement } | null>(null);
   const pendingImageRange = useRef<{ sectionIndex: number; paragraphIndex: number; element: HTMLDivElement; range: Range } | null>(null);
+  const pendingTextColorRange = useRef<{ sectionIndex: number; paragraphIndex: number; element: HTMLDivElement; range: Range } | null>(null);
+  const [textColorOpen, setTextColorOpen] = useState(false);
+  const [customTextColor, setCustomTextColor] = useState('#2563EB');
   const [imageDialog, setImageDialog] = useState<{
     sectionIndex: number;
     imageId?: string;
@@ -184,6 +199,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<PublicImageTheme>('dark');
   const [previewMobile, setPreviewMobile] = useState(false);
+  const [imagePreviewMobile, setImagePreviewMobile] = useState(false);
   const [previewSelection, setPreviewSelection] = useState<string | null>(null);
   const draftHistoryRef = useRef<{ past: BlogRecord[]; future: BlogRecord[] }>({ past: [], future: [] });
   const suppressEditorHistoryRef = useRef(false);
@@ -200,6 +216,20 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     post.author.imageVariants,
     imageTheme,
   );
+  const imageDialogPreview = imageDialog
+    ? {
+      ...(imageDialog.imageIndex === undefined ? {} : post.inlineImages?.[imageDialog.imageIndex]),
+      id: 'admin-image-preview',
+      url: imageDialog.source,
+      altText: imageDialog.altText,
+      caption: imageDialog.caption,
+      width: imageDialog.width,
+      alignment: imageDialog.alignment,
+      layout: imageDialog.layout,
+      spacingAbove: imageDialog.spacingAbove,
+      spacingBelow: imageDialog.spacingBelow,
+    }
+    : undefined;
 
   const dark = true;
   const text = dark ? 'text-[#ECF3EE]' : 'text-[#1B261D]';
@@ -335,12 +365,56 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
   const saveEditorSelection = (sectionIndex: number, paragraphIndex: number, element: HTMLDivElement) => {
     activeEditor.current = { sectionIndex, paragraphIndex, element };
     pendingImageRange.current = null;
+    pendingTextColorRange.current = null;
     const selection = window.getSelection();
     if (!selection?.rangeCount) return;
     const range = selection.getRangeAt(0);
     if (element.contains(range.commonAncestorContainer)) {
       pendingImageRange.current = { sectionIndex, paragraphIndex, element, range: range.cloneRange() };
+      pendingTextColorRange.current = { sectionIndex, paragraphIndex, element, range: range.cloneRange() };
     }
+  };
+
+  const applyTextColor = (value: string) => {
+    const color = normalizeBlogTextColor(value);
+    if (!color) {
+      setError('Enter a valid HEX color, such as #2563EB.');
+      return;
+    }
+    const pending = pendingTextColorRange.current;
+    if (!pending || !pending.element.isConnected || pending.range.collapsed ||
+      !pending.element.contains(pending.range.commonAncestorContainer)) {
+      setError('Select a word or phrase in an article paragraph before applying a text color.');
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection) {
+      setError('Text selection is unavailable. Select the text again and retry.');
+      return;
+    }
+    pending.element.focus();
+    selection.removeAllRanges();
+    selection.addRange(pending.range.cloneRange());
+    if (!document.execCommand('foreColor', false, color)) {
+      setError('This browser could not apply the text color. Try selecting the text again.');
+      return;
+    }
+    const updatedHtml = sanitizeBlogHtml(pending.element.innerHTML);
+    pending.element.innerHTML = updatedHtml;
+    setPost((current) => ({
+      ...current,
+      updatedAt: new Date().toISOString(),
+      contentSections: current.contentSections.map((section, index) => index === pending.sectionIndex
+        ? {
+          ...section,
+          paragraphs: section.paragraphs.map((paragraph, paragraphIndex) =>
+            paragraphIndex === pending.paragraphIndex ? updatedHtml : paragraph),
+        }
+        : section),
+    }));
+    pendingTextColorRange.current = null;
+    setTextColorOpen(false);
+    setError('');
   };
 
   const openImageConfiguration = (sectionIndex: number, imageIndex?: number, destination?: ImageDestination) => {
@@ -867,7 +941,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
               <div className={`grid min-h-60 place-items-center ${muted}`}><LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> Loading article…</div>
             ) : (
               <form id="blog-editor-form" onSubmit={(event) => void submit(event)} className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="space-y-5">
+                <div className="min-w-0 space-y-5">
                   <section id="article-content" tabIndex={-1} className={panel}>
                     <div className={`mb-4 border-b pb-4 ${dark ? 'border-[#304135]' : 'border-[#E8ECE7]'}`}>
                       <h2 className={`font-bold ${text}`}>Article Content</h2>
@@ -880,10 +954,10 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                         setPost((current) => ({ ...current, title, metaTitle: !current.metaTitle || current.metaTitle === current.title ? title : current.metaTitle, socialTitle: !current.socialTitle || current.socialTitle === current.title ? title : current.socialTitle, slug: customSlug ? current.slug : slugify(title) }));
                       }} placeholder="Enter an engaging title…" className={`${field} text-base font-semibold`} />
                     </label>
-                    <div className="mb-5 grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]">
-                      <span className={`flex items-center rounded-xl border px-3 text-xs ${dark ? 'border-[#304135] bg-[#131D16] text-[#A9B8AD]' : 'border-[#DFE6DF] bg-[#FAFBF9] text-[#829084]'}`}>neargrowads.in/blog/</span>
-                      <input required aria-label="Article URL slug" value={post.slug} onChange={(event) => { setCustomSlug(true); setField('slug', slugify(event.target.value)); }} className={field} placeholder="e.g. local-seo-strategies" />
-                      <button type="button" onClick={() => { setCustomSlug(false); setField('slug', slugify(post.title)); }} className="inline-flex items-center justify-center rounded-xl border border-[#304135] px-3 py-2 text-xs font-semibold text-[#72D28B] hover:bg-[#202D24]">
+                    <div className="mb-5 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-[minmax(0,130px)_minmax(0,1fr)_auto]">
+                      <span className={`flex min-w-0 items-center rounded-xl border px-3 text-xs [overflow-wrap:anywhere] ${dark ? 'border-[#304135] bg-[#131D16] text-[#A9B8AD]' : 'border-[#DFE6DF] bg-[#FAFBF9] text-[#829084]'}`}>neargrowads.in/blog/</span>
+                      <input required aria-label="Article URL slug" value={post.slug} onChange={(event) => { setCustomSlug(true); setField('slug', slugify(event.target.value)); }} className={`${field} w-full min-w-0`} placeholder="e.g. local-seo-strategies" />
+                      <button type="button" onClick={() => { setCustomSlug(false); setField('slug', slugify(post.title)); }} className="inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-[#304135] px-3 py-2 text-xs font-semibold text-[#72D28B] hover:bg-[#202D24]">
                         Optimize slug
                       </button>
                     </div>
@@ -921,6 +995,72 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                           {action === 'autoLink' ? 'Auto-link URLs' : Icon && <Icon className="h-4 w-4" />}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        title="Text color"
+                        aria-label="Text color"
+                        aria-expanded={textColorOpen}
+                        aria-controls="admin-blog-text-color-picker"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setTextColorOpen((open) => !open)}
+                        className="grid h-8 w-8 place-items-center rounded-lg text-[#A9B8AD] transition hover:bg-[#26372B] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
+                      >
+                        <Paintbrush className="h-4 w-4" />
+                      </button>
+                      {textColorOpen && (
+                        <div id="admin-blog-text-color-picker" role="group" aria-label="Text color options" className={`flex basis-full flex-wrap items-center gap-2 rounded-lg border p-2 ${dark ? 'border-[#304135] bg-[#131D16]' : 'border-[#E8ECE7] bg-[#FAFBF9]'}`}>
+                          {blogTextColors.map(({ label, value }) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-label={`${label} text`}
+                              title={label}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => applyTextColor(value)}
+                              className="h-7 w-7 rounded-full border border-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7] focus-visible:ring-offset-2 focus-visible:ring-offset-[#101713]"
+                              style={{ backgroundColor: value }}
+                            />
+                          ))}
+                          <label className="flex items-center gap-2 text-xs text-[#A9B8AD]">
+                            Custom
+                            <input
+                              type="color"
+                              aria-label="Choose custom text color"
+                              value={normalizeBlogTextColor(customTextColor) || '#2563EB'}
+                              onChange={(event) => setCustomTextColor(event.target.value)}
+                              className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0"
+                            />
+                          </label>
+                          <label className="sr-only" htmlFor="admin-blog-custom-text-color">Custom HEX color</label>
+                          <input
+                            id="admin-blog-custom-text-color"
+                            type="text"
+                            inputMode="text"
+                            autoCapitalize="characters"
+                            spellCheck={false}
+                            maxLength={7}
+                            aria-label="Custom HEX text color"
+                            value={customTextColor}
+                            onChange={(event) => setCustomTextColor(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                applyTextColor(customTextColor);
+                              }
+                            }}
+                            placeholder="#2563EB"
+                            className="w-24 rounded-md border border-[#405248] bg-[#101713] px-2 py-1.5 font-mono text-xs text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
+                          />
+                          <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => applyTextColor(customTextColor)}
+                            className="rounded-md border border-[#405248] px-2.5 py-1.5 text-xs font-semibold text-[#EAF1EB] hover:border-[#67D8B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <p className={`mb-3 text-[10px] ${muted}`}>Place the caret in the article before inserting an image. Use Preview article to choose a heading or paragraph position visually.</p>
                     <div className="space-y-3">
@@ -1242,7 +1382,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                     <ImageThemeTabs theme={imageTheme} source={featuredImagePreview.source} onChange={setImageTheme} />
                     {featuredImagePreview.image.url && (
                       <div className="relative mb-3">
-                        <img src={featuredImagePreview.image.url} alt={featuredImagePreview.image.altText || 'Featured article preview'} className="aspect-video w-full rounded-xl border border-[#304135] object-cover" />
+                        <img src={featuredImagePreview.image.url} alt={featuredImagePreview.image.altText || 'Featured article preview'} className={BLOG_FEATURED_IMAGE_CLASS_NAME} />
                         {post.featuredImageVariants?.[imageTheme]?.url && (
                           <button type="button" onClick={() => setField('featuredImageVariants', {
                             ...post.featuredImageVariants,
@@ -1414,7 +1554,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
               </div>
               <button type="button" aria-label="Cancel image configuration" onClick={() => setImageDialog(null)} className="rounded-lg px-2 py-1 text-sm text-[#A9B8AD] hover:bg-[#26372B]">Close</button>
             </div>
-            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="mt-5 grid gap-5">
               <div className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block">
@@ -1509,25 +1649,38 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                 {uploadError && <p role="alert" className="text-xs text-rose-300">{uploadError}</p>}
               </div>
               <div>
-                <p className={fieldLabel}>Live preview · medium by default</p>
-                <div className="flow-root min-h-56 rounded-xl border border-[#304135] bg-[#101713] p-3">
-                  {imageDialog.source
-                    ? <figure style={{
-                      width: 'fit-content',
-                      maxWidth: `min(${imageDialog.width},100%)`,
-                      marginTop: `${imageDialog.spacingAbove}px`,
-                      marginBottom: `${imageDialog.spacingBelow}px`,
-                      marginLeft: imageDialog.layout === 'standalone' && imageDialog.alignment !== 'left' ? 'auto' : imageDialog.layout === 'wrap-right' ? 'auto' : 0,
-                      marginRight: imageDialog.layout === 'standalone' && imageDialog.alignment !== 'right' ? 'auto' : imageDialog.layout === 'wrap-left' ? 'auto' : 0,
-                      float: imageDialog.layout === 'wrap-left' ? 'left' : imageDialog.layout === 'wrap-right' ? 'right' : undefined,
-                    }}>
-                      <img src={imageDialog.source} alt={imageDialog.altText} style={{ display: 'block', width: 'auto', maxWidth: '100%', height: 'auto', objectFit: 'contain' }} />
-                      {imageDialog.caption && <figcaption className="pt-2 text-center text-xs text-[#A9B8AD]">{imageDialog.caption}</figcaption>}
-                    </figure>
-                    : <p className="text-center text-xs text-[#76867B]">Upload or select an image to preview its natural proportions and configured maximum width.</p>}
-                  {imageDialog.source && imageDialog.layout !== 'standalone' && <p className="text-xs leading-5 text-[#A9B8AD]">This sample text shows how the selected wrap direction will flow beside the image in the article.</p>}
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                  <p className={`${fieldLabel} mb-0`}>Published article image preview</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="inline-flex rounded-lg border border-[#304135] bg-[#101812] p-1" aria-label="Image preview viewport">
+                      <button type="button" aria-pressed={!imagePreviewMobile} onClick={() => setImagePreviewMobile(false)} className="rounded-md px-3 py-2 text-xs font-semibold text-[#A9B8AD] aria-pressed:bg-[#286D3B] aria-pressed:text-white">Desktop</button>
+                      <button type="button" aria-pressed={imagePreviewMobile} onClick={() => setImagePreviewMobile(true)} className="rounded-md px-3 py-2 text-xs font-semibold text-[#A9B8AD] aria-pressed:bg-[#286D3B] aria-pressed:text-white">Mobile</button>
+                    </div>
+                    {imageDialogPreview && <ImageThemeTabs
+                      theme={imageTheme}
+                      source={resolveBlogImage(
+                        imageDialogPreview.url,
+                        imageDialogPreview.altText,
+                        imageDialogPreview.imageVariants,
+                        imageTheme,
+                      ).source}
+                      onChange={setImageTheme}
+                    />}
+                  </div>
                 </div>
-                <p className="mt-2 text-[10px] leading-5 text-[#A9B8AD]">Images keep their aspect ratio and natural size; the selected width is a maximum and is clamped to the article container.</p>
+                <div className="overflow-x-auto rounded-xl border border-[#304135] bg-[#101713] p-3">
+                  <div
+                    className={`admin-blog-image-preview mx-auto min-h-56 ${imagePreviewMobile ? 'w-[390px] max-w-full px-4' : 'w-full max-w-[760px]'}`}
+                    data-preview-viewport={imagePreviewMobile ? 'mobile' : 'desktop'}
+                    data-public-theme={imageTheme}
+                  >
+                    {imageDialogPreview && imageDialog.source
+                      ? <div className="flow-root" dangerouslySetInnerHTML={{ __html: renderBlogInlineImage(imageDialogPreview, imageTheme) }} />
+                      : <p className="py-12 text-center text-xs text-[#76867B]">Upload or select an image to preview its published size, crop and position.</p>}
+                    {imageDialog.source && imageDialog.layout !== 'standalone' && <p className="text-xs leading-5 text-[#A9B8AD]">This sample text shows how the selected wrap direction will flow beside the image in the article.</p>}
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] leading-5 text-[#A9B8AD]">This preview uses the same theme variant, image sizing, float behavior and caption markup as the published article.</p>
               </div>
             </div>
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#304135] pt-4">
@@ -1567,7 +1720,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                 <button type="button" onClick={() => { setPreviewOpen(false); setPreviewSelection(null); }} className="rounded-lg border border-[#33453A] px-3 py-1.5 text-[11px] font-semibold text-[#EAF1EB]">Close preview</button>
               </div>
             </div>
-            <div className={`admin-blog-preview mx-auto min-h-full w-full ${previewMobile ? 'max-w-[390px]' : 'max-w-[1400px]'}`} data-preview-theme={previewTheme}>
+            <div className={`admin-blog-preview mx-auto min-h-full w-full ${previewMobile ? 'max-w-[390px]' : 'max-w-[1400px]'}`} data-preview-theme={previewTheme} data-preview-viewport={previewMobile ? 'mobile' : 'desktop'}>
               {previewSelection && (previewSelection.startsWith('legacy:')
                 ? <style>{`.admin-blog-preview [data-blog-image-index="${previewSelection.slice('legacy:'.length)}"]{outline:2px solid #67D8B7;outline-offset:4px;border-radius:8px}`}</style>
                 : <style>{`.admin-blog-preview [data-blog-image-id="${CSS.escape(previewSelection)}"]{outline:2px solid #67D8B7;outline-offset:4px;border-radius:8px}`}</style>)}

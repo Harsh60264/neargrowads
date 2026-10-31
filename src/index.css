@@ -3236,6 +3236,15 @@ html[data-theme='light'] [data-public-theme='light'] .blog-post-page .blog-inlin
   }
 }
 
+.admin-blog-image-preview[data-preview-viewport='mobile'] .blog-inline-image[style*='float:'],
+.admin-blog-preview[data-preview-viewport='mobile'] .blog-inline-image[style*='float:'] {
+  float: none !important;
+  clear: both;
+  max-width: 100% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
 html[data-theme='dark'] [data-public-theme='dark'] .home-page .home-consultation-form {
   color-scheme: dark;
   background-color: #171F2D !important;

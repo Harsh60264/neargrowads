@@ -3,6 +3,7 @@ import { resolveBlogImage, type BlogPost } from '../../data/blogData';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { ArrowLeft, ArrowRight, Calendar, Check, ChevronRight, Clock, Copy, ListTree, Share2, User } from 'lucide-react';
 import { blogImageMarker, sanitizeBlogHtml } from '../../utils/blogRichText';
+import { BLOG_FEATURED_IMAGE_CLASS_NAME } from './blogImagePresentation';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
 
 interface BlogPostPageProps {
@@ -266,7 +267,7 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
 
       {resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.url && (
         <div className="mx-auto max-w-6xl px-4 pt-8 sm:px-6 md:pt-12 lg:px-8">
-          <img src={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.url} alt={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.altText ?? ''} fetchPriority="high" className="aspect-[16/8] max-h-[620px] w-full rounded-2xl border border-white/10 object-cover shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:rounded-3xl" />
+          <img src={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.url} alt={resolveBlogImage(post.featuredImage, post.featuredImageAltText ?? '', post.featuredImageVariants, theme).image.altText ?? ''} fetchPriority="high" className={BLOG_FEATURED_IMAGE_CLASS_NAME} />
         </div>
       )}
 

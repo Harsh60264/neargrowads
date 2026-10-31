@@ -27,10 +27,25 @@ function safeHref(value: string): boolean {
 function safeImageSource(value: string): boolean {
   if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(value)) return true;
   try {
-    return ['http:', 'https:'].includes(new URL(value, window.location.origin).protocol);
+    const origin = typeof window === 'undefined' ? 'https://localhost' : window.location.origin;
+    return ['http:', 'https:'].includes(new URL(value, origin).protocol);
   } catch {
     return false;
   }
+}
+
+export function normalizeBlogTextColor(value: string): string | null {
+  const color = value.trim();
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) {
+    const hex = color.slice(1);
+    const expanded = hex.length === 3 ? [...hex].map((digit) => `${digit}${digit}`).join('') : hex;
+    return `#${expanded.toUpperCase()}`;
+  }
+  const rgb = color.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+  if (!rgb) return null;
+  const channels = rgb.slice(1).map(Number);
+  if (channels.some((channel) => channel > 255)) return null;
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
 }
 
 type InlineImage = NonNullable<BlogPost['inlineImages']>[number];
@@ -92,10 +107,14 @@ export function sanitizeBlogHtml(value: string, inlineImages?: InlineImage[], th
     if ((tag === 'figure' || tag === 'span') && node.getAttribute('data-blog-image-id')) {
       const id = node.getAttribute('data-blog-image-id') || '';
       const image = inlineImages?.find((candidate) => candidate.id === id);
-      if (image) return renderInlineImage(image, theme);
+      if (image) return renderBlogInlineImage(image, theme);
       return `<span data-blog-image-id="${escapeHtml(id)}"></span>`;
     }
     const children = Array.from(node.childNodes).map(serialize).join('');
+    if (tag === 'font') {
+      const color = normalizeBlogTextColor(node.getAttribute('color') || '');
+      return color ? `<span style="color:${color}">${children}</span>` : children;
+    }
     if (!allowedTags.has(tag)) return children;
 
     const attributes: string[] = [];
@@ -117,9 +136,22 @@ export function sanitizeBlogHtml(value: string, inlineImages?: InlineImage[], th
       const id = node.getAttribute('data-blog-image-id');
       if (id && /^[a-zA-Z0-9-]{1,80}$/.test(id)) attributes.push(`data-blog-image-id="${escapeHtml(id)}"`);
     }
+    const styles: string[] = [];
     const alignment = node instanceof HTMLElement ? node.style.textAlign : '';
     if (['left', 'center', 'right'].includes(alignment)) {
-      attributes.push(`style="text-align:${alignment}"`);
+      styles.push(`text-align:${alignment}`);
+    }
+    const colorDeclaration = tag === 'span'
+      ? node.getAttribute('style')?.split(';')
+        .map((declaration) => declaration.trim())
+        .find((declaration) => /^color\s*:/i.test(declaration))
+      : undefined;
+    const color = colorDeclaration
+      ? normalizeBlogTextColor(colorDeclaration.slice(colorDeclaration.indexOf(':') + 1))
+      : null;
+    if (color) styles.push(`color:${color}`);
+    if (styles.length) {
+      attributes.push(`style="${styles.join(';')}"`);
     }
     if (tag === 'ol') {
       const start = Number(node.getAttribute('start'));
@@ -133,7 +165,7 @@ export function sanitizeBlogHtml(value: string, inlineImages?: InlineImage[], th
   return Array.from(document.body.childNodes).map(serialize).join('');
 }
 
-function renderInlineImage(image: InlineImage, theme: PublicImageTheme): string {
+export function renderBlogInlineImage(image: InlineImage, theme: PublicImageTheme): string {
   const resolved = resolveBlogImage(image.url, image.altText, image.imageVariants, theme).image;
   if (!safeImageSource(resolved.url)) return '';
   const width = isSupportedBlogImageWidth(image.width)
