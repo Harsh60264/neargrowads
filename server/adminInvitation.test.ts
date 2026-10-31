@@ -336,7 +336,7 @@ test('admin setup fields and invitation history label credential visibility and 
   assert.doesNotMatch(settingsSource, /Invitation Sent · Email Not Verified/);
 });
 
-test('recovery revokes existing sessions before password changes and reports later cleanup failures', () => {
+test('recovery completes pending CMS setup despite failed global Auth-session revocation', () => {
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
   const end = serverSource.indexOf("app.get('/api/admin/users'", start);
@@ -345,25 +345,50 @@ test('recovery revokes existing sessions before password changes and reports lat
   const sessionsRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?");
   const finalSessionRevocationIndex = completionRoute.indexOf("rest/v1/admin_sessions?", sessionsRevocationIndex + 1);
   const refreshRevocationIndex = completionRoute.indexOf('revokeSupabaseRefreshTokens(verifiedAccessToken, identity.id)');
+  const invitationCompletionIndex = completionRoute.lastIndexOf("'rest/v1/rpc/complete_admin_invitation'");
   const auditIndex = completionRoute.indexOf("writeAdminAudit(identity.id, 'auth.password.recovered'");
   const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
 
   assert.ok(passwordUpdateIndex > completionRoute.indexOf("supabaseAuthRequest('verify'"));
   assert.ok(sessionsRevocationIndex < passwordUpdateIndex);
-  assert.ok(finalSessionRevocationIndex > passwordUpdateIndex);
-  assert.ok(refreshRevocationIndex > passwordUpdateIndex && refreshRevocationIndex < finalSessionRevocationIndex);
+  assert.ok(finalSessionRevocationIndex > passwordUpdateIndex && finalSessionRevocationIndex < refreshRevocationIndex);
+  assert.ok(refreshRevocationIndex > passwordUpdateIndex && refreshRevocationIndex < invitationCompletionIndex);
+  assert.ok(invitationCompletionIndex > refreshRevocationIndex);
   assert.ok(auditIndex > passwordUpdateIndex);
+  assert.match(completionRoute, /catch \(error\) \{\s*recoveryRefreshTokenRevocationFailed = true;[\s\S]*?if \(mode === 'invite'\) \{/);
+  assert.match(completionRoute, /Your password and Admin setup are complete, and existing CMS sessions were revoked\. Warning: Supabase Auth sessions could not be globally revoked/);
   assert.match(completionRoute, /recoveryPasswordUpdateStarted = mode === 'recovery'/);
   assert.match(completionRoute, /recoveryPasswordUpdated = mode === 'recovery'/);
   assert.match(completionRoute, /recoveryPasswordUpdated\)[\s\S]*?password was changed and existing CMS sessions were revoked, but recovery cleanup did not finish/);
-  assert.match(completionRoute, /recoveryPasswordUpdateStarted\)[\s\S]*?could not confirm whether your password was changed\. Existing CMS sessions were revoked/);
+  assert.match(completionRoute, /recoveryPasswordUpdateStarted\)[\s\S]*?could not confirm whether your password was changed\. The account remains pending[\s\S]*?Do not retry this link/);
   assert.match(completionRoute, /recoveryAdminSessionsRevoked[\s\S]*?system could not confirm that existing CMS sessions were revoked/);
   assert.match(completionRoute, /finalSessionSweepComplete: recoveryFinalSessionSweepComplete/);
-  assert.match(completionRoute, /recoveryFinalSessionSweepComplete[\s\S]*?Treat any existing Admin session as potentially active/);
+  assert.match(completionRoute, /recoveryFinalSessionSweepComplete[\s\S]*?account remains pending[\s\S]*?Treat any existing Admin session as potentially active/);
   assert.match(completionRoute, /recoveryCleanupStage === 'not_started'/);
   assert.match(completionRoute, /recoveryCleanupStage,[\s\S]*?adminSessionsRevoked: recoveryAdminSessionsRevoked,[\s\S]*?finalSessionSweepComplete: recoveryFinalSessionSweepComplete,[\s\S]*?refreshTokensRevoked: recoveryRefreshTokensRevoked/);
   assert.match(authActionSource, /let recoveryOutcomeUnknown = mode === 'recovery'/);
   assert.match(authActionSource, /recoveryOutcomeUnknown[\s\S]*?could not confirm whether your password was changed or whether all Admin sessions were revoked[\s\S]*?potentially active/);
+});
+
+test('verified pending Co-Owner recovery activates by invitation generation, not temporary-password RPC', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const invitationMigration = readFileSync(
+    new URL('../supabase/migrations/20261028200000_secure_admin_invitation_recovery.sql', import.meta.url),
+    'utf8',
+  );
+  const completionRouteStart = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const completionRouteEnd = serverSource.indexOf("app.get('/api/admin/users'", completionRouteStart);
+  const completionRoute = serverSource.slice(completionRouteStart, completionRouteEnd);
+  const invitationRpc = invitationMigration.slice(
+    invitationMigration.indexOf('create or replace function public.complete_admin_invitation'),
+    invitationMigration.indexOf('create or replace function public.prepare_admin_invitation_recovery'),
+  );
+
+  assert.match(completionRoute, /if \(identity\.status === 'pending'\)[\s\S]*?complete_admin_invitation[\s\S]*?p_must_change_password: false,[\s\S]*?p_invitation_generation: invitationGeneration/);
+  assert.match(invitationRpc, /target_row\.is_primary_owner is distinct from false/i);
+  assert.match(invitationRpc, /target_row\.invitation_generation is distinct from p_invitation_generation/i);
+  assert.doesNotMatch(invitationRpc, /target_row\.role|role\s*=\s*'owner'/i);
+  assert.doesNotMatch(completionRoute.slice(completionRoute.indexOf("if (mode === 'recovery') {")), /complete_admin_temporary_password_setup/);
 });
 
 test('global refresh-token revocation uses the user JWT, rejects 404s, and accepts successful logout', async () => {

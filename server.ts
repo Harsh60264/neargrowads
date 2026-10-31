@@ -5470,6 +5470,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let recoveryAdminSessionsRevoked = false;
     let recoveryFinalSessionSweepComplete = false;
     let recoveryRefreshTokensRevoked = false;
+    let recoveryRefreshTokenRevocationFailed = false;
     let recoveryCleanupStage = 'not_started';
     try {
       let pendingInvitation: {
@@ -5642,9 +5643,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(400).json({ message: 'Choose a strong password to finish setting up this invitation.' });
         return;
       }
-      if (mode === 'recovery') recoveryCleanupStage = 'refresh_token_revocation';
-      await revokeSupabaseRefreshTokens(verifiedAccessToken, identity.id);
-      if (mode === 'recovery') recoveryRefreshTokensRevoked = true;
       if (mode === 'recovery') {
         recoveryCleanupStage = 'final_admin_session_revocation';
         const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
@@ -5654,6 +5652,20 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           body: JSON.stringify({ revoked_at: new Date().toISOString() }),
         }));
         recoveryFinalSessionSweepComplete = true;
+      }
+      if (mode === 'recovery') {
+        recoveryCleanupStage = 'refresh_token_revocation';
+        try {
+          await revokeSupabaseRefreshTokens(verifiedAccessToken, identity.id);
+          recoveryRefreshTokensRevoked = true;
+        } catch (error) {
+          recoveryRefreshTokenRevocationFailed = true;
+          console.error('[NearGrow Ads] Supabase Auth sessions could not be globally revoked after Admin-session cleanup.', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+            status: error instanceof SupabaseRequestError ? error.status : undefined,
+            code: error instanceof SupabaseRequestError ? error.code : undefined,
+          });
+        }
       }
       if (mode === 'invite') {
         const completion = await readSupabaseJson<{ status?: string }>(
@@ -5712,6 +5724,12 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           await writeAdminAudit(identity.id, 'auth.password.recovered', 'security', identity.id);
         }
       }
+      if (recoveryRefreshTokenRevocationFailed) {
+        res.json({
+          message: 'Your password and Admin setup are complete, and existing CMS sessions were revoked. Warning: Supabase Auth sessions could not be globally revoked from this recovery request. Sign in with your new password and contact the Primary Owner if you notice unexpected access.',
+        });
+        return;
+      }
       res.json({ message: 'Your account is ready. Sign in with your own password.' });
     } catch (error) {
       console.error('[NearGrow Ads] Admin account activation or recovery failed.', {
@@ -5737,7 +5755,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(503).json({
           message: recoveryFinalSessionSweepComplete
             ? 'We could not confirm whether your password was changed. Existing CMS sessions were revoked. Request a new recovery email before retrying; the fresh link will be verified before any further changes.'
-            : 'We could not confirm whether your password was changed. Earlier CMS sessions were revoked, but a final session check did not complete. Treat any existing Admin session as potentially active, request a new recovery email, and contact your established administrator support channel.',
+            : 'We could not confirm whether your password was changed. The account remains pending and existing CMS sessions were revoked. Do not retry this link; ask the Primary Owner to send a fresh recovery link. Treat any existing Admin session as potentially active until the fresh recovery is completed.',
         });
         return;
       }
