@@ -13,6 +13,7 @@ $poolerHost = 'aws-0-eu-west-1.pooler.supabase.com'
 $poolerPort = 5432
 $databaseName = 'postgres'
 $databaseUser = "postgres.$stagingProjectRef"
+$manualSqlEditorMigrationName = '20261031010000_complete_admin_temporary_password_setup.sql'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $migrationDirectory = Join-Path $repoRoot 'supabase\migrations'
 $logPath = Join-Path $env:LOCALAPPDATA "NearGrowAds\staging-migration-logs\$stagingProjectRef.log"
@@ -39,12 +40,24 @@ if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^psql \(PostgreSQL\) 18(?:
 }
 
 $allMigrationFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -Filter '*.sql' | Sort-Object Name)
-if ($allMigrationFiles.Count -ne 34) {
-  throw "Expected 34 repository migrations; found $($allMigrationFiles.Count)."
+if ($allMigrationFiles.Count -ne 35) {
+  throw "Expected 35 repository migration files; found $($allMigrationFiles.Count)."
 }
-$expectedMigrationNames = @($allMigrationFiles | Select-Object -Skip 3 | ForEach-Object { $_.Name })
+$manualSqlEditorMigration = @($allMigrationFiles | Where-Object { $_.Name -ceq $manualSqlEditorMigrationName })
+if ($manualSqlEditorMigration.Count -ne 1) {
+  throw "The manually applied verification-only migration is missing or duplicated: $manualSqlEditorMigrationName"
+}
+$expectedMigrationNames = @(
+  $allMigrationFiles |
+    Select-Object -Skip 3 |
+    Where-Object { $_.Name -cne $manualSqlEditorMigrationName } |
+    ForEach-Object { $_.Name }
+)
 if ($expectedMigrationNames.Count -ne 31) {
   throw 'Expected exactly 31 migrations in the staging application range (4-34).'
+}
+if ($allMigrationFiles[-1].Name -cne $manualSqlEditorMigrationName) {
+  throw "The verification-only migration must remain the newest repository migration: $manualSqlEditorMigrationName"
 }
 
 $logPassed = $false
@@ -80,9 +93,9 @@ Write-Output 'NearGrowAds staging migration verification'
 Write-Output "Project ref: $stagingProjectRef"
 Write-Output "Local migration log: $(if (Test-Path -LiteralPath $logPath) { 'present' } else { 'missing' })"
 if ($logPassed) {
-  Write-Output 'PASS | MIGRATION_LOG | exactly 31 expected success entries; no failed entries'
+  Write-Output 'PASS | MIGRATION_LOG | exactly 31 runner-managed migrations (4-34); no failed entries'
 } else {
-  Write-Output "FAIL | MIGRATION_LOG | success entries=$($logSuccessNames.Count); missing=$($missingLogNames.Count); duplicate=$($duplicateLogNames.Count); unexpected=$($extraLogNames.Count); failures=$($logFailures.Count)"
+  Write-Output "FAIL | MIGRATION_LOG | expected 31 runner-managed migrations (4-34); success entries=$($logSuccessNames.Count); missing=$($missingLogNames.Count); duplicate=$($duplicateLogNames.Count); unexpected=$($extraLogNames.Count); failures=$($logFailures.Count)"
   foreach ($name in $missingLogNames) { Write-Output "  MISSING_LOG_SUCCESS | $name" }
   foreach ($name in $duplicateLogNames) { Write-Output "  DUPLICATE_LOG_SUCCESS | $name" }
   foreach ($name in $extraLogNames) { Write-Output "  UNEXPECTED_LOG_SUCCESS | $name" }
@@ -125,6 +138,7 @@ expected_columns(table_name, column_name) AS (
     ('admin_users', 'temporary_password_expires_at'),
     ('admin_users', 'temporary_password_used_at'),
     ('admin_users', 'is_primary_owner'),
+    ('admin_audit_logs', 'idempotency_key'),
     ('admin_sessions', 'last_activity_at'),
     ('leads', 'notification_status'),
     ('leads', 'consent_status'),
@@ -146,7 +160,9 @@ expected_rpcs(name, signature) AS (
     ('prepare_admin_invitation_recovery', 'public.prepare_admin_invitation_recovery(uuid,uuid,uuid)'),
     ('cancel_admin_invitation', 'public.cancel_admin_invitation(uuid,uuid)'),
     ('archive_admin_account', 'public.archive_admin_account(uuid,uuid)'),
-    ('consume_admin_temporary_password_login', 'public.consume_admin_temporary_password_login(uuid)')
+    ('consume_admin_temporary_password_login', 'public.consume_admin_temporary_password_login(uuid)'),
+    ('get_active_admin_session', 'public.get_active_admin_session(uuid,uuid)'),
+    ('complete_admin_temporary_password_setup', 'public.complete_admin_temporary_password_setup(uuid,uuid)')
 ),
 expected_buckets(bucket_id, is_public, size_limit) AS (
   VALUES
@@ -217,6 +233,142 @@ checks AS (
     END
   FROM expected_rpcs f
   LEFT JOIN pg_proc p ON p.oid = to_regprocedure(f.signature)
+
+  UNION ALL
+
+  SELECT
+    'ADMIN_TABLE_PRIVILEGE',
+    expected.table_name,
+    COALESCE(
+      (
+        SELECT bool_and(has_table_privilege('service_role', relation.oid, privilege))
+        FROM unnest(ARRAY[
+          'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+        ]) AS required(privilege)
+      )
+      AND NOT has_table_privilege('anon', relation.oid, 'SELECT')
+      AND NOT has_table_privilege('anon', relation.oid, 'INSERT')
+      AND NOT has_table_privilege('anon', relation.oid, 'UPDATE')
+      AND NOT has_table_privilege('anon', relation.oid, 'DELETE')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'SELECT')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'INSERT')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'UPDATE')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'DELETE')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+        WHERE acl.grantee = 0
+      ),
+      false
+    ),
+    CASE
+      WHEN relation.oid IS NULL THEN 'Admin table is missing'
+      WHEN EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+        WHERE acl.grantee = 0
+      ) THEN 'PUBLIC has direct table privileges'
+      WHEN has_table_privilege('anon', relation.oid, 'SELECT')
+        OR has_table_privilege('anon', relation.oid, 'INSERT')
+        OR has_table_privilege('anon', relation.oid, 'UPDATE')
+        OR has_table_privilege('anon', relation.oid, 'DELETE')
+        OR has_table_privilege('authenticated', relation.oid, 'SELECT')
+        OR has_table_privilege('authenticated', relation.oid, 'INSERT')
+        OR has_table_privilege('authenticated', relation.oid, 'UPDATE')
+        OR has_table_privilege('authenticated', relation.oid, 'DELETE')
+        THEN 'anon/authenticated have direct table privileges'
+      WHEN NOT (
+        SELECT bool_and(has_table_privilege('service_role', relation.oid, privilege))
+        FROM unnest(ARRAY[
+          'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+        ]) AS required(privilege)
+      ) THEN 'service_role is missing one or more table privileges'
+      ELSE 'direct client/PUBLIC grants removed; service_role has all table privileges'
+    END
+  FROM (VALUES
+    ('admin_users'),
+    ('admin_sessions'),
+    ('admin_audit_logs'),
+    ('admin_ownership_transfers')
+  ) AS expected(table_name)
+  LEFT JOIN pg_class relation
+    ON relation.oid = to_regclass('public.' || expected.table_name)
+
+  UNION ALL
+
+  SELECT
+    'TEMP_PASSWORD_MIGRATION',
+    'admin_audit_logs_idempotency_key_unique',
+    EXISTS (
+      SELECT 1
+      FROM pg_index index_entry
+      JOIN pg_class index_relation ON index_relation.oid = index_entry.indexrelid
+      WHERE index_entry.indrelid = to_regclass('public.admin_audit_logs')
+        AND index_relation.relname = 'admin_audit_logs_idempotency_key_unique'
+        AND index_entry.indisunique
+        AND index_entry.indisvalid
+        AND index_entry.indpred IS NOT NULL
+        AND pg_get_indexdef(index_entry.indexrelid) ~* '\(idempotency_key\)'
+    ),
+    CASE WHEN EXISTS (
+      SELECT 1
+      FROM pg_index index_entry
+      JOIN pg_class index_relation ON index_relation.oid = index_entry.indexrelid
+      WHERE index_entry.indrelid = to_regclass('public.admin_audit_logs')
+        AND index_relation.relname = 'admin_audit_logs_idempotency_key_unique'
+        AND index_entry.indisunique
+        AND index_entry.indisvalid
+        AND index_entry.indpred IS NOT NULL
+        AND pg_get_indexdef(index_entry.indexrelid) ~* '\(idempotency_key\)'
+    ) THEN 'unique partial idempotency index exists' ELSE 'missing or invalid idempotency index' END
+
+  UNION ALL
+
+  SELECT
+    'TEMP_PASSWORD_MIGRATION',
+    'RPC implementation safeguards',
+    COALESCE(
+      session_rpc.prosecdef
+      AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.temporary_password_expires_at > clock_timestamp()%'
+      AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.temporary_password_used_at is not null%'
+      AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.status = ''active''%'
+      AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.archived_at is null%'
+      AND setup_rpc.prosecdef
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.is_primary_owner is distinct from false%'
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.must_change_password is distinct from true%'
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.temporary_password_expires_at <= clock_timestamp()%'
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%for update%'
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%temporary-admin-password-setup:%'
+      AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%on conflict (idempotency_key)%',
+      false
+    ),
+    CASE
+      WHEN session_rpc.oid IS NULL OR setup_rpc.oid IS NULL THEN 'one or both exact-signature RPCs are missing'
+      WHEN NOT (
+        session_rpc.prosecdef
+        AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.temporary_password_expires_at > clock_timestamp()%'
+        AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.temporary_password_used_at is not null%'
+        AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.status = ''active''%'
+        AND lower(pg_get_functiondef(session_rpc.oid)) LIKE '%account.archived_at is null%'
+      ) THEN 'session RPC lacks expected active-account/expiry safeguards'
+      WHEN NOT (
+        setup_rpc.prosecdef
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.is_primary_owner is distinct from false%'
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.must_change_password is distinct from true%'
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%target_row.temporary_password_expires_at <= clock_timestamp()%'
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%for update%'
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%temporary-admin-password-setup:%'
+        AND lower(pg_get_functiondef(setup_rpc.oid)) LIKE '%on conflict (idempotency_key)%'
+      ) THEN 'setup RPC lacks expected owner/expiry/locking/audit safeguards'
+      ELSE 'RPC definitions contain expected owner/expiry/locking/audit safeguards'
+    END
+  FROM (
+    SELECT
+      to_regprocedure('public.get_active_admin_session(uuid,uuid)') AS session_oid,
+      to_regprocedure('public.complete_admin_temporary_password_setup(uuid,uuid)') AS setup_oid
+  ) expected
+  LEFT JOIN pg_proc session_rpc ON session_rpc.oid = expected.session_oid
+  LEFT JOIN pg_proc setup_rpc ON setup_rpc.oid = expected.setup_oid
 
   UNION ALL
 

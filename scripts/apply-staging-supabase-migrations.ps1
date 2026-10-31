@@ -20,6 +20,8 @@ if (-not (Test-Path -LiteralPath $psqlEnvironmentHelper -PathType Leaf)) {
 $stagingProjectRef = 'kdaixomygsuxadofoieb'
 $productionProjectRef = 'axbjzmdokfoftzfgwiql'
 $projectRefPattern = '^[a-z0-9]{20}$'
+$manualSqlEditorMigrationName = '20261031010000_complete_admin_temporary_password_setup.sql'
+$rejectedRetryMigrationName = '20261030230000_retry_temporary_admin_password_expiry.sql'
 $migrationNames = @(
   '20261021000000_grant_leads_storage_permissions.sql',
   '20261021100000_create_service_catalogue.sql',
@@ -73,12 +75,24 @@ $migrationFiles = foreach ($name in $migrationNames) {
 if ($migrationFiles.Count -ne 31) {
   throw 'The migration list must contain exactly migrations 4 through 34.'
 }
+if ($migrationNames -contains $manualSqlEditorMigrationName -or
+  $migrationNames -contains $rejectedRetryMigrationName) {
+  throw 'The manually applied verification-only migration and rejected retry migration must never be queued.'
+}
+$allMigrationFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -Filter '*.sql' | Sort-Object Name)
+if ($allMigrationFiles.Count -ne 35 -or $allMigrationFiles[-1].Name -cne $manualSqlEditorMigrationName) {
+  throw "Expected 35 repository migration files, with $manualSqlEditorMigrationName as the verification-only final migration."
+}
+if ($allMigrationFiles.Name -contains $rejectedRetryMigrationName) {
+  throw "The rejected migration must not be present in the repository inventory: $rejectedRetryMigrationName"
+}
 
 if ($DryRun) {
   Write-Output "DRY RUN ONLY - no SQL will be executed and no database connection will be opened."
   Write-Output "Staging project ref: $ProjectRef"
-  Write-Output 'Planned migrations (4-34):'
+  Write-Output 'Planned runner-managed migrations (4-34):'
   $migrationNames | ForEach-Object { Write-Output "  $_" }
+  Write-Output "Verification-only; already applied manually in SQL Editor and never queued: $manualSqlEditorMigrationName"
   return
 }
 
@@ -198,6 +212,95 @@ SELECT CASE WHEN
 THEN 'PREREQUISITES_OK' ELSE 'PREREQUISITES_FAIL' END
 FROM checks;
 
+WITH expected_functions(signature) AS (
+  VALUES
+    ('public.get_active_admin_session(uuid,uuid)'),
+    ('public.complete_admin_temporary_password_setup(uuid,uuid)')
+),
+function_checks AS (
+  SELECT
+    CASE
+      WHEN p.oid IS NULL THEN false
+      ELSE p.prosecdef
+        AND has_function_privilege('service_role', p.oid, 'EXECUTE')
+        AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
+        AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+          WHERE acl.grantee = 0
+            AND acl.privilege_type = 'EXECUTE'
+        )
+    END AS passed
+  FROM expected_functions expected
+  LEFT JOIN pg_proc p ON p.oid = to_regprocedure(expected.signature)
+),
+expected_tables(table_name) AS (
+  VALUES
+    ('admin_users'),
+    ('admin_sessions'),
+    ('admin_audit_logs'),
+    ('admin_ownership_transfers')
+),
+table_checks AS (
+  SELECT
+    CASE
+      WHEN relation.oid IS NULL THEN false
+      ELSE relation.relrowsecurity
+        AND (
+          SELECT bool_and(has_table_privilege('service_role', relation.oid, privilege))
+          FROM unnest(ARRAY[
+            'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+          ]) AS required(privilege)
+        )
+        AND NOT has_table_privilege('anon', relation.oid, 'SELECT')
+        AND NOT has_table_privilege('anon', relation.oid, 'INSERT')
+        AND NOT has_table_privilege('anon', relation.oid, 'UPDATE')
+        AND NOT has_table_privilege('anon', relation.oid, 'DELETE')
+        AND NOT has_table_privilege('authenticated', relation.oid, 'SELECT')
+        AND NOT has_table_privilege('authenticated', relation.oid, 'INSERT')
+        AND NOT has_table_privilege('authenticated', relation.oid, 'UPDATE')
+        AND NOT has_table_privilege('authenticated', relation.oid, 'DELETE')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+          WHERE acl.grantee = 0
+        )
+    END AS passed
+  FROM expected_tables expected
+  LEFT JOIN pg_class relation
+    ON relation.oid = to_regclass('public.' || expected.table_name)
+),
+migration_objects AS (
+  SELECT
+    to_regclass('public.admin_audit_logs') IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'admin_audit_logs'
+          AND column_name = 'idempotency_key'
+      )
+      AND EXISTS (
+        SELECT 1
+        FROM pg_index i
+        JOIN pg_class idx ON idx.oid = i.indexrelid
+        WHERE i.indrelid = to_regclass('public.admin_audit_logs')
+          AND idx.relname = 'admin_audit_logs_idempotency_key_unique'
+          AND i.indisunique
+          AND i.indisvalid
+          AND i.indpred IS NOT NULL
+          AND pg_get_indexdef(i.indexrelid) ~* '\(idempotency_key\)'
+      )
+      AND (SELECT count(*) = 2 AND bool_and(passed) FROM function_checks)
+      AND (SELECT count(*) = 4 AND bool_and(passed) FROM table_checks) AS passed
+)
+SELECT CASE WHEN passed
+  THEN 'MANUAL_SQL_EDITOR_MIGRATION_OK'
+  ELSE 'MANUAL_SQL_EDITOR_MIGRATION_FAIL'
+END
+FROM migration_objects;
+
 SELECT COALESCE(to_regclass('supabase_migrations.schema_migrations') IS NOT NULL, false) AS history_exists \gset
 \if :history_exists
   SELECT 'MIGRATION_HISTORY_PRESENT';
@@ -254,8 +357,14 @@ try {
     throw 'The first three migration prerequisites could not all be verified. No migrations were run.'
   }
 
+  if ($preflightText -notcontains 'MANUAL_SQL_EDITOR_MIGRATION_OK' -or
+    $preflightText -contains 'MANUAL_SQL_EDITOR_MIGRATION_FAIL') {
+    $preflightText | ForEach-Object { Write-Host "$_" }
+    throw "The manually applied migration $manualSqlEditorMigrationName is not verified by actual database objects and privileges. No migrations were run; this runner will never execute that migration."
+  }
+
   if ($PreflightOnly) {
-    Write-Output 'Read-only staging connection and prerequisite checks passed. No migrations were run.'
+    Write-Output 'Read-only staging prerequisites and manually applied migration object/permission checks passed. No migrations were run.'
     return
   }
 

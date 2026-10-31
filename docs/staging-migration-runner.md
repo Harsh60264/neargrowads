@@ -22,7 +22,9 @@ The runner writes only migration name, status, and time to a per-user local log 
 
 It does not store passwords or connection strings. `psql` prompts securely for the staging database password for the read-only preflight and again for the migration run. Before invoking `psql`, the runner requires a trusted PostgreSQL root certificate at `%APPDATA%\postgresql\root.crt`, snapshots and removes every inherited process-level `PG*` variable—including `PGSERVICE`, `PGSERVICEFILE`, `PGPASSFILE`, `PGPASSWORD`, `PGHOST`, and `PGOPTIONS`—then sets `PGSSLMODE=verify-full` and `PGSSLROOTCERT` to that certificate. This verifies both the certificate chain and pooler hostname, while preventing inherited libpq settings from changing the target or credential source. The original process environment is restored afterward. The SQL driver and captured query output files are temporary and deleted when the run ends. Successful migrations recorded in Supabase migration history or this local log are skipped. A previously failed migration causes the runner to stop before retrying; inspect the database manually before attempting recovery. Preserve this local log until the staging project is retired. If the log is lost, reconcile migration history and schema before confirming anything; do not assume migrations are unapplied.
 
-If `supabase_migrations.schema_migrations` exists, the runner skips recorded migrations. Whether or not history exists, it requires explicit confirmation that no migrations 4–34 were applied outside the Supabase history and this runner's local log. The three prerequisite migrations applied manually may not appear in Supabase migration history; the runner checks their schema objects directly. If other migrations were applied manually and left untracked, do not confirm until that history/state has been reconciled. The local log is the runner’s durable skip record when migrations are not present in Supabase’s migration history, so keep it backed up in a private local location.
+The local `.env` is not read by these PowerShell scripts and must not be copied, sourced, or used as a Staging configuration; it may contain Production-targeted application settings. Keep it unchanged. For application Preview work, use Vercel's Preview-scoped variables and manually verify that every Supabase URL/key and Admin identity pin belongs to `kdaixomygsuxadofoieb`. The local scripts are independently pinned to the Staging database endpoint and do not consume application environment variables.
+
+If `supabase_migrations.schema_migrations` exists, the runner skips recorded migrations. Whether or not history exists, it requires explicit confirmation that no migrations 4–34 were applied outside the Supabase history and this runner's local log. The three prerequisite migrations applied manually may not appear in Supabase migration history; the runner checks their schema objects directly. Migration `20261031010000_complete_admin_temporary_password_setup.sql` is migration 35, was applied manually in the Staging SQL Editor, and is verification-only: it is excluded from the runner's 31-file executable list and is never executed by this script. Before either preflight-only mode or applying migrations 4–34, the runner checks its actual audit column/index, exact RPC signatures and `service_role`-only function execution grants, and Admin table RLS/direct grants. Migration history is not treated as proof that migration 35 is installed. If other migrations were applied manually and left untracked, do not confirm until that history/state has been reconciled. The local log is the runner’s durable skip record when migrations are not present in Supabase’s migration history, so keep it backed up in a private local location.
 
 ## Preconditions
 
@@ -67,7 +69,7 @@ List the fixed migrations without opening a connection or executing SQL:
   -DryRun
 ```
 
-Expected output lists migrations 4–34. Review the project ref and filenames before proceeding.
+Expected output lists runner-managed migrations 4–34 and explicitly identifies migration 35 as verification-only. Review the project ref and filenames before proceeding. The rejected `20261030230000_retry_temporary_admin_password_expiry.sql` migration is not in the repository inventory or executable list.
 
 ## Read-only connection and prerequisite check
 
@@ -80,7 +82,7 @@ After you verify the staging project ref in the Supabase Dashboard, this mode op
   -PreflightOnly
 ```
 
-Type the exact staging project ref when asked. Confirm that the output says prerequisite checks passed. Do not continue if a check fails or the displayed target differs from the verified staging project.
+Type the exact staging project ref when asked. Confirm that the output says both prerequisite checks and manually applied migration object/permission checks passed. Do not continue if a check fails or the displayed target differs from the verified staging project.
 
 ## Apply migrations 4–34
 

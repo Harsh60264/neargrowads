@@ -115,7 +115,6 @@ const adminReauthAttempts = new Map<string, number[]>();
 const adminRecoveryAttempts = new Map<string, number[]>();
 const adminAccountCreateAttempts = new Map<string, number[]>();
 const adminManagedRecoveryAttempts = new Map<string, number[]>();
-const adminTemporaryPasswordCronAttempts = new Map<string, number[]>();
 const serviceEnquiryAttempts = new Map<string, number[]>();
 const serviceOrderAttempts = new Map<string, number[]>();
 const securityEventWriteAttempts = new Map<string, number[]>();
@@ -3565,10 +3564,7 @@ async function authenticateAdminSession(req: Request): Promise<AdminIdentity | u
   if (!activeSessions.length) return undefined;
   const identity = await readAdminIdentity(token.userId);
   if (!identity || identity.status !== 'active' || identity.archivedAt) return undefined;
-  if (identity.mustChangePassword && isTemporaryPasswordExpired(identity.temporaryPasswordExpiresAt)) {
-    await expireTemporaryAdminPassword(identity);
-    return undefined;
-  }
+  if (identity.mustChangePassword && isTemporaryPasswordExpired(identity.temporaryPasswordExpiresAt)) return undefined;
   return identity;
 }
 
@@ -3964,28 +3960,6 @@ async function revokeSupabaseRefreshTokens(accessToken: string, expectedUserId: 
     supabaseAuthRequest,
     (response) => readSupabaseJson<unknown>(response),
   );
-}
-
-async function expireTemporaryAdminPassword(identity: AdminIdentity): Promise<void> {
-  await setSupabaseUserPassword(identity.id, generateTemporaryAdminPassword());
-  const userQuery = new URLSearchParams({ id: `eq.${identity.id}` });
-  await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
-    method: 'PATCH',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({
-      must_change_password: true,
-      temporary_password_expires_at: null,
-      temporary_password_used_at: null,
-      updated_at: new Date().toISOString(),
-    }),
-  }));
-  const sessionsQuery = new URLSearchParams({ user_id: `eq.${identity.id}`, revoked_at: 'is.null' });
-  await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
-    method: 'PATCH',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-  }));
-  await writeAdminAudit(identity.id, 'auth.password.temporary_expired', 'security');
 }
 
 async function findSupabaseUserByEmail(email: string): Promise<{ id: string; email: string; email_confirmed_at?: string } | undefined> {
@@ -4813,92 +4787,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     });
   });
 
-  app.get('/api/cron/admin-temporary-password-expiry', async (req: Request, res: Response): Promise<void> => {
-      res.setHeader('Cache-Control', 'no-store');
-      const secret = process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '';
-      const authorization = req.get('authorization') || '';
-      const expectedAuthorization = `Bearer ${secret}`;
-      const suppliedBuffer = Buffer.from(authorization);
-      const expectedBuffer = Buffer.from(expectedAuthorization);
-      if (secret.length < 32 || suppliedBuffer.length !== expectedBuffer.length ||
-        !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
-        res.status(secret.length < 32 ? 503 : 401).json({
-          message: secret.length < 32
-            ? 'Temporary-password expiry scheduler is not configured.'
-            : 'Scheduler authorization is invalid.',
-        });
-        return;
-      }
-
-      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-      const now = Date.now();
-      const attempts = (adminTemporaryPasswordCronAttempts.get(clientIp) || []).filter((time) => now - time < 60_000);
-      if (attempts.length >= 2) {
-        res.status(429).json({ message: 'Temporary-password expiry processing is rate limited.' });
-        return;
-      }
-      attempts.push(now);
-      adminTemporaryPasswordCronAttempts.set(clientIp, attempts);
-
-      try {
-        const expiryQuery = new URLSearchParams({
-          must_change_password: 'eq.true',
-          is_primary_owner: 'eq.false',
-          temporary_password_expires_at: `lte.${new Date(now).toISOString()}`,
-          select: 'id,email,role,status,permissions,is_primary_owner,archived_at,temporary_password_expires_at,temporary_password_used_at',
-          limit: '100',
-        });
-        const expiredAccounts = await readSupabaseJson<Array<Record<string, unknown>>>(
-          await supabaseAdminRequest(`rest/v1/admin_users?${expiryQuery}`),
-        );
-        let expired = 0;
-        let failed = 0;
-        for (const account of expiredAccounts) {
-          const identity: AdminIdentity = {
-            id: String(account.id),
-            email: String(account.email),
-            role: account.role as AdminRole,
-            status: account.status as AdminIdentity['status'],
-            permissions: account.permissions && typeof account.permissions === 'object'
-              ? account.permissions as AdminPermissions
-              : {},
-            isPrimaryOwner: false,
-            archivedAt: typeof account.archived_at === 'string' ? account.archived_at : null,
-            mustChangePassword: true,
-            temporaryPasswordExpiresAt: typeof account.temporary_password_expires_at === 'string'
-              ? account.temporary_password_expires_at
-              : null,
-            temporaryPasswordUsedAt: typeof account.temporary_password_used_at === 'string'
-              ? account.temporary_password_used_at
-              : null,
-          };
-          try {
-            await expireTemporaryAdminPassword(identity);
-            expired += 1;
-          } catch (error) {
-            failed += 1;
-            console.error('[NearGrow Ads] Temporary administrator password expiry failed.', {
-              errorName: error instanceof Error ? error.name : 'UnknownError',
-              status: error instanceof SupabaseRequestError ? error.status : undefined,
-              code: error instanceof SupabaseRequestError ? error.code : undefined,
-            });
-          }
-        }
-        res.status(failed ? 503 : 200).json({
-          processed: expired,
-          failed,
-          ...(failed ? { message: 'Some expired temporary passwords could not be invalidated; the scheduler should retry.' } : {}),
-        });
-      } catch (error) {
-        console.error('[NearGrow Ads] Temporary administrator password expiry scan failed.', {
-          errorName: error instanceof Error ? error.name : 'UnknownError',
-          status: error instanceof SupabaseRequestError ? error.status : undefined,
-          code: error instanceof SupabaseRequestError ? error.code : undefined,
-        });
-        res.status(503).json({ message: 'Expired temporary passwords could not be processed.' });
-      }
-  });
-
   app.get('/api/uploads/:folder/:filename', (req: Request, res: Response): void => {
     const { folder, filename } = req.params;
     if (!['blog', 'team', 'service-store'].includes(folder) ||
@@ -5306,7 +5194,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
       if (identity.mustChangePassword && isTemporaryPasswordExpired(identity.temporaryPasswordExpiresAt)) {
-        await expireTemporaryAdminPassword(identity);
         logFailedLogin('temporary_password_expired', 403);
         res.status(403).json({ message: 'The temporary password expired. Ask the Primary Owner to send a new secure setup link.' });
         return;
@@ -5349,7 +5236,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           }),
         );
         if (claimed.status !== 'consumed') {
-          if (claimed.status === 'expired') await expireTemporaryAdminPassword(identity);
           const createdSessionQuery = new URLSearchParams({ id: `eq.${sessionId}` });
           await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${createdSessionQuery}`, {
             method: 'PATCH',
@@ -5961,13 +5847,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       } else {
         const resendApiKey = process.env.RESEND_API_KEY || '';
         const invitationEmailFrom = process.env.ADMIN_INVITATION_EMAIL_FROM || '';
-        const expiryCronSecret = process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '';
         if (!resendApiKey || !invitationEmailFrom || /[\r\n]/.test(invitationEmailFrom)) {
           res.status(503).json({ message: 'Temporary-password delivery is not configured. Set RESEND_API_KEY and ADMIN_INVITATION_EMAIL_FROM before creating a new administrator.' });
-          return;
-        }
-        if (expiryCronSecret.length < 32) {
-          res.status(503).json({ message: 'Temporary-password expiry is not configured. Set ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET and schedule its protected expiry endpoint before creating a new administrator.' });
           return;
         }
         temporaryCredentialFlow = true;
@@ -6618,10 +6499,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(409).json({ message: 'Only an active, verified administrator account can receive a temporary password.' });
         return;
       }
-      if ((process.env.ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET || '').length < 32) {
-        res.status(503).json({ message: 'Temporary-password expiry is not configured. Set ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET and schedule its protected expiry endpoint first.' });
-        return;
-      }
       const authUser = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(
         await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(target.id)}`),
       );
@@ -6682,38 +6559,113 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'Enter the temporary password provided by your Owner.',
       );
       if (!accessToken) return;
-      await readSupabaseJson<unknown>(await supabaseAuthRequest('user', {
-        method: 'PUT',
-        body: JSON.stringify({ password: newPassword }),
-      }, accessToken));
-      const userQuery = new URLSearchParams({ id: `eq.${identity.id}` });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          must_change_password: false,
-          temporary_password_expires_at: null,
-          temporary_password_used_at: null,
-          last_password_reset_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }),
-      }));
       const currentSessionId = readAdminSession(req)?.sessionId;
-      const sessionsQuery = new URLSearchParams({
-        user_id: `eq.${identity.id}`,
-        revoked_at: 'is.null',
-        ...(currentSessionId ? { id: `neq.${currentSessionId}` } : {}),
-      });
-      await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/admin_sessions?${sessionsQuery}`, {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-      }));
-      await revokeSupabaseRefreshTokens(accessToken, identity.id);
-      await writeAdminAudit(identity.id, 'auth.password.temporary_changed', 'security');
+      if (!currentSessionId) {
+        res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+        return;
+      }
+      const currentIdentity = await readAdminIdentity(identity.id);
+      if (!currentIdentity || currentIdentity.status !== 'active' || currentIdentity.archivedAt ||
+        currentIdentity.isPrimaryOwner || currentIdentity.mustChangePassword !== true ||
+        isTemporaryPasswordExpired(currentIdentity.temporaryPasswordExpiresAt) ||
+        (currentIdentity.temporaryPasswordExpiresAt && !currentIdentity.temporaryPasswordUsedAt)) {
+        res.status(403).json({ message: 'This setup session is expired or no longer eligible. Ask the Primary Owner to resend setup.' });
+        return;
+      }
+      const activeSession = await readSupabaseJson<Array<{ session_id: string }>>(
+        await supabaseAdminRequest('rest/v1/rpc/get_active_admin_session', {
+          method: 'POST',
+          body: JSON.stringify({ p_session_id: currentSessionId, p_user_id: identity.id }),
+        }),
+      );
+      if (!activeSession.length) {
+        res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+        return;
+      }
+
+      let passwordUpdated = false;
+      try {
+        await readSupabaseJson<unknown>(await supabaseAuthRequest('user', {
+          method: 'PUT',
+          body: JSON.stringify({ password: newPassword }),
+        }, accessToken));
+        passwordUpdated = true;
+        await revokeSupabaseRefreshTokens(accessToken, identity.id);
+
+        const completionKey = `temporary-admin-password-setup:${identity.id}:${currentSessionId}`;
+        try {
+          const completion = await readSupabaseJson<{ status?: string }>(
+            await supabaseAdminRequest('rest/v1/rpc/complete_admin_temporary_password_setup', {
+              method: 'POST',
+              body: JSON.stringify({ p_user_id: identity.id, p_session_id: currentSessionId }),
+            }),
+          );
+          if (completion.status !== 'completed') {
+            throw new Error('Temporary administrator password setup could not be finalized.');
+          }
+        } catch (completionError) {
+          let completionVerified = false;
+          let verificationError: unknown;
+          try {
+            const userQuery = new URLSearchParams({
+              id: `eq.${identity.id}`,
+              select: 'status,archived_at,is_primary_owner,must_change_password,temporary_password_expires_at',
+              limit: '1',
+            });
+            const users = await readSupabaseJson<Array<{
+              status?: string;
+              archived_at?: string | null;
+              is_primary_owner?: boolean;
+              must_change_password?: boolean;
+              temporary_password_expires_at?: string | null;
+            }>>(await supabaseAdminRequest(`rest/v1/admin_users?${userQuery}`));
+            const auditQuery = new URLSearchParams({
+              idempotency_key: `eq.${completionKey}`,
+              select: 'id',
+              limit: '1',
+            });
+            const audit = await readSupabaseJson<Array<{ id: string }>>(
+              await supabaseAdminRequest(`rest/v1/admin_audit_logs?${auditQuery}`),
+            );
+            if (users[0]?.status === 'active' && !users[0]?.archived_at &&
+              users[0]?.is_primary_owner === false && users[0]?.must_change_password === false &&
+              users[0]?.temporary_password_expires_at === null && audit.length === 1) {
+              completionVerified = true;
+            }
+          } catch (error) {
+            verificationError = error;
+          }
+          if (!completionVerified) {
+            if (verificationError) {
+              throw new AggregateError(
+                [completionError, verificationError],
+                'Temporary administrator password setup could not be verified.',
+              );
+            }
+            throw completionError;
+          }
+        }
+      } catch (error) {
+        console.error('[NearGrow Ads] First-login password change failed.', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          status: error instanceof SupabaseRequestError ? error.status : undefined,
+          code: error instanceof SupabaseRequestError ? error.code : undefined,
+          passwordUpdated,
+        });
+        res.status(503).json({
+          message: passwordUpdated
+            ? 'Your password may have changed, but CMS setup could not be confirmed. Do not retry with the old password; use the verified recovery flow or contact the Primary Owner.'
+            : 'Your password could not be changed. Contact the Primary Owner before retrying.',
+        });
+        return;
+      }
       res.json({ message: 'Password changed. Your temporary password is no longer valid.' });
     } catch (error) {
-      console.error('[NearGrow Ads] First-login password change failed.', error instanceof Error ? error.name : 'Unknown error');
+      console.error('[NearGrow Ads] First-login password change failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        status: error instanceof SupabaseRequestError ? error.status : undefined,
+        code: error instanceof SupabaseRequestError ? error.code : undefined,
+      });
       res.status(503).json({ message: 'Your password could not be changed. Contact the Owner before retrying.' });
     }
   });
