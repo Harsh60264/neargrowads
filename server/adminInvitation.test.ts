@@ -176,6 +176,21 @@ test('accepts a one-time token hash in a fresh browser without a PKCE verifier',
   assert.equal(callback.error, undefined);
 });
 
+test('recovery token hash takes precedence over an accompanying access token', () => {
+  const callback = readAdminAuthCallback(
+    '?mode=recovery&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&token_hash=one-time-token-hash-value&type=recovery&access_token=synthetic.existing.auth.jwt',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'recovery',
+  );
+
+  assert.equal(callback.tokenHash, 'one-time-token-hash-value');
+  assert.equal(callback.tokenType, 'recovery');
+  assert.equal(callback.invitationGeneration, '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62');
+  assert.equal(callback.accessToken, undefined);
+  assert.equal(callback.error, undefined);
+});
+
 test('recovery requires a fresh purpose-bound token hash, never an existing JWT or PKCE session', () => {
   const validProof = {
     tokenHash: 'synthetic-one-time-recovery-token',

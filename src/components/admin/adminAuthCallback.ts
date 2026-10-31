@@ -49,6 +49,15 @@ export function readAdminAuthCallback(
     return { error: 'This password-reset link is missing its current recovery state. Request a new recovery email.' };
   }
 
+  const tokenHash = query.get('token_hash') || query.get('token') || fragment.get('token_hash') || fragment.get('token');
+  if (mode === 'recovery' && tokenHash) {
+    const tokenType = query.get('type') || fragment.get('type') || '';
+    if (tokenType === 'recovery') {
+      return { tokenHash, tokenType, invitationGeneration: validGeneration };
+    }
+    return { error: invalidLinkMessage(mode) };
+  }
+
   const accessToken = query.get('access_token') || fragment.get('access_token');
   if (accessToken) {
     return mode === 'recovery'
@@ -56,7 +65,6 @@ export function readAdminAuthCallback(
       : { accessToken, invitationGeneration: validGeneration };
   }
 
-  const tokenHash = query.get('token_hash') || query.get('token') || fragment.get('token_hash') || fragment.get('token');
   if (tokenHash) {
     const tokenType = query.get('type') || fragment.get('type') || '';
     if ((mode === 'recovery' ? tokenType === 'recovery' : ['signup', 'invite', 'recovery'].includes(tokenType))) {
