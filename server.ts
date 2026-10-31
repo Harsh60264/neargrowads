@@ -24,6 +24,8 @@ import {
   buildAdminPasswordResetRedirect,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
+  isCurrentPendingAdminInvitation,
+  isValidAdminInvitationGeneration,
 } from './server/adminInvitation';
 import {
   adminCmsAccessAllowed,
@@ -5433,6 +5435,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       tokenHash,
       tokenType,
       invitationGeneration,
+      invitationSetup,
       password,
       confirmPassword,
       mode,
@@ -5441,8 +5444,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const hasCodeCallback = typeof authorizationCode === 'string' || typeof codeVerifier === 'string';
     const hasTokenHash = typeof tokenHash === 'string' || typeof tokenType === 'string';
     const invalidLinkMessage = mode === 'recovery'
-      ? 'The password-reset link is invalid or expired. Request a new recovery email.'
-      : 'The verification link is invalid or expired. Ask the Primary Owner to resend setup.';
+      ? 'The password-reset link is invalid, expired, or already used. Request a new recovery email.'
+      : 'The verification link is invalid, expired, or already used. Ask the Primary Owner to resend setup.';
     if ([hasAccessToken, hasCodeCallback, hasTokenHash].filter(Boolean).length !== 1 ||
       (hasAccessToken && (accessToken.length < 20 || accessToken.length > 10_000)) ||
       (typeof authorizationCode === 'string' && (authorizationCode.length < 8 || authorizationCode.length > 2_000)) ||
@@ -5452,6 +5455,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       (hasTokenHash && (typeof tokenHash !== 'string' || typeof tokenType !== 'string' ||
         !['signup', 'invite', 'recovery'].includes(tokenType))) ||
       (mode !== 'invite' && mode !== 'recovery') ||
+      (invitationSetup !== undefined && typeof invitationSetup !== 'boolean') ||
       (typeof password !== 'string' && !(mode === 'invite' && password === undefined)) ||
       (password !== undefined && (!isStrongAdminPassword(password) || password !== confirmPassword))) {
       res.status(400).json({
@@ -5468,6 +5472,41 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let recoveryRefreshTokensRevoked = false;
     let recoveryCleanupStage = 'not_started';
     try {
+      let pendingInvitation: {
+        id: string;
+        email: string;
+        invitation_generation: string;
+        status: 'pending';
+        is_primary_owner: false;
+      } | undefined;
+      if (mode === 'invite' || invitationSetup === true || invitationGeneration !== undefined) {
+        const invalidInvitationMessage = 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.';
+        if (!isValidAdminInvitationGeneration(invitationGeneration)) {
+          res.status(401).json({ message: invalidInvitationMessage });
+          return;
+        }
+        const generationQuery = new URLSearchParams({
+          invitation_generation: `eq.${invitationGeneration}`,
+          status: 'eq.pending',
+          is_primary_owner: 'eq.false',
+          select: 'id,email,invitation_generation,status,is_primary_owner',
+          limit: '2',
+        });
+        const generationRows = await readSupabaseJson<Array<{
+          id?: unknown;
+          email?: unknown;
+          invitation_generation?: unknown;
+          status?: unknown;
+          is_primary_owner?: unknown;
+        }>>(await supabaseAdminRequest(`rest/v1/admin_users?${generationQuery}`));
+        const currentInvitation = generationRows.length === 1 ? generationRows[0] : undefined;
+        if (!isCurrentPendingAdminInvitation(currentInvitation, invitationGeneration)) {
+          res.status(401).json({ message: invalidInvitationMessage });
+          return;
+        }
+        pendingInvitation = currentInvitation;
+      }
+
       let verifiedAccessToken = accessToken as string | undefined;
       if (typeof authorizationCode === 'string' && typeof codeVerifier === 'string') {
         const exchangeResponse = await supabaseAuthRequest('token?grant_type=pkce', {
@@ -5503,29 +5542,55 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         });
         return;
       }
+      if (pendingInvitation) {
+        const generationQuery = new URLSearchParams({
+          invitation_generation: `eq.${pendingInvitation.invitation_generation}`,
+          status: 'eq.pending',
+          is_primary_owner: 'eq.false',
+          select: 'id,email,invitation_generation,status,is_primary_owner',
+          limit: '2',
+        });
+        const generationRows = await readSupabaseJson<Array<{
+          id?: unknown;
+          email?: unknown;
+          invitation_generation?: unknown;
+          status?: unknown;
+          is_primary_owner?: unknown;
+        }>>(await supabaseAdminRequest(`rest/v1/admin_users?${generationQuery}`));
+        const currentInvitation = generationRows.length === 1 ? generationRows[0] : undefined;
+        if (!isCurrentPendingAdminInvitation(currentInvitation, pendingInvitation.invitation_generation) ||
+          currentInvitation.id !== pendingInvitation.id ||
+          currentInvitation.email.toLowerCase() !== pendingInvitation.email.toLowerCase()) {
+          res.status(401).json({
+            message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.',
+          });
+          return;
+        }
+        pendingInvitation = currentInvitation;
+      }
       const identity = await readAdminIdentity(authUser.id);
       if (!identity) {
+        if (pendingInvitation) {
+          res.status(401).json({
+            message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.',
+          });
+          return;
+        }
         res.status(403).json({ message: 'This verified identity does not have an eligible administrator account.' });
         return;
       }
-      const needsGeneration = mode === 'invite' || identity.status === 'pending' || invitationGeneration !== undefined;
-      if (needsGeneration) {
-        if (!isUuid(invitationGeneration)) {
-          res.status(401).json({ message: 'This link is missing its current recovery state. Ask the Primary Owner to send a fresh link.' });
-          return;
-        }
-        const generationQuery = new URLSearchParams({
-          id: `eq.${identity.id}`,
-          select: 'invitation_generation',
-          limit: '1',
+      if (identity.status === 'pending' && !pendingInvitation) {
+        res.status(401).json({
+          message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.',
         });
-        const generationRows = await readSupabaseJson<Array<{ invitation_generation?: string | null }>>(
-          await supabaseAdminRequest(`rest/v1/admin_users?${generationQuery}`),
-        );
-        if (generationRows[0]?.invitation_generation !== invitationGeneration) {
-          res.status(401).json({ message: 'This link has been replaced or cancelled. Ask the Primary Owner to send a fresh link.' });
-          return;
-        }
+        return;
+      }
+      if (pendingInvitation &&
+        (identity.id !== pendingInvitation.id ||
+          identity.email !== pendingInvitation.email.toLowerCase() ||
+          identity.status !== 'pending')) {
+        res.status(401).json({ message: 'This invitation is missing, invalid, expired, or no longer current. Ask the Primary Owner to resend setup.' });
+        return;
       }
       if ((mode === 'invite' && identity.status !== 'active' && decideAdminInvitationCompletion(identity, authUser) === 'reject') ||
         (mode === 'invite' && identity.status === 'active' &&

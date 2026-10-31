@@ -6,11 +6,17 @@ import {
   buildAdminPasswordResetRedirect,
   decideAdminInvitationCompletion,
   decideAdminInvitationRecovery,
+  isCurrentPendingAdminInvitation,
+  isValidAdminInvitationGeneration,
   type AdminInvitationIdentity,
 } from './adminInvitation';
 import { isSameOriginHost } from './adminAuthOrigin';
 import { revokeSupabaseRefreshTokensWithAccessToken } from './supabaseAuthSessions';
-import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from '../src/components/admin/adminAuthCallback';
+import {
+  clearAdminAuthCallbackVerifier,
+  readAdminAuthCallback,
+  readAdminAuthRoute,
+} from '../src/components/admin/adminAuthCallback';
 
 const pendingIdentity: AdminInvitationIdentity = {
   id: '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62',
@@ -60,7 +66,27 @@ test('rejects an expired Supabase verification callback before setup can be subm
     { length: 0, key: () => null, getItem: () => null },
   );
   assert.equal(callback.accessToken, undefined);
-  assert.match(callback.error || '', /missing, invalid, or expired/i);
+  assert.match(callback.error || '', /invalid, expired, or already used/i);
+});
+
+test('invitation generations must be strict UUIDs belonging to a current pending delegated invitation', () => {
+  const generation = pendingIdentity.id;
+  assert.equal(isValidAdminInvitationGeneration(generation), true);
+  assert.equal(isValidAdminInvitationGeneration(undefined), false);
+  assert.equal(isValidAdminInvitationGeneration('not-a-uuid'), false);
+  assert.equal(isValidAdminInvitationGeneration('2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62-extra'), false);
+
+  const currentInvitation = {
+    id: pendingIdentity.id,
+    email: pendingIdentity.email,
+    invitation_generation: generation,
+    status: 'pending',
+    is_primary_owner: false,
+  };
+  assert.equal(isCurrentPendingAdminInvitation(currentInvitation, generation), true);
+  assert.equal(isCurrentPendingAdminInvitation({ ...currentInvitation, invitation_generation: 'f46dd026-fc56-4865-b4c7-f213f2c5076b' }, generation), false);
+  assert.equal(isCurrentPendingAdminInvitation({ ...currentInvitation, status: 'disabled' }, generation), false);
+  assert.equal(isCurrentPendingAdminInvitation({ ...currentInvitation, is_primary_owner: true }, generation), false);
 });
 
 test('rejects cancelled or disabled invitations and only permits repeat completion after acceptance audit', () => {
@@ -160,8 +186,8 @@ test('a recovery callback without a token is rejected before setup can be submit
   assert.equal(callback.error, undefined);
 
   const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
-  assert.match(authActionSource, /!hasCallback && !callback\.error[\s\S]*?This password-reset link is missing or expired/);
-  assert.match(authActionSource, /disabled=\{!hasCallback \|\| busy \|\| password !== confirmPassword\}/);
+  assert.match(authActionSource, /!hasCallback && !callback\.error[\s\S]*?This password-reset link is missing, expired, or already used/);
+  assert.match(authActionSource, /disabled=\{!hasCallback \|\| busy \|\| callbackAttempted \|\| !passwordIsStrong \|\| password !== confirmPassword\}/);
 });
 
 test('recovery callback failures ask for a new recovery email, not invitation setup', () => {
@@ -172,7 +198,7 @@ test('recovery callback failures ask for a new recovery email, not invitation se
     'recovery',
   );
 
-  assert.match(callback.error || '', /password-reset link.*invalid, or expired.*new recovery email/i);
+  assert.match(callback.error || '', /password-reset link.*invalid, expired, or already used.*new recovery email/i);
 });
 
 test('only recovery-mode GET invitation-context checks bypass CMS-session middleware', () => {
@@ -202,6 +228,14 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.match(completionRoute, /if \(await authenticateAdminSession\(req\)\)[\s\S]*?status\(409\)/);
   assert.doesNotMatch(completionRoute, /requireAdmin\(req,\s*res\)/);
   assert.match(completionRoute, /supabaseAuthRequest\('verify'[\s\S]*?token_hash:\s*tokenHash,\s*type:\s*tokenType/);
+  assert.ok(completionRoute.indexOf('isValidAdminInvitationGeneration(invitationGeneration)') <
+    completionRoute.indexOf("supabaseAuthRequest('verify'"));
+  assert.ok(completionRoute.indexOf('isCurrentPendingAdminInvitation(currentInvitation, invitationGeneration)') <
+    completionRoute.indexOf("supabaseAuthRequest('verify'"));
+  assert.match(completionRoute, /status:\s*'eq\.pending'/);
+  assert.match(completionRoute, /is_primary_owner:\s*'eq\.false'/);
+  assert.match(completionRoute, /invitationSetup === true/);
+  assert.match(completionRoute, /identity\.id !== pendingInvitation\.id[\s\S]*?identity\.status !== 'pending'/);
   assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
   assert.match(completionRoute, /mode === 'recovery'\s*\? 'The password-reset request is incomplete or invalid/);
   assert.match(completionRoute, /mode === 'recovery'\s*\? 'Verify this email address before resetting the password/);
@@ -210,13 +244,96 @@ test('callback completion verifies token hashes server-side without requiring a 
   assert.match(completionRoute, /revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/);
   assert.equal((completionRoute.match(/revokeSupabaseRefreshTokens\(verifiedAccessToken,\s*identity\.id\)/g) || []).length, 1);
   assert.doesNotMatch(serverSource, /auth\/v1\/admin\/users\/\$\{encodeURIComponent\(userId\)\}\/logout/);
-  assert.match(completionRoute, /password-reset link is invalid or expired\. Request a new recovery email\./);
+  assert.match(completionRoute, /password-reset link is invalid, expired, or already used\. Request a new recovery email\./);
   assert.match(completionRoute, /if \(error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\) &&[\s\S]*?mode !== 'recovery' \|\| recoveryCleanupStage === 'not_started'[\s\S]*?status\(401\)\.json\(\{ message: invalidLinkMessage \}\)/);
   assert.match(serverSource, /sameSite:\s*'strict'[\s\S]*?path:\s*'\/api\/admin'/);
   assert.doesNotMatch(serverSource.slice(
     serverSource.indexOf('function setAdminSessionCookie'),
     serverSource.indexOf('function safeStringEqual'),
   ), /domain:/i);
+});
+
+test('temporary invitation callback requires explicit action and retains invite state while scrubbing the URL', () => {
+  const search = '?mode=invite&invitation_generation=2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62&setup=temporary&token_hash=synthetic-test-token-hash&type=signup';
+  const route = readAdminAuthRoute(search);
+  const callback = readAdminAuthCallback(
+    search,
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    route.mode,
+    true,
+  );
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+  const cleanupIndex = authActionSource.indexOf('window.history.replaceState');
+  const callbackCaptureIndex = authActionSource.indexOf('readAdminAuthCallback(');
+
+  assert.equal(route.mode, 'invite');
+  assert.equal(route.temporaryCredential, true);
+  assert.equal(callback.invitationGeneration, '2ca7a30c-7bdd-4fa8-83d6-e1fd29e5af62');
+  assert.equal(callback.tokenType, 'signup');
+  assert.equal(callback.error, undefined);
+  assert.ok(callbackCaptureIndex < cleanupIndex);
+  assert.match(appSource, /mode=\{callbackRoute\.mode\}[\s\S]*temporaryCredential=\{callbackRoute\.temporaryCredential\}[\s\S]*invitationSetup/);
+  assert.match(authActionSource, /Verify invitation & continue/);
+  assert.doesNotMatch(authActionSource, /attemptedAutomaticCompletion|sessionGate !== 'ready'.*completeSetup/);
+  assert.match(authActionSource, /callbackAttempted \|\| sessionGate !== 'ready'/);
+});
+
+test('stale or absent invitation state is rejected before Supabase token verification', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const start = serverSource.indexOf("app.post('/api/admin/auth/complete'");
+  const end = serverSource.indexOf("app.get('/api/admin/users'", start);
+  const route = serverSource.slice(start, end);
+  const generationCheck = route.indexOf('isCurrentPendingAdminInvitation(currentInvitation, invitationGeneration)');
+  const verifyCall = route.indexOf("supabaseAuthRequest('verify'");
+
+  assert.ok(generationCheck >= 0);
+  assert.ok(verifyCall > generationCheck);
+  assert.match(route, /This invitation is missing, invalid, expired, or no longer current\. Ask the Primary Owner to resend setup\./);
+  assert.match(route, /pendingInvitation\s*&&[\s\S]*?identity\.id !== pendingInvitation\.id/);
+});
+
+test('previously consumed verification callbacks direct the recipient to reissue rather than retry', () => {
+  const callback = readAdminAuthCallback(
+    '?error=access_denied&error_code=otp_expired',
+    '',
+    { length: 0, key: () => null, getItem: () => null },
+    'invite',
+  );
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+
+  assert.match(callback.error || '', /invalid, expired, or already used.*resend setup/i);
+  assert.match(authActionSource, /callbackAttempted && error[\s\S]*?will not be submitted again/);
+  assert.doesNotMatch(authActionSource, /Retry setup/);
+});
+
+test('Primary Owner sign-in and ordinary password recovery remain separate and available', () => {
+  const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const pageSource = readFileSync(new URL('../src/components/admin/AdminPage.tsx', import.meta.url), 'utf8');
+  const loginStart = serverSource.indexOf("app.post('/api/admin/login'");
+  const loginEnd = serverSource.indexOf("app.get('/api/admin/session'", loginStart);
+  const recoveryStart = serverSource.indexOf("app.post('/api/admin/auth/recovery'");
+  const recoveryEnd = serverSource.indexOf("app.post('/api/admin/users/:id/recovery'", recoveryStart);
+  const recoveryRoute = serverSource.slice(recoveryStart, recoveryEnd);
+  const loginRoute = serverSource.slice(loginStart, loginEnd);
+
+  assert.match(pageSource, /fetch\('\/api\/admin\/login'/);
+  assert.match(loginRoute, /supabaseAuthRequest\('token\?grant_type=password'/);
+  assert.match(recoveryRoute, /buildAdminPasswordResetRedirect\(adminAuthRedirectOrigin\(req\)\)/);
+  assert.match(recoveryRoute, /supabaseAuthRequest\(`recover\?\$\{query\}`/);
+  assert.match(pageSource, /Forgot password\? Send a secure recovery email/);
+  assert.match(pageSource, /aria-label=\{showLoginPassword \? 'Hide password' : 'Show password'\}/);
+});
+
+test('admin setup fields and invitation history label credential visibility and delivery accurately', () => {
+  const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
+  const settingsSource = readFileSync(new URL('../src/components/admin/AdminSettings.tsx', import.meta.url), 'utf8');
+
+  assert.match(authActionSource, /aria-label=\{showPassword \? 'Hide new password' : 'Show new password'\}/);
+  assert.match(authActionSource, /aria-label=\{showConfirmPassword \? 'Hide confirmation password' : 'Show confirmation password'\}/);
+  assert.match(settingsSource, /Verification Requested · Delivery Unconfirmed/);
+  assert.doesNotMatch(settingsSource, /Invitation Sent · Email Not Verified/);
 });
 
 test('recovery revokes existing sessions before password changes and reports later cleanup failures', () => {
@@ -397,7 +514,7 @@ test('recovery retries require fresh one-time verification and never treat a reu
   assert.ok(verifyIndex >= 0 && verifyIndex < passwordUpdateIndex);
   assert.match(completionRoute, /const allowedTypes = mode === 'invite' \? \['signup', 'invite'\] : \['recovery'\]/);
   assert.match(completionRoute, /error instanceof SupabaseRequestError && \[400, 401, 403\]\.includes\(error\.status\)/);
-  assert.match(authActionSource, /if \(busy \|\| notice \|\| sessionGate !== 'ready'\) return/);
+  assert.match(authActionSource, /if \(busy \|\| notice \|\| callbackAttempted \|\| sessionGate !== 'ready'\) return/);
   assert.match(authActionSource, /recoveryOutcomeUnknown[\s\S]*?request a new recovery email/);
 });
 
@@ -467,7 +584,7 @@ test('pre-existing NULL-generation invitations require owner reissue before setu
   assert.match(migration, /target_row\.status is distinct from 'pending' and target_row\.status is distinct from 'disabled'/i);
   assert.match(recoveryRoute, /p_invitation_generation: invitationGeneration/);
   assert.match(recoveryRoute, /buildAdminInvitationRedirect\([\s\S]*?'recovery',\s*invitationGeneration/);
-  assert.match(completionRoute, /mode === 'invite' \|\| identity\.status === 'pending' \|\| invitationGeneration !== undefined/);
+  assert.match(completionRoute, /mode === 'invite' \|\| invitationSetup === true \|\| invitationGeneration !== undefined/);
 });
 
 test('active invitation retries require current-generation acceptance audit and reach the idempotent RPC', () => {
@@ -571,7 +688,7 @@ test('recovery requires Owner reauthentication and login remains status-gated', 
   const completionRouteStart = serverSource.indexOf("app.post('/api/admin/auth/complete'");
   const completionRouteEnd = serverSource.indexOf("app.get('/api/admin/users'", completionRouteStart);
   const completionRoute = serverSource.slice(completionRouteStart, completionRouteEnd);
-  const generationCheck = completionRoute.indexOf('generationRows[0]?.invitation_generation !== invitationGeneration');
+  const generationCheck = completionRoute.indexOf('isCurrentPendingAdminInvitation(currentInvitation, invitationGeneration)');
   const passwordUpdate = completionRoute.indexOf('if (password !== undefined)');
   assert.notEqual(generationCheck, -1);
   assert.ok(passwordUpdate > generationCheck);

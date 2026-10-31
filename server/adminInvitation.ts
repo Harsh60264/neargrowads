@@ -16,6 +16,39 @@ export interface VerifiedAdminAuthUser {
 export type AdminInvitationCompletionDecision = 'complete' | 'already_accepted' | 'reject';
 export type AdminInvitationRecoveryMethod = 'signup' | 'password_recovery' | 'reject';
 
+export interface PendingAdminInvitationGeneration {
+  id?: unknown;
+  email?: unknown;
+  invitation_generation?: unknown;
+  status?: unknown;
+  is_primary_owner?: unknown;
+}
+
+export function isValidAdminInvitationGeneration(value: unknown): value is string {
+  return typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function isCurrentPendingAdminInvitation(
+  invitation: PendingAdminInvitationGeneration | undefined,
+  generation: string,
+): invitation is PendingAdminInvitationGeneration & {
+  id: string;
+  email: string;
+  invitation_generation: string;
+  status: 'pending';
+  is_primary_owner: false;
+} {
+  return Boolean(invitation &&
+    typeof invitation.id === 'string' &&
+    invitation.id.length > 0 &&
+    typeof invitation.email === 'string' &&
+    invitation.email.trim().length > 0 &&
+    invitation.invitation_generation === generation &&
+    invitation.status === 'pending' &&
+    invitation.is_primary_owner === false);
+}
+
 export function decideAdminInvitationRecovery(
   identity: AdminInvitationIdentity | undefined,
   authUser: VerifiedAdminAuthUser,

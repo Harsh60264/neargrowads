@@ -30,6 +30,7 @@ import { publicMedia } from './data/publicMedia';
 import { captureFirstTouchCampaign } from './data/leadTracking';
 import { PublicActivityTracker } from './components/PublicActivityTracker';
 import { ArrowLeft } from 'lucide-react';
+import { readAdminAuthRoute } from './components/admin/adminAuthCallback';
 
 const FIRST_VISIT_TRANSITION_MS = 900;
 const INTERNAL_TRANSITION_MS = 650;
@@ -418,10 +419,11 @@ export default function App() {
   // Route matching logic
   const renderCurrentView = () => {
     if (currentPath === '/admin/accept-invite') {
-      const callbackQuery = new URLSearchParams(window.location.search);
+      const callbackRoute = readAdminAuthRoute(window.location.search);
       return <AdminAuthAction
-        mode={callbackQuery.get('mode') === 'recovery' ? 'recovery' : 'invite'}
-        temporaryCredential={callbackQuery.get('setup') === 'temporary'}
+        mode={callbackRoute.mode}
+        temporaryCredential={callbackRoute.temporaryCredential}
+        invitationSetup
       />;
     }
     if (currentPath === '/admin/password-reset') {

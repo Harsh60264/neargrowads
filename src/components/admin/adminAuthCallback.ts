@@ -8,10 +8,24 @@ export interface AdminAuthCallback {
   error?: string;
 }
 
+export interface AdminAuthRouteState {
+  mode: 'invite' | 'recovery';
+  temporaryCredential: boolean;
+}
+
+export function readAdminAuthRoute(search: string): AdminAuthRouteState {
+  const query = new URLSearchParams(search);
+  const mode = query.get('mode') === 'recovery' ? 'recovery' : 'invite';
+  return {
+    mode,
+    temporaryCredential: mode === 'invite' && query.get('setup') === 'temporary',
+  };
+}
+
 function invalidLinkMessage(mode: 'invite' | 'recovery'): string {
   return mode === 'recovery'
-    ? 'This password-reset link is missing, invalid, or expired. Request a new recovery email.'
-    : 'This verification link is missing, invalid, or expired. Ask the Primary Owner to resend setup.';
+    ? 'This password-reset link is missing, invalid, expired, or already used. Request a new recovery email.'
+    : 'This verification link is missing, invalid, expired, or already used. Ask the Primary Owner to resend setup.';
 }
 
 export function readAdminAuthCallback(
@@ -19,15 +33,17 @@ export function readAdminAuthCallback(
   hash: string,
   storage: Pick<Storage, 'length' | 'key' | 'getItem'>,
   mode: 'invite' | 'recovery' = 'invite',
+  invitationSetup = false,
 ): AdminAuthCallback {
   const query = new URLSearchParams(search);
   const fragment = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
   const invitationGeneration = query.get('invitation_generation') || fragment.get('invitation_generation') || undefined;
-  const validGeneration = invitationGeneration && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(invitationGeneration)
-    ? invitationGeneration
-    : undefined;
+  const validGeneration = isValidCallbackGeneration(invitationGeneration) ? invitationGeneration : undefined;
   if (query.has('error') || query.has('error_code') || fragment.has('error') || fragment.has('error_code')) {
     return { error: invalidLinkMessage(mode) };
+  }
+  if ((mode === 'invite' || invitationSetup) && !validGeneration) {
+    return { error: 'This invitation is missing or invalid. Ask the Primary Owner to resend setup.' };
   }
 
   const accessToken = query.get('access_token') || fragment.get('access_token');
@@ -54,6 +70,10 @@ export function readAdminAuthCallback(
   return distinctVerifiers.length === 1
     ? { authorizationCode, codeVerifier: distinctVerifiers[0], invitationGeneration: validGeneration }
     : { error: invalidLinkMessage(mode) };
+}
+
+function isValidCallbackGeneration(value: string | undefined): value is string {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
 }
 
 export function clearAdminAuthCallbackVerifier(

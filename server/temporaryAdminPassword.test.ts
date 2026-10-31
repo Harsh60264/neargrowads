@@ -143,6 +143,23 @@ test('expired or stale first-password setup is rejected before Supabase Auth pas
   assert.match(setupMigration, /temporary-admin-password-setup:/);
 });
 
+test('successful first-login password change validates the CMS session and clears temporary-password lifecycle state', () => {
+  const setupStart = serverSource.indexOf("app.post('/api/admin/auth/first-password'");
+  const setupEnd = serverSource.indexOf("app.get('/api/admin/sessions/mine'", setupStart);
+  const setupRoute = serverSource.slice(setupStart, setupEnd);
+  const migration = setupMigration.slice(setupMigration.indexOf('create or replace function public.complete_admin_temporary_password_setup'));
+
+  assert.match(setupRoute, /identity\.isPrimaryOwner \|\| identity\.mustChangePassword !== true/);
+  assert.match(setupRoute, /get_active_admin_session/);
+  assert.match(setupRoute, /supabaseAuthRequest\('user'[\s\S]*?method: 'PUT'[\s\S]*?revokeSupabaseRefreshTokens/);
+  assert.match(setupRoute, /complete_admin_temporary_password_setup/);
+  assert.match(setupRoute, /completion\.status !== 'completed'/);
+  assert.match(setupRoute, /Password changed\. Your temporary password is no longer valid\./);
+  assert.match(migration, /must_change_password = false/);
+  assert.match(migration, /temporary_password_expires_at = null/);
+  assert.match(migration, /temporary_password_used_at = null/);
+});
+
 test('expiry is enforced without scheduler, lease, quarantine, or Auth password rotation', () => {
   assert.doesNotMatch(serverSource, /admin-temporary-password-expiry/);
   assert.doesNotMatch(serverSource, /ADMIN_TEMP_PASSWORD_EXPIRY_CRON_SECRET/);

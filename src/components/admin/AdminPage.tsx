@@ -200,6 +200,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LeadStatus>('all');
   const [leadPage, setLeadPage] = useState(1);
@@ -778,12 +779,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
                   />
                 </span>
               </label>
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold text-[#ebf2ed]">Password</span>
+              <div>
+                <label htmlFor="admin-login-password" className="mb-2 block text-xs font-semibold text-[#ebf2ed]">Password</label>
                 <span className="admin-login-field flex items-center gap-3 rounded-xl border px-3.5 focus-within:border-[#64AE75] focus-within:ring-4 focus-within:ring-[#3EA259]/10">
                   <LockKeyhole className="admin-login-field-icon h-4 w-4 shrink-0" />
                   <input
-                    type="password"
+                    id="admin-login-password"
+                    type={showLoginPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     required
                     value={password}
@@ -791,8 +793,11 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
                     placeholder="Enter your password"
                     className="admin-login-input h-12 min-w-0 flex-1 bg-transparent text-sm outline-none"
                   />
+                  <button type="button" aria-label={showLoginPassword ? 'Hide password' : 'Show password'} aria-pressed={showLoginPassword} onClick={() => setShowLoginPassword((shown) => !shown)} className="rounded p-1 text-[#91A195] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#64AE75]">
+                    {showLoginPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
                 </span>
-              </label>
+              </div>
               <button
                 type="submit"
                 disabled={busy || !session.configured}
@@ -835,12 +840,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               ['newPassword', 'New password', 'new-password'],
               ['confirmPassword', 'Confirm new password', 'new-password'],
             ] as const).map(([key, label, autocomplete]) => (
-              <label key={key} className="block text-xs font-medium text-[#B8C7BC]">{label}
+              <div key={key}>
+                <label htmlFor={`first-password-${key}`} className="block text-xs font-medium text-[#B8C7BC]">{label}</label>
                 <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3 focus-within:border-[#67D8B7]">
-                  <input className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" type={showFirstPassword ? 'text' : 'password'} autoComplete={autocomplete} required minLength={key === 'currentPassword' ? 1 : 12} maxLength={200} value={firstPasswordValues[key]} onChange={(event) => setFirstPasswordValues((current) => ({ ...current, [key]: event.target.value }))} />
-                  {key === 'newPassword' && <button type="button" aria-label={showFirstPassword ? 'Hide passwords' : 'Show passwords'} onClick={() => setShowFirstPassword((shown) => !shown)} className="text-[#91A195]">{showFirstPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>}
+                  <input id={`first-password-${key}`} className="min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" type={showFirstPassword ? 'text' : 'password'} autoComplete={autocomplete} required minLength={key === 'currentPassword' ? 1 : 12} maxLength={200} value={firstPasswordValues[key]} onChange={(event) => setFirstPasswordValues((current) => ({ ...current, [key]: event.target.value }))} />
+                  {key === 'newPassword' && <button type="button" aria-label={showFirstPassword ? 'Hide passwords' : 'Show passwords'} aria-pressed={showFirstPassword} onClick={() => setShowFirstPassword((shown) => !shown)} className="rounded p-1 text-[#91A195] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#67D8B7]">{showFirstPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}</button>}
                 </span>
-              </label>
+              </div>
             ))}
             <p className="text-[10px] text-[#91A195]">Strength: {strength}/5 — use 12+ characters and at least three character types.</p>
             {firstPasswordValues.newPassword !== firstPasswordValues.confirmPassword && <p role="alert" className="text-xs text-rose-200">New passwords do not match.</p>}

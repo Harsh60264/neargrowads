@@ -1,16 +1,27 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { LockKeyhole, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Eye, EyeOff, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { NearGrowLogo } from '../brand/NearGrowLogo';
 import { clearAdminAuthCallbackVerifier, readAdminAuthCallback } from './adminAuthCallback';
 
-export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: 'invite' | 'recovery'; temporaryCredential?: boolean }) {
+export function AdminAuthAction({
+  mode,
+  temporaryCredential = false,
+  invitationSetup = false,
+}: {
+  mode: 'invite' | 'recovery';
+  temporaryCredential?: boolean;
+  invitationSetup?: boolean;
+}) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [callback] = useState(() => readAdminAuthCallback(
     window.location.search,
     window.location.hash,
     window.localStorage,
     mode,
+    invitationSetup,
   ));
   const [sessionGate, setSessionGate] = useState<'checking' | 'signout_required' | 'ready' | 'error'>('checking');
   const [sessionGateError, setSessionGateError] = useState('');
@@ -18,8 +29,11 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const attemptedAutomaticCompletion = useRef(false);
+  const [callbackAttempted, setCallbackAttempted] = useState(false);
   const usesTemporaryCredential = mode === 'invite' && temporaryCredential;
+  const passwordIsStrong = password.length >= 12 &&
+    [/[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)]
+      .filter(Boolean).length >= 3;
 
   const checkInvitationBrowserSession = useCallback(async (): Promise<boolean | undefined> => {
     setSessionGate('checking');
@@ -78,8 +92,9 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
   };
 
   const completeSetup = async () => {
-    if (busy || notice || sessionGate !== 'ready') return;
+    if (busy || notice || callbackAttempted || sessionGate !== 'ready') return;
     setBusy(true);
+    setCallbackAttempted(true);
     setError('');
     setNotice('');
     let recoveryOutcomeUnknown = mode === 'recovery';
@@ -90,6 +105,7 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
         body: JSON.stringify({
           ...callback,
           mode,
+          invitationSetup,
           ...(!usesTemporaryCredential ? { password, confirmPassword } : {}),
         }),
       });
@@ -110,19 +126,13 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
             : 'Setup could not be completed. Retry or ask the Primary Owner to resend setup.';
       setError(message);
       if (message.includes('Sign out the existing administrator session')) {
+        setCallbackAttempted(false);
         await checkInvitationBrowserSession();
       }
     } finally {
       setBusy(false);
     }
   };
-
-  useEffect(() => {
-    if (sessionGate !== 'ready' || !usesTemporaryCredential || callback.error || attemptedAutomaticCompletion.current ||
-      (!callback.accessToken && !callback.authorizationCode && !callback.tokenHash)) return;
-    attemptedAutomaticCompletion.current = true;
-    void completeSetup();
-  }, [sessionGate, usesTemporaryCredential, callback]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -150,29 +160,40 @@ export function AdminAuthAction({ mode, temporaryCredential = false }: { mode: '
         </div>}
         {callback.error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{callback.error}</div>}
         {!hasCallback && !callback.error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{mode === 'recovery'
-          ? 'This password-reset link is missing or expired. Request a new recovery email.'
-          : 'This verification link is missing or expired. Ask the Primary Owner to resend setup.'}</div>}
+          ? 'This password-reset link is missing, expired, or already used. Request a new recovery email.'
+          : 'This verification link is missing, expired, or already used. Ask the Primary Owner to resend setup.'}</div>}
         {error && <div role="alert" className="mt-5 rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-200">{error}</div>}
+        {callbackAttempted && error && <p role="status" className="mt-3 text-xs leading-5 text-[#A9B8AD]">{mode === 'recovery'
+          ? 'For security, this link will not be submitted again. Request a new recovery email.'
+          : 'For security, this link will not be submitted again. Ask the Primary Owner to resend setup.'}</p>}
         {notice ? <div role="status" className="mt-5 rounded-xl border border-[#67D8B7]/30 bg-[#67D8B7]/10 p-3 text-sm text-[#B8F1DC]">{notice}<a href="/admin/login" className="ml-2 underline">Go to sign in</a></div> : sessionGate === 'ready' && (
           usesTemporaryCredential ? (
             <div className="mt-6 space-y-4">
               <p className="rounded-xl border border-[#304135] bg-[#101913] p-3 text-xs leading-5 text-[#A9B8AD]">Completing the verified invitation activates only the account assigned to this email. You will be required to change your one-time password at first sign-in.</p>
               {busy && <p role="status" className="text-sm text-[#B8F1DC]">Verifying your invitation and completing setup…</p>}
-              {error && hasCallback && <button type="button" onClick={() => void completeSetup()} disabled={busy} className="flex h-11 w-full items-center justify-center rounded-xl border border-[#47594C] text-sm font-semibold text-[#C8D8CA] disabled:opacity-50">Retry setup</button>}
+              <button type="button" onClick={() => void completeSetup()} disabled={!hasCallback || busy || callbackAttempted} className="flex h-11 w-full items-center justify-center rounded-xl bg-[#286D3B] text-sm font-semibold text-white hover:bg-[#347E49] disabled:opacity-50">
+                {busy ? 'Verifying invitation…' : 'Verify invitation & continue'}
+              </button>
             </div>
           ) : (
             <form onSubmit={submit} className="mt-6 space-y-4">
-              <label className="block text-xs font-medium text-[#B8C7BC]">New password
+              <div>
+                <label htmlFor="admin-setup-password" className="block text-xs font-medium text-[#B8C7BC]">New password</label>
                 <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3.5 focus-within:border-[#67D8B7]">
                   <LockKeyhole className="h-4 w-4 text-[#91A195]" />
-                  <input type="password" autoComplete="new-password" required minLength={12} className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <input id="admin-setup-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={12} className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <button type="button" aria-label={showPassword ? 'Hide new password' : 'Show new password'} aria-pressed={showPassword} onClick={() => setShowPassword((shown) => !shown)} className="rounded p-1 text-[#91A195] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#67D8B7]">{showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}</button>
                 </span>
-              </label>
-              <label className="block text-xs font-medium text-[#B8C7BC]">Confirm new password
-                <input type="password" autoComplete="new-password" required minLength={12} className="mt-1.5 h-11 w-full rounded-xl border border-[#33453A] bg-[#101913] px-3.5 text-sm outline-none focus:border-[#67D8B7]" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
-              </label>
+              </div>
+              <div>
+                <label htmlFor="admin-confirm-setup-password" className="block text-xs font-medium text-[#B8C7BC]">Confirm new password</label>
+                <span className="mt-1.5 flex items-center gap-2 rounded-xl border border-[#33453A] bg-[#101913] px-3.5 focus-within:border-[#67D8B7]">
+                  <input id="admin-confirm-setup-password" type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={12} className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                  <button type="button" aria-label={showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'} aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword((shown) => !shown)} className="rounded p-1 text-[#91A195] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#67D8B7]">{showConfirmPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}</button>
+                </span>
+              </div>
               <p className="text-[10px] leading-5 text-[#91A195]">Minimum 12 characters; include at least three of lowercase, uppercase, number, and symbol.</p>
-              <button type="submit" disabled={!hasCallback || busy || password !== confirmPassword} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#286D3B] text-sm font-semibold text-white hover:bg-[#347E49] disabled:opacity-50">{busy ? 'Completing setup…' : mode === 'invite' ? 'Complete Admin Setup' : 'Set password'}</button>
+              <button type="submit" disabled={!hasCallback || busy || callbackAttempted || !passwordIsStrong || password !== confirmPassword} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#286D3B] text-sm font-semibold text-white hover:bg-[#347E49] disabled:opacity-50">{busy ? 'Completing setup…' : mode === 'invite' ? 'Complete Admin Setup' : 'Set password'}</button>
             </form>
           )
         )}

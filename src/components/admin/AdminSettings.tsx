@@ -808,7 +808,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     const status = historyStatus(user);
     if (status === 'pending') {
       if (user.emailVerified && user.mustChangePassword) return 'Pending Setup';
-      if (!user.emailVerified && latestInvitationActivity(user)) return 'Invitation Sent · Email Not Verified';
+      if (!user.emailVerified && latestInvitationActivity(user)) return 'Verification Requested · Delivery Unconfirmed';
       if (!user.emailVerified) return 'Created · Email Not Verified';
       return 'Pending';
     }
