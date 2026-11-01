@@ -200,6 +200,7 @@ export function LeadershipTeamSection() {
   const [interactionPaused, setInteractionPaused] = useState(false);
   const [mentorCarouselVisible, setMentorCarouselVisible] = useState(false);
   const [mentorOrder, setMentorOrder] = useState<string[]>(() => sortTeam(TEAM_SEED.filter((m) => m.visible && m.group === 'mentor')).map((m) => m.id));
+  const [selectedMentorId, setSelectedMentorId] = useState('');
   const [flickingMentorId, setFlickingMentorId] = useState<string | null>(null);
   const coreSectionRef = useRef<HTMLDivElement>(null);
   const mentorCarouselRef = useRef<HTMLUListElement>(null);
@@ -236,7 +237,9 @@ export function LeadershipTeamSection() {
     if (!mentorOrder.includes(member.id)) orderedMentors.push(member);
   });
   const displayMentors = isMentorStack ? orderedMentors : mentors;
-  const activeMentor = displayMentors[0] ?? mentors[0];
+  const activeMentor = (isMentorStack
+    ? displayMentors[0]
+    : mentors.find((member) => member.id === selectedMentorId)) ?? mentors[0];
   const activeMentorDetails = activeMentor ? resolveMentorSectionContent(activeMentor) : undefined;
   const core = members.filter((m) => m.group === 'core');
   const coreSignature = core.map((member) => member.id).join('|');
@@ -483,6 +486,8 @@ export function LeadershipTeamSection() {
   cycleMentorsRef.current = cycleMentors;
 
   const selectMentor = (memberId: string) => {
+    setSelectedMentorId(memberId);
+    if (!isMentorStack) return;
     const next = promoteMentor(mentorOrderRef.current, memberId);
     if (next === mentorOrderRef.current) return;
     mentorTransitioningRef.current = false;
@@ -499,20 +504,20 @@ export function LeadershipTeamSection() {
   };
 
   const handleMentorKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    if (!isMentorStack) return;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    if (isMentorStack && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault();
       cycleMentors(event.key === 'ArrowRight' ? 1 : -1);
       return;
     }
     if (event.key !== 'Enter' && event.key !== ' ') return;
     const target = event.target;
-    if (!(target instanceof Element) || target.closest('a, button')) return;
+    if (!(target instanceof Element) || target.closest('a, button, select')) return;
     const item = target.closest<HTMLLIElement>('[data-mentor-id]');
     const memberId = item?.dataset.mentorId;
     if (!memberId) return;
     event.preventDefault();
-    selectMentor(memberId);
+    setSelectedMentorId(memberId);
+    if (isMentorStack) selectMentor(memberId);
   };
 
   useEffect(() => {
@@ -588,43 +593,42 @@ export function LeadershipTeamSection() {
                   ref={mentorCarouselRef}
                   className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
                   aria-label="Strategic mentors"
-                  onKeyDown={isMentorStack ? handleMentorKeyDown : undefined}
+                  onKeyDown={handleMentorKeyDown}
                 >
                   {displayMentors.map((m, index) => (
                     <li
                       key={m.id}
                       className={`group min-w-0${m.id === flickingMentorId ? ' is-flicking' : ''}`}
-                      data-mentor-id={isMentorStack ? m.id : undefined}
+                      data-mentor-id={m.id}
                       data-stack-position={isMentorStack ? getMentorStackLayer(index) : undefined}
-                      aria-current={isMentorStack && index === 0 ? 'true' : undefined}
-                      aria-label={isMentorStack ? `Select ${m.name}` : undefined}
+                      aria-current={(isMentorStack ? index === 0 : m.id === activeMentor?.id) ? 'true' : undefined}
+                      aria-label={`Select ${m.name}`}
                       aria-hidden={isMentorStack && index >= MAX_VISIBLE_MENTOR_STACK_LAYERS ? true : undefined}
-                      tabIndex={isMentorStack ? (index < MAX_VISIBLE_MENTOR_STACK_LAYERS ? 0 : -1) : undefined}
+                      tabIndex={isMentorStack ? (index < MAX_VISIBLE_MENTOR_STACK_LAYERS ? 0 : -1) : 0}
                       style={isMentorStack ? { zIndex: displayMentors.length - index + 10 } : undefined}
-                      onClick={isMentorStack ? (event) => {
-                        if (event.target instanceof Element && event.target.closest('a, button')) return;
+                      onClick={(event) => {
+                        if (event.target instanceof Element && event.target.closest('a, button, select')) return;
                         selectMentor(m.id);
-                      } : undefined}
+                      }}
                       onAnimationEnd={isMentorStack ? (event) => handleMentorAnimationEnd(event, m.id) : undefined}
                     >
                       <MentorCard member={m} active={!isMentorStack || index === 0} />
                     </li>
                   ))}
                 </ul>
-                {isMentorStack && displayMentors.length > 1 && (
-                  <div className="ng-mentor-stack-picker" role="group" aria-label="Select a strategic mentor">
-                    {displayMentors.map((member, index) => (
-                      <button
-                        key={member.id}
-                        type="button"
-                        aria-label={`Show ${member.name}`}
-                        aria-pressed={index === 0}
-                        onClick={() => selectMentor(member.id)}
-                      >
-                        {index + 1}
-                      </button>
-                    ))}
-                  </div>
+                {isMentorStack && displayMentors.length > MAX_VISIBLE_MENTOR_STACK_LAYERS && (
+                  <label className="ng-mentor-accessible-picker">
+                    <span>Choose mentor</span>
+                    <select
+                      aria-label="Select a strategic mentor"
+                      value={displayMentors[0]?.id ?? ''}
+                      onChange={(event) => selectMentor(event.target.value)}
+                    >
+                      {displayMentors.map((member) => (
+                        <option key={member.id} value={member.id}>{member.name}</option>
+                      ))}
+                    </select>
+                  </label>
                 )}
               </div>
               {activeMentor && (

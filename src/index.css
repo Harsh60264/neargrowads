@@ -1333,41 +1333,32 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
     overflow: visible;
   }
 
-  .ng-mentor-stack-picker {
+  .ng-mentor-accessible-picker {
     position: absolute;
     z-index: 60;
     right: 0;
-    bottom: 8px;
-    left: 0;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px;
-    padding: 0 8px;
-  }
-
-  .ng-mentor-stack-picker button {
-    display: inline-flex;
-    width: 30px;
-    height: 30px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    border-radius: 9999px;
-    background: rgba(11, 16, 20, 0.88);
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 12px;
+    top: 8px;
+    display: grid;
+    gap: 4px;
+    max-width: min(240px, calc(100% - 16px));
+    color: var(--brand-text);
+    font-size: 11px;
     font-weight: 700;
-    transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
   }
 
-  .ng-mentor-stack-picker button[aria-pressed="true"] {
-    border-color: #67D8B7;
-    background: #67D8B7;
-    color: #0B1014;
+  .ng-mentor-accessible-picker select {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--brand-border);
+    border-radius: 8px;
+    padding: 6px 28px 6px 9px;
+    background-color: var(--brand-bg-soft);
+    color: var(--brand-text);
+    font: inherit;
+    font-size: 12px;
   }
 
-  .ng-mentor-stack-picker button:focus-visible {
+  .ng-mentor-accessible-picker select:focus-visible {
     outline: 3px solid #67D8B7;
     outline-offset: 3px;
   }
@@ -1508,7 +1499,6 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ng-mentor-stack-picker button { transition: none; }
   .ng-team-card:hover { transform: none; }
 }
 
