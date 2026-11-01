@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { getMentorStackLayer, MAX_VISIBLE_MENTOR_STACK_LAYERS, promoteMentor } from './mentorStackLayout';
+import { cycleMentorIds, getMentorStackLayer, MAX_VISIBLE_MENTOR_STACK_LAYERS, promoteMentor } from './mentorStackLayout';
 
 const sectionSource = readFileSync(new URL('./LeadershipTeamSection.tsx', import.meta.url), 'utf8');
 const styles = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
@@ -25,17 +25,27 @@ test('promotes a selected mentor to the front without dropping or reordering oth
   assert.equal(promoteMentor(original, 'missing'), original);
 });
 
-for (const count of [1, 4, 5, 8]) {
-  test(`keeps every mentor selectable with ${count} profiles`, () => {
+for (const count of [1, 4, 5, 6, 8]) {
+  test(`card cycling reaches every mentor with ${count} profiles`, () => {
     const mentorIds = Array.from({ length: count }, (_, index) => `mentor-${index + 1}`);
+    const visited = new Set<string>();
+    let order = mentorIds;
 
-    mentorIds.forEach((mentorId) => {
-      const selected = promoteMentor(mentorIds, mentorId);
-      assert.equal(selected[0], mentorId);
-      assert.deepEqual([...selected].sort(), [...mentorIds].sort());
-    });
+    for (let index = 0; index < count; index += 1) {
+      visited.add(order[0]);
+      order = cycleMentorIds(order, 1);
+    }
+
+    assert.deepEqual(visited, new Set(mentorIds));
+    assert.deepEqual(order, mentorIds);
   });
 }
+
+test('cycles backward and does not change a single-mentor stack', () => {
+  assert.deepEqual(cycleMentorIds(['a', 'b', 'c'], -1), ['c', 'a', 'b']);
+  const onlyMentor = ['a'];
+  assert.equal(cycleMentorIds(onlyMentor, 1), onlyMentor);
+});
 
 test('reserves normal-flow height for the stack before the Core Team section', () => {
   assert.match(styles, /\.ng-mentor-stack-stage\.is-stack\s*\{[^}]*height:\s*640px/s);
@@ -43,16 +53,21 @@ test('reserves normal-flow height for the stack before the Core Team section', (
   assert.ok(sectionSource.indexOf('ng-mentor-stack-stage') < sectionSource.indexOf('ng-core-section'));
 });
 
-test('makes overflow mentors selectable by name without numbered navigation controls', () => {
+test('uses card-only navigation without dropdown or numbered controls', () => {
   assert.match(styles, /\.ng-mentor-carousel\.is-stack\s*>\s*li\[data-stack-position="3"\]\s*~\s*li\[data-stack-position="3"\]\s*\{[^}]*opacity:\s*0/s);
   assert.match(sectionSource, /getMentorStackLayer\(index\)/);
   assert.match(sectionSource, /MAX_VISIBLE_MENTOR_STACK_LAYERS/);
   assert.doesNotMatch(sectionSource, /ng-mentor-stack-picker/);
-  assert.match(sectionSource, /ng-mentor-accessible-picker/);
-  assert.match(sectionSource, /displayMentors\.map\(\(member\) => \(\s*<option key=\{member\.id\} value=\{member\.id\}>\{member\.name\}<\/option>/);
+  assert.doesNotMatch(sectionSource, /ng-mentor-accessible-picker|Choose mentor|<select/);
   assert.doesNotMatch(styles, /ng-mentor-stack-picker/);
-  assert.match(sectionSource, /onClick=\{\(event\) => \{[\s\S]*?selectMentor\(m\.id\);/);
+  assert.match(sectionSource, /onClick=\{\(event\) => \{[\s\S]*?activateMentor\(m\.id\);/);
   assert.match(sectionSource, /onKeyDown=\{handleMentorKeyDown\}/);
+  assert.match(sectionSource, /const cycleMentors = \(direction: 1 \| -1, manual = false\): boolean => \{[\s\S]*?!manual && !canAdvanceMentor/s);
+  assert.match(sectionSource, /cycleMentors\(1, true\)/);
+  assert.match(sectionSource, /cycleMentors\(direction, true\)/);
+  assert.match(sectionSource, /left or right arrow keys to browse all mentors/);
+  assert.match(sectionSource, /id="ng-mentor-details-title" aria-live="polite" aria-atomic="true"/);
+  assert.doesNotMatch(styles, /ng-mentor-accessible-picker/);
 });
 
 test('uses a narrower card-stack origin at tablet widths to stay inside the stage', () => {
