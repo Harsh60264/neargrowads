@@ -125,12 +125,10 @@ function MentorCard({ member, active }: { member: TeamMember; active: boolean })
 
 function CoreAccordionCard({
   member,
-  index,
   active,
   onActivate,
 }: {
   member: TeamMember;
-  index: number;
   active: boolean;
   onActivate: (id: string) => void;
 }) {
@@ -157,7 +155,6 @@ function CoreAccordionCard({
           onFocus={() => onActivate(member.id)}
         >
           <span className="ng-core-compact" aria-hidden="true">
-            <span className="ng-core-compact-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="ng-core-compact-initials">{initials(member.name)}</span>
             <span className="ng-core-compact-name">{member.name}</span>
             <span className="ng-core-compact-role">{member.role}</span>
@@ -173,7 +170,6 @@ function CoreAccordionCard({
             className="ng-core-photo"
           />
           <div className="ng-core-copy">
-            <span className="ng-core-detail-index">NEARGROW ADS · {String(index + 1).padStart(2, '0')}</span>
             <h4>{member.name}</h4>
             <p className="ng-core-role">{member.role}</p>
             <span className="ng-core-accent-line" aria-hidden="true" />
@@ -709,7 +705,6 @@ export function LeadershipTeamSection() {
                         />
                         <div aria-hidden="true" className="ng-core-carousel-gradient" />
                         <div className="ng-core-carousel-copy">
-                          <span className="ng-core-detail-index">NEARGROW ADS · {String(index + 1).padStart(2, '0')}</span>
                           <h4>{member.name}</h4>
                           <p>{member.role}</p>
                         </div>
@@ -723,11 +718,10 @@ export function LeadershipTeamSection() {
               </ul>
             </div>
             <ul className="ng-core-accordion" aria-label="Core team members">
-              {core.map((member, index) => (
+              {core.map((member) => (
                 <CoreAccordionCard
                   key={member.id}
                   member={member}
-                  index={index}
                   active={member.id === selectedCoreId}
                   onActivate={setActiveCoreId}
                 />
