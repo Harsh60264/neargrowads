@@ -169,7 +169,10 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
   const add = (group: TeamGroup) => {
     if (!canCreate) return;
     const id = `${group}-${Date.now().toString(36)}`;
-    const member: TeamMember = { id, group, name: '', role: '', tag: '', bio: '', imageUrl: '', socialUrl: '', order: 99, visible: false };
+    const member: TeamMember = {
+      id, group, name: '', role: '', tag: '', bio: '', imageUrl: '', socialUrl: '', order: 99, visible: false,
+      ...(group === 'mentor' ? { overview: '', vision: '', insight: '' } : {}),
+    };
     change(reindex([...members, member]));
     setSelectedId(id);
   };
@@ -433,6 +436,23 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
                     <label className={label} htmlFor="t-bio">Short bio <span className={`font-normal ${muted}`}>({selected.bio.length}/320)</span></label>
                     <textarea id="t-bio" disabled={!canChangeSelected} rows={4} className={field} maxLength={320} value={selected.bio} onChange={(e) => patch(selected.id, { bio: e.target.value })} />
                   </div>
+
+                  {selected.group === 'mentor' && (
+                    <>
+                      <div>
+                        <label className={label} htmlFor="t-overview">Overview <span className={`font-normal ${muted}`}>({(selected.overview ?? '').length}/2000)</span></label>
+                        <textarea id="t-overview" disabled={!canChangeSelected} rows={4} className={field} maxLength={2000} value={selected.overview ?? ''} onChange={(e) => patch(selected.id, { overview: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className={label} htmlFor="t-vision">Our Vision &amp; Purpose <span className={`font-normal ${muted}`}>({(selected.vision ?? '').length}/2000)</span></label>
+                        <textarea id="t-vision" disabled={!canChangeSelected} rows={4} className={field} maxLength={2000} value={selected.vision ?? ''} onChange={(e) => patch(selected.id, { vision: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className={label} htmlFor="t-insight">Mentor Insight <span className={`font-normal ${muted}`}>({(selected.insight ?? '').length}/2000)</span></label>
+                        <textarea id="t-insight" disabled={!canChangeSelected} rows={4} className={field} maxLength={2000} value={selected.insight ?? ''} onChange={(e) => patch(selected.id, { insight: e.target.value })} />
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     {canChangeSelected && <button type="button" onClick={() => patch(selected.id, { visible: !selected.visible })} className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-semibold ${dark ? 'border-[#405344] text-[#ECF3EE]' : 'border-[#DFE6DF] text-[#526056]'}`} aria-pressed={selected.visible}>

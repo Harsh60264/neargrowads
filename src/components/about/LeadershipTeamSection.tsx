@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
 import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
+import { resolveMentorSectionContent } from '../../data/teamMentorContent';
 import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 
 /* ---------- small primitives ---------- */
@@ -121,25 +122,6 @@ function MentorCard({ member, active }: { member: TeamMember; active: boolean })
   );
 }
 
-const mentorDetails: Record<string, { vision: string; insight: string }> = {
-  'mentor-01': {
-    vision: 'Make cross-border growth more intentional by pairing the right channels with messaging that feels local.',
-    insight: 'A strong expansion plan starts with understanding the audience in each market.',
-  },
-  'mentor-02': {
-    vision: 'Help growing teams build dependable technical foundations that support secure, sustainable delivery.',
-    insight: 'Reliable architecture gives ambitious teams room to scale with confidence.',
-  },
-  'mentor-03': {
-    vision: 'Turn search and measurement into a clearer view of performance across regions and languages.',
-    insight: 'Useful measurement connects what audiences search for with the decisions teams make next.',
-  },
-  'mentor-04': {
-    vision: 'Help brands move into new markets with focused go-to-market plans and purposeful partnerships.',
-    insight: 'The best next market is the one where a clear opportunity meets a practical route to reach it.',
-  },
-};
-
 function CoreAccordionCard({
   member,
   index,
@@ -258,7 +240,7 @@ export function LeadershipTeamSection() {
   });
   const displayMentors = isMentorStack ? orderedMentors : mentors;
   const activeMentor = displayMentors[0] ?? mentors[0];
-  const activeMentorDetails = activeMentor ? mentorDetails[activeMentor.id] : undefined;
+  const activeMentorDetails = activeMentor ? resolveMentorSectionContent(activeMentor) : undefined;
   const core = members.filter((m) => m.group === 'core');
   const coreSignature = core.map((member) => member.id).join('|');
   const selectedCoreId = core.some((member) => member.id === activeCoreId) ? activeCoreId : core[0]?.id;
@@ -613,15 +595,15 @@ export function LeadershipTeamSection() {
                     <div className="ng-mentor-details-divider" aria-hidden="true" />
                     <div className="ng-mentor-details-block">
                       <h4>Overview</h4>
-                      <p>{activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.overview || 'Profile overview coming soon.'}</p>
                     </div>
                     <div className="ng-mentor-details-block">
                       <h4>Our vision &amp; purpose</h4>
-                      <p>{activeMentorDetails?.vision ?? activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.vision || 'Purpose information coming soon.'}</p>
                     </div>
                     <blockquote className="ng-mentor-insight">
                       <span>Mentor insight</span>
-                      <p>{activeMentorDetails?.insight ?? activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.insight || 'A mentor insight will be shared soon.'}</p>
                     </blockquote>
                   </div>
                 </aside>

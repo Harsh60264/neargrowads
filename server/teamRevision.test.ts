@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { matchesTeamRevision, teamContentRevision } from './teamRevision';
+import { matchesTeamRevision, teamContentRevision, teamRevisionConflictStatus } from './teamRevision';
 
 const originalMember = {
   id: 'member-one',
@@ -33,14 +33,26 @@ test('a saved revision remains valid after JSONB changes object-key order', () =
 });
 
 test('consecutive saves accept the latest revision and reject the previous one', () => {
-  const firstSave = [{ ...originalMember, role: 'Lead Designer' }];
+  const firstSave = [{
+    ...originalMember,
+    role: 'Lead Designer',
+    overview: 'Detailed overview.',
+    vision: 'Purpose copy.',
+    insight: 'Mentor insight.',
+  }];
   const firstRevision = teamContentRevision(firstSave);
-  const secondSave = [{ ...firstSave[0], visible: false }];
+  const secondSave = [{ ...firstSave[0], insight: 'Revised mentor insight.', visible: false }];
   const secondRevision = teamContentRevision(secondSave);
 
   assert.equal(matchesTeamRevision(firstRevision, firstSave), true);
   assert.equal(matchesTeamRevision(secondRevision, secondSave), true);
   assert.equal(matchesTeamRevision(firstRevision, secondSave), false);
+  assert.equal(teamRevisionConflictStatus(secondRevision, secondSave), undefined);
+  assert.equal(teamRevisionConflictStatus(firstRevision, secondSave), 409);
+});
+
+test('a missing revision is rejected without weakening optimistic concurrency', () => {
+  assert.equal(teamRevisionConflictStatus(undefined, [originalMember]), 428);
 });
 
 test('revision hashing preserves team-member ordering', () => {

@@ -18,6 +18,7 @@ import { normalizeGlobeLightAppearance } from './src/data/globeAppearance';
 import { isSafePublicDestination } from './src/data/publicLinks';
 import { normalizeTeamUrl } from './src/data/teamLinks';
 import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
+import { validateOptionalMentorSectionCopy } from './src/data/teamMentorContent';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
 import {
   type AdminRecoveryGeneration,
@@ -43,7 +44,7 @@ import {
 import {
   revokeSupabaseRefreshTokensWithAccessToken,
 } from './server/supabaseAuthSessions';
-import { matchesTeamRevision, teamContentRevision } from './server/teamRevision';
+import { teamContentRevision, teamRevisionConflictStatus } from './server/teamRevision';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import {
   resolveAdminOwnerConfiguration,
@@ -2176,6 +2177,7 @@ function validateBlogPost(value: unknown): ManagedBlogPost | undefined {
 type TeamGroup = 'mentor' | 'core';
 interface TeamMember {
   id: string; group: TeamGroup; name: string; role: string; tag?: string; bio: string;
+  overview?: string; vision?: string; insight?: string;
   imageUrl: string; socialUrl: string; order: number; visible: boolean;
 }
 
@@ -2876,11 +2878,20 @@ function validateTeam(body: unknown): { members?: TeamMember[]; message?: string
     if (typeof m.role !== 'string' || !m.role.trim() || m.role.length > 100) return { message: `${label} needs a role (max 100 characters).` };
     if (typeof m.bio !== 'string' || m.bio.length > 320) return { message: `${label}: bio must be 320 characters or fewer.` };
     if (m.tag !== undefined && (typeof m.tag !== 'string' || m.tag.length > 40)) return { message: `${label}: expertise tag is too long.` };
+    const overview = validateOptionalMentorSectionCopy(m.overview);
+    const vision = validateOptionalMentorSectionCopy(m.vision);
+    const insight = validateOptionalMentorSectionCopy(m.insight);
+    if (!overview.valid || !vision.valid || !insight.valid) {
+      return { message: `${label}: mentor section content must be text no longer than 2000 characters.` };
+    }
     const socialUrl = normalizeTeamUrl(m.socialUrl);
     if (socialUrl === null) return { message: `${label}: enter a valid HTTP or HTTPS LinkedIn or portfolio URL.` };
     if (!isSupportedTeamPhotoReference(m.imageUrl)) return { message: `${label}: photo must be empty, an uploaded image or an https link.` };
     members.push({
       id: m.id, group: m.group, name: m.name.trim(), role: m.role.trim(), tag: (m.tag ?? '').trim(), bio: m.bio.trim(),
+      ...(m.group === 'mentor' && overview.value !== undefined ? { overview: overview.value } : {}),
+      ...(m.group === 'mentor' && vision.value !== undefined ? { vision: vision.value } : {}),
+      ...(m.group === 'mentor' && insight.value !== undefined ? { insight: insight.value } : {}),
       imageUrl: m.imageUrl, socialUrl, order: Number.isFinite(m.order) ? Math.max(0, Math.trunc(m.order as number)) : 0,
       visible: m.visible !== false,
     });
@@ -8732,12 +8743,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       await withTeamMutation(async () => {
         const currentMembers = await readTeam();
         const expectedRevision = req.get('If-Match');
-        if (!expectedRevision) {
-          res.status(428).json({ message: 'The team revision is missing. Reload the page before saving.' });
-          return;
-        }
-        if (!matchesTeamRevision(expectedRevision, currentMembers)) {
-          res.status(409).json({ message: 'Another administrator saved newer team content. Your edits are still here, but reload the latest team content before saving again.' });
+        const conflictStatus = teamRevisionConflictStatus(expectedRevision, currentMembers);
+        if (conflictStatus) {
+          res.status(conflictStatus).json({
+            message: conflictStatus === 428
+              ? 'The team revision is missing. Reload the page before saving.'
+              : 'Another administrator saved newer team content. Your edits are still here, but reload the latest team content before saving again.',
+          });
           return;
         }
         await writeTeam(members);
