@@ -51,6 +51,25 @@ test('consecutive saves accept the latest revision and reject the previous one',
   assert.equal(teamRevisionConflictStatus(firstRevision, secondSave), 409);
 });
 
+test('Core Team photo settings participate in revisions and survive repeated save payloads', () => {
+  const firstSave = [{
+    ...originalMember,
+    photoSettings: { fit: 'contain', zoom: 100, positionX: 50, positionY: 50, background: 'blurred' },
+  }];
+  const firstRevision = teamContentRevision(firstSave);
+  const secondSave = [{
+    ...firstSave[0],
+    photoSettings: { ...firstSave[0].photoSettings, fit: 'cover', zoom: 145, positionX: 28 },
+  }];
+  const secondRevision = teamContentRevision(secondSave);
+  const reloaded = jsonbLikeRoundTrip(secondSave);
+
+  assert.notEqual(firstRevision, secondRevision);
+  assert.equal(matchesTeamRevision(secondRevision, reloaded), true);
+  assert.equal(teamRevisionConflictStatus(firstRevision, secondSave), 409);
+  assert.deepEqual((reloaded as typeof secondSave)[0].photoSettings, secondSave[0].photoSettings);
+});
+
 test('a missing revision is rejected without weakening optimistic concurrency', () => {
   assert.equal(teamRevisionConflictStatus(undefined, [originalMember]), 428);
 });

@@ -1,5 +1,6 @@
 import seed from './team.seed.json';
 import { teamUrlKind } from './teamLinks';
+import type { TeamPhotoSettingsInput } from './teamPhotoAdjustments';
 
 export type TeamGroup = 'mentor' | 'core';
 
@@ -13,6 +14,7 @@ export interface TeamMember {
   overview?: string;
   vision?: string;
   insight?: string;
+  photoSettings?: TeamPhotoSettingsInput;
   imageUrl: string;
   socialUrl: string;
   order: number;

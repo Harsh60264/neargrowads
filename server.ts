@@ -18,6 +18,7 @@ import { normalizeGlobeLightAppearance } from './src/data/globeAppearance';
 import { isSafePublicDestination } from './src/data/publicLinks';
 import { normalizeTeamUrl } from './src/data/teamLinks';
 import { isSupportedTeamPhotoReference } from './src/data/teamPhoto';
+import { validateTeamPhotoSettings, type TeamPhotoSettingsInput } from './src/data/teamPhotoAdjustments';
 import { validateOptionalMentorSectionCopy } from './src/data/teamMentorContent';
 import { normalizeCatalogueCategoryName, publicCataloguePackages, serviceCatalogueSlug, uniqueServiceCatalogueSlug, validServiceCatalogueSlug } from './src/data/serviceCatalogueCategories';
 import {
@@ -2178,6 +2179,7 @@ type TeamGroup = 'mentor' | 'core';
 interface TeamMember {
   id: string; group: TeamGroup; name: string; role: string; tag?: string; bio: string;
   overview?: string; vision?: string; insight?: string;
+  photoSettings?: TeamPhotoSettingsInput;
   imageUrl: string; socialUrl: string; order: number; visible: boolean;
 }
 
@@ -2884,6 +2886,10 @@ function validateTeam(body: unknown): { members?: TeamMember[]; message?: string
     if (!overview.valid || !vision.valid || !insight.valid) {
       return { message: `${label}: mentor section content must be text no longer than 2000 characters.` };
     }
+    const photoSettings = validateTeamPhotoSettings(m.photoSettings);
+    if (!photoSettings.valid || (m.photoSettings !== undefined && m.group !== 'core')) {
+      return { message: `${label}: image adjustments are only supported for Core Team profiles and must use valid settings.` };
+    }
     const socialUrl = normalizeTeamUrl(m.socialUrl);
     if (socialUrl === null) return { message: `${label}: enter a valid HTTP or HTTPS LinkedIn or portfolio URL.` };
     if (!isSupportedTeamPhotoReference(m.imageUrl)) return { message: `${label}: photo must be empty, an uploaded image or an https link.` };
@@ -2892,6 +2898,7 @@ function validateTeam(body: unknown): { members?: TeamMember[]; message?: string
       ...(m.group === 'mentor' && overview.value !== undefined ? { overview: overview.value } : {}),
       ...(m.group === 'mentor' && vision.value !== undefined ? { vision: vision.value } : {}),
       ...(m.group === 'mentor' && insight.value !== undefined ? { insight: insight.value } : {}),
+      ...(m.group === 'core' && photoSettings.value ? { photoSettings: photoSettings.value } : {}),
       imageUrl: m.imageUrl, socialUrl, order: Number.isFinite(m.order) ? Math.max(0, Math.trunc(m.order as number)) : 0,
       visible: m.visible !== false,
     });

@@ -4,6 +4,7 @@ import { TEAM_SEED, initials, sortTeam, type TeamGroup, type TeamMember } from '
 import { normalizeTeamUrl } from '../../data/teamLinks';
 import { isSupportedTeamPhotoReference } from '../../data/teamPhoto';
 import { uploadAdminMedia } from './uploadAdminMedia';
+import { TeamPhotoAdjustmentControls } from './TeamPhotoAdjustmentControls';
 
 interface Props {
   onBack: () => void;
@@ -47,11 +48,11 @@ function requestError(error: unknown): string {
   return error instanceof Error ? error.message : 'The team request could not be completed.';
 }
 
-/** Downscale phone photos to ≤ 900px (long edge) WebP before upload; falls back to the original file. */
+/** Downscale oversized team photos to ≤ 1500px (long edge) WebP when smaller; otherwise keep the original. */
 async function prepareImage(file: File): Promise<Blob> {
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 900 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 1500 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
@@ -419,9 +420,23 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
                       {selectedUpload?.status === 'failed' && retryFilesRef.current.has(selected.id) && canChangeSelected && <button type="button" onClick={() => { void upload(selected.id, retryFilesRef.current.get(selected.id)); }} className="block text-xs font-semibold text-emerald-400 underline underline-offset-2">Retry upload</button>}
                       {photoErrors[selected.id] && <p className="text-xs font-semibold text-rose-400">{photoErrors[selected.id]}</p>}
                       {(selected.imageUrl || selectedUpload?.status === 'uploading') && canChangeSelected && <button type="button" onClick={() => { cancelUpload(selected.id); patch(selected.id, { imageUrl: '' }); }} className={`block text-xs font-semibold ${muted} hover:text-rose-600`}>{selectedUpload?.status === 'uploading' ? 'Cancel upload and remove photo' : 'Remove photo'}</button>}
-                      <p className={`text-[11px] ${muted}`}>Portrait 4:5, JPG/JPEG/PNG/WebP up to 15 MB. Resized automatically.</p>
+                      <p className={`max-w-md text-[11px] leading-5 ${muted}`}>
+                        Recommended: 4:5 portrait, 1200 × 1500 px (minimum 800 × 1000 px). JPG, PNG or WebP; maximum 15 MB. These dimensions are recommendations, not upload requirements. Large images are resized automatically.
+                      </p>
                     </div>
                   </div>
+
+                  {selected.group === 'core' && (
+                    <TeamPhotoAdjustmentControls
+                      src={previewUrlsRef.current.get(selected.id) || selected.imageUrl}
+                      name={selected.name}
+                      role={selected.role}
+                      bio={selected.bio}
+                      value={selected.photoSettings}
+                      disabled={!canChangeSelected}
+                      onChange={(photoSettings) => patch(selected.id, { photoSettings })}
+                    />
+                  )}
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div><label className={label} htmlFor="t-name">Full name</label><input id="t-name" disabled={!canChangeSelected} className={field} maxLength={80} value={selected.name} onChange={(e) => patch(selected.id, { name: e.target.value })} /></div>

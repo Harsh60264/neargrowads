@@ -36,6 +36,8 @@ test('expanded Core Team photos preserve their natural framing without image zoo
   assert.match(frameStyles, /overflow:\s*hidden/);
   assert.match(section, /src=\{member\.imageUrl\}[\s\S]*?alt=""/);
   assert.match(section, /alt=""[\s\S]*?onError=\{\(\) => setFailed\(true\)\}/);
+  assert.match(section, /normalizeTeamPhotoSettings\(member\.photoSettings\)/);
+  assert.match(section, /data-background-style=\{photoSettings\?\.background\}/);
   assert.match(styles, /html\[data-theme='light'\][\s\S]*?\.ng-core-photo-frame\s*\{\s*background-color:\s*#123D2B/s);
   assert.match(styles, /@media\s*\(max-width:\s*1023px\)[\s\S]*?\.ng-core-accordion-item\.is-active \.ng-core-photo-frame\s*\{[^}]*width:\s*86px;[^}]*height:\s*108px/s);
   assert.match(styles, /@media\s*\(max-width:\s*480px\)[\s\S]*?\.ng-core-accordion-item\.is-active \.ng-core-photo-frame\s*\{[^}]*width:\s*72px;[^}]*height:\s*94px/s);
