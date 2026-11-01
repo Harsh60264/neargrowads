@@ -289,18 +289,26 @@ test('recovery callback failures ask for a new recovery email, not invitation se
   assert.match(callback.error || '', /password-reset link.*invalid, expired, or already used.*new recovery email/i);
 });
 
-test('only recovery-mode GET invitation-context checks bypass CMS-session middleware', () => {
+test('only invite and recovery GET invitation-context checks bypass CMS-session middleware', () => {
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const middlewareStart = serverSource.indexOf("const authExemptPaths = ['/login'");
   const middlewareEnd = serverSource.indexOf('try {', middlewareStart);
   const middleware = serverSource.slice(middlewareStart, middlewareEnd);
+  const authenticationFallbackStart = serverSource.indexOf(
+    'const identity = await authenticateAdminSession(req);',
+    middlewareEnd,
+  );
+  const authenticationFallbackEnd = serverSource.indexOf('res.locals.adminIdentity = identity;', authenticationFallbackStart);
+  const authenticationFallback = serverSource.slice(authenticationFallbackStart, authenticationFallbackEnd);
   const contextStart = serverSource.indexOf("app.get('/api/admin/auth/invitation-context'");
   const contextEnd = serverSource.indexOf("app.post('/api/admin/auth/recovery'", contextStart);
   const contextRoute = serverSource.slice(contextStart, contextEnd);
   const authActionSource = readFileSync(new URL('../src/components/admin/AdminAuthAction.tsx', import.meta.url), 'utf8');
 
-  assert.match(middleware, /req\.method === 'GET'[\s\S]*?req\.path === '\/auth\/invitation-context'[\s\S]*?req\.query\.mode === 'recovery'/);
-  assert.match(middleware, /authExemptPaths\.includes\(req\.path\) \|\| isRecoveryContextCheck/);
+  assert.match(middleware, /const authExemptPaths = \['\/login', '\/session', '\/activity', '\/logout', '\/auth\/recovery', '\/auth\/complete'\]/);
+  assert.match(middleware, /const isInvitationContextCheck = req\.method === 'GET'[\s\S]*?req\.path === '\/auth\/invitation-context'[\s\S]*?\(req\.query\.mode === 'invite' \|\| req\.query\.mode === 'recovery'\)/);
+  assert.match(middleware, /authExemptPaths\.includes\(req\.path\) \|\| isInvitationContextCheck/);
+  assert.match(authenticationFallback, /const identity = await authenticateAdminSession\(req\);[\s\S]*?if \(!identity\) \{[\s\S]*?status\(401\)/);
   assert.match(authActionSource, /new URLSearchParams\(\{ mode \}\)/);
   assert.match(contextRoute, /authenticateAdminSession\(req\)/);
   assert.match(contextRoute, /hasActiveAdminSession:\s*Boolean\(identity\)/);
