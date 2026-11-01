@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
 import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
+import { getTeamPhotoImageStyle, normalizeTeamPhotoSettings } from '../../data/teamPhotoAdjustments';
 import { resolveMentorSectionContent } from '../../data/teamMentorContent';
 import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
 import { cycleMentorIds, getMentorStackLayer, MAX_VISIBLE_MENTOR_STACK_LAYERS, promoteMentor } from './mentorStackLayout';
@@ -15,12 +16,14 @@ const LinkedInGlyph = ({ className = 'h-4 w-4' }: { className?: string }) => (
 );
 
 /** Photo with graceful fallback to a branded initials tile (no image set, or image fails to load). */
-function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,6vw,2.75rem)]' }: { member: TeamMember; className?: string; ratio: { w: number; h: number }; initialsClass?: string }) {
+function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,6vw,2.75rem)]', decorativeBackdrop = false }: { member: TeamMember; className?: string; ratio: { w: number; h: number }; initialsClass?: string; decorativeBackdrop?: boolean }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [member.imageUrl]);
+  const photoSettings = decorativeBackdrop ? normalizeTeamPhotoSettings(member.photoSettings) : undefined;
+  const photoStyle = photoSettings ? getTeamPhotoImageStyle(photoSettings) : undefined;
 
   if (member.imageUrl && !failed) {
-    return (
+    const image = (
       <img
         src={member.imageUrl}
         alt={`Portrait of ${member.name}`}
@@ -29,8 +32,35 @@ function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,
         loading="lazy"
         decoding="async"
         onError={() => setFailed(true)}
-        className={`object-cover ${className ?? ''}`}
+        className={`${decorativeBackdrop ? '' : 'object-cover'} ${className ?? ''}`}
+        style={photoStyle}
       />
+    );
+
+    if (decorativeBackdrop) {
+      return (
+        <div className="ng-core-photo-frame" data-background-style={photoSettings?.background}>
+          {photoSettings?.background === 'blurred' && (
+            <img
+              src={member.imageUrl}
+              alt=""
+              aria-hidden="true"
+              width={ratio.w}
+              height={ratio.h}
+              loading="lazy"
+              decoding="async"
+              onError={() => setFailed(true)}
+              className="ng-core-photo-backdrop"
+              style={{ objectPosition: `${photoSettings.positionX}% ${photoSettings.positionY}%` }}
+            />
+          )}
+          {image}
+        </div>
+      );
+    }
+
+    return (
+      image
     );
   }
   return (
@@ -168,6 +198,7 @@ function CoreAccordionCard({
             ratio={{ w: 720, h: 960 }}
             initialsClass="text-5xl"
             className="ng-core-photo"
+            decorativeBackdrop
           />
           <div className="ng-core-copy">
             <h4>{member.name}</h4>
@@ -719,6 +750,7 @@ export function LeadershipTeamSection() {
                           ratio={{ w: 720, h: 960 }}
                           initialsClass="text-6xl"
                           className="ng-core-carousel-photo"
+                          decorativeBackdrop
                         />
                         <div aria-hidden="true" className="ng-core-carousel-gradient" />
                         <div className="ng-core-carousel-copy">

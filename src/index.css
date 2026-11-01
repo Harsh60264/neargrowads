@@ -2195,22 +2195,38 @@ html[data-theme='light'] .ng-global-reach-fallback {
   transform: scale(1);
 }
 
+.ng-core-photo-frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: #071426;
+}
+
+.ng-core-photo-backdrop {
+  position: absolute;
+  inset: -5%;
+  width: 110%;
+  height: 110%;
+  border: 0;
+  object-fit: cover;
+  object-position: center;
+  filter: blur(18px) brightness(0.42);
+  transform: scale(1.04);
+}
+
 .ng-core-photo {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
-  background-color: #071426;
-  object-fit: cover;
-  opacity: 0.58;
-  transform: scale(1.08);
-  transition: opacity 600ms ease, transform 700ms var(--ng-core-ease);
+  object-fit: contain;
+  object-position: center;
 }
 
-.ng-core-accordion-item.is-active .ng-core-photo {
-  opacity: 0.72;
-  transform: scale(1.015);
+.ng-core-photo-frame .ng-core-photo {
+  border: 0;
+  border-radius: inherit;
 }
 
 .ng-core-copy {
@@ -2390,13 +2406,22 @@ html[data-theme='light'] .ng-global-reach-fallback {
     height: 108px;
     border: 1px solid rgba(103, 216, 183, 0.28);
     border-radius: 12px;
-    opacity: 0.86;
-    transform: scale(1);
   }
 
-  .ng-core-accordion-item.is-active .ng-core-photo {
-    opacity: 0.92;
-    transform: scale(1);
+  .ng-core-accordion-item.is-active .ng-core-photo-frame {
+    position: relative;
+    inset: auto;
+    width: 86px;
+    height: 108px;
+    border: 1px solid rgba(103, 216, 183, 0.28);
+    border-radius: 12px;
+  }
+
+  .ng-core-photo-frame .ng-core-photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
   }
 
   .ng-core-copy {
@@ -2472,6 +2497,11 @@ html[data-theme='light'] .ng-global-reach-fallback {
   }
 
   .ng-core-photo {
+    width: 72px;
+    height: 94px;
+  }
+
+  .ng-core-accordion-item.is-active .ng-core-photo-frame {
     width: 72px;
     height: 94px;
   }
@@ -2557,9 +2587,8 @@ html[data-theme='light'] .ng-global-reach-fallback {
     width: 100%;
     height: 100%;
     border: 0;
-    background-color: #071426;
-    object-fit: cover;
-    object-position: center 30%;
+    object-fit: contain;
+    object-position: center;
   }
 
   .ng-core-carousel-gradient {
@@ -7286,6 +7315,10 @@ html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .
   border-color: var(--brand-green-deep);
   background: linear-gradient(145deg, #164C35, #123D2B 72%, #0D3021);
   box-shadow: 0 12px 30px rgba(18, 61, 43, 0.2);
+}
+
+html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-photo-frame {
+  background-color: #123D2B;
 }
 
 html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-compact-name {
