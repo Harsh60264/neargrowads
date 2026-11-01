@@ -1175,6 +1175,12 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   gap: 2rem;
 }
 
+.ng-mentor-stack-stage.is-stack {
+  position: relative;
+  min-width: 0;
+  height: 640px;
+}
+
 .ng-mentor-details {
   min-width: 0;
   border: 1px solid rgba(103, 216, 183, 0.18);
@@ -1317,10 +1323,10 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   .ng-mentor-carousel.is-stack {
     --cycle-interval: 5000ms;
     --flick-duration: 540ms;
-    --stack-offset: clamp(30px, 4.8vw, 42px);
+    --stack-offset: clamp(16px, 3vw, 36px);
     position: relative;
     display: block;
-    height: 620px;
+    height: 100%;
     margin: 0;
     padding: 0;
     gap: 0;
@@ -1330,7 +1336,7 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   .ng-mentor-carousel.is-stack > li {
     position: absolute;
     top: 50%;
-    left: 44%;
+    left: 36%;
     width: clamp(220px, 24vw, 260px);
     height: auto;
     transform-origin: center;
@@ -1373,6 +1379,12 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
     opacity: 0.5;
     filter: blur(1.8px) brightness(0.66) saturate(0.74);
     transform: translate(-50%, -50%) translate(calc(var(--stack-offset) * 2.8), -50px) rotate(9deg) scale(0.91);
+  }
+
+  .ng-mentor-carousel.is-stack > li[data-stack-position="3"] ~ li[data-stack-position="3"] {
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .ng-mentor-carousel.is-stack > li[data-stack-position="0"] {
@@ -1418,7 +1430,14 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
 
 @media (min-width: 1200px) {
   .ng-mentor-carousel.is-stack > li {
+    left: 44%;
     width: clamp(280px, 21vw, 320px);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .ng-mentor-carousel.is-stack > li {
+    left: 44%;
   }
 }
 
@@ -1431,6 +1450,10 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
     display: grid;
     height: auto;
     overflow: visible;
+  }
+
+  .ng-mentor-stack-stage.is-stack {
+    height: auto;
   }
 
   .ng-mentor-carousel.is-stack > li {
@@ -2078,20 +2101,12 @@ html[data-theme='light'] .ng-global-reach-fallback {
   display: grid;
   width: 100%;
   height: 100%;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr) 16px;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
   opacity: 1;
   transition: opacity 220ms ease, visibility 220ms ease;
-}
-
-.ng-core-compact-index {
-  display: none;
-  color: rgba(245, 166, 35, 0.82);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
 }
 
 .ng-core-compact-initials {
@@ -2130,13 +2145,6 @@ html[data-theme='light'] .ng-global-reach-fallback {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ng-core-compact-index {
-  grid-column: 3;
-  grid-row: 1;
-  align-self: center;
-  padding: 0;
 }
 
 .ng-core-compact-initials {
@@ -2219,16 +2227,9 @@ html[data-theme='light'] .ng-global-reach-fallback {
   pointer-events: none;
 }
 
-.ng-core-detail-index {
-  color: #67D8B7;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-}
-
 .ng-core-copy h4 {
   max-width: 100%;
-  margin: 8px 0 0;
+  margin: 0;
   color: #fff;
   font-size: clamp(16px, 1.45vw, 21px);
   font-weight: 800;
@@ -2336,17 +2337,7 @@ html[data-theme='light'] .ng-global-reach-fallback {
     flex-direction: column;
     justify-content: center;
     gap: 17px;
-    padding: 42px 8px 18px;
-  }
-
-  .ng-core-compact-index {
-    position: absolute;
-    top: 18px;
-    left: 50%;
-    display: block;
-    color: rgba(245, 166, 35, 0.8);
-    font-size: 9px;
-    transform: translateX(-50%);
+    padding: 18px 8px;
   }
 
   .ng-core-compact-initials {
@@ -2489,11 +2480,6 @@ html[data-theme='light'] .ng-global-reach-fallback {
     padding-right: 0;
   }
 
-  .ng-core-detail-index {
-    font-size: 8px;
-    letter-spacing: 0.12em;
-  }
-
   .ng-core-copy h4 {
     font-size: 14px;
   }
@@ -2588,17 +2574,12 @@ html[data-theme='light'] .ng-global-reach-fallback {
     right: 0;
     bottom: 0;
     left: 0;
-    padding: 56px 20px 22px;
+    padding: 40px 20px 22px;
     pointer-events: none;
   }
 
-  .ng-core-carousel-copy .ng-core-detail-index {
-    font-size: 8px;
-    letter-spacing: 0.13em;
-  }
-
   .ng-core-carousel-copy h4 {
-    margin: 7px 0 0;
+    margin: 0;
     color: #fff;
     font-size: 19px;
     font-weight: 800;
@@ -7313,10 +7294,6 @@ html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .
 
 html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-compact-role {
   color: var(--brand-text-muted);
-}
-
-html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-compact-index {
-  color: #B56A00;
 }
 
 html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-compact-initials {

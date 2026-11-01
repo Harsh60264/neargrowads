@@ -10,6 +10,9 @@ export interface TeamMember {
   role: string;
   tag?: string;
   bio: string;
+  overview?: string;
+  vision?: string;
+  insight?: string;
   imageUrl: string;
   socialUrl: string;
   order: number;

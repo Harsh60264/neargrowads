@@ -19,3 +19,11 @@ export function teamContentRevision(value: unknown): string {
 export function matchesTeamRevision(expectedRevision: string, currentMembers: unknown): boolean {
   return expectedRevision === teamContentRevision(currentMembers);
 }
+
+export function teamRevisionConflictStatus(
+  expectedRevision: string | undefined,
+  currentMembers: unknown,
+): 428 | 409 | undefined {
+  if (!expectedRevision) return 428;
+  return matchesTeamRevision(expectedRevision, currentMembers) ? undefined : 409;
+}

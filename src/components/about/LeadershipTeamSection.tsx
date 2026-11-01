@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react';
 import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember } from '../../data/teamData';
 import { normalizeTeamUrl } from '../../data/teamLinks';
+import { resolveMentorSectionContent } from '../../data/teamMentorContent';
 import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
+import { cycleMentorIds, getMentorStackLayer, MAX_VISIBLE_MENTOR_STACK_LAYERS, promoteMentor } from './mentorStackLayout';
 
 /* ---------- small primitives ---------- */
 
@@ -121,33 +123,12 @@ function MentorCard({ member, active }: { member: TeamMember; active: boolean })
   );
 }
 
-const mentorDetails: Record<string, { vision: string; insight: string }> = {
-  'mentor-01': {
-    vision: 'Make cross-border growth more intentional by pairing the right channels with messaging that feels local.',
-    insight: 'A strong expansion plan starts with understanding the audience in each market.',
-  },
-  'mentor-02': {
-    vision: 'Help growing teams build dependable technical foundations that support secure, sustainable delivery.',
-    insight: 'Reliable architecture gives ambitious teams room to scale with confidence.',
-  },
-  'mentor-03': {
-    vision: 'Turn search and measurement into a clearer view of performance across regions and languages.',
-    insight: 'Useful measurement connects what audiences search for with the decisions teams make next.',
-  },
-  'mentor-04': {
-    vision: 'Help brands move into new markets with focused go-to-market plans and purposeful partnerships.',
-    insight: 'The best next market is the one where a clear opportunity meets a practical route to reach it.',
-  },
-};
-
 function CoreAccordionCard({
   member,
-  index,
   active,
   onActivate,
 }: {
   member: TeamMember;
-  index: number;
   active: boolean;
   onActivate: (id: string) => void;
 }) {
@@ -174,7 +155,6 @@ function CoreAccordionCard({
           onFocus={() => onActivate(member.id)}
         >
           <span className="ng-core-compact" aria-hidden="true">
-            <span className="ng-core-compact-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="ng-core-compact-initials">{initials(member.name)}</span>
             <span className="ng-core-compact-name">{member.name}</span>
             <span className="ng-core-compact-role">{member.role}</span>
@@ -190,7 +170,6 @@ function CoreAccordionCard({
             className="ng-core-photo"
           />
           <div className="ng-core-copy">
-            <span className="ng-core-detail-index">NEARGROW ADS · {String(index + 1).padStart(2, '0')}</span>
             <h4>{member.name}</h4>
             <p className="ng-core-role">{member.role}</p>
             <span className="ng-core-accent-line" aria-hidden="true" />
@@ -221,11 +200,12 @@ export function LeadershipTeamSection() {
   const [interactionPaused, setInteractionPaused] = useState(false);
   const [mentorCarouselVisible, setMentorCarouselVisible] = useState(false);
   const [mentorOrder, setMentorOrder] = useState<string[]>(() => sortTeam(TEAM_SEED.filter((m) => m.visible && m.group === 'mentor')).map((m) => m.id));
+  const [selectedMentorId, setSelectedMentorId] = useState('');
   const [flickingMentorId, setFlickingMentorId] = useState<string | null>(null);
   const coreSectionRef = useRef<HTMLDivElement>(null);
   const mentorCarouselRef = useRef<HTMLUListElement>(null);
   const mentorOrderRef = useRef(mentorOrder);
-  const cycleMentorsRef = useRef<(direction: 1 | -1) => void>(() => {});
+  const cycleMentorsRef = useRef<(direction: 1 | -1) => boolean>(() => false);
   const coreCarouselContainerRef = useRef<HTMLDivElement>(null);
   const coreCarouselRef = useRef<HTMLUListElement>(null);
   const virtualIndexRef = useRef(1);
@@ -257,8 +237,10 @@ export function LeadershipTeamSection() {
     if (!mentorOrder.includes(member.id)) orderedMentors.push(member);
   });
   const displayMentors = isMentorStack ? orderedMentors : mentors;
-  const activeMentor = displayMentors[0] ?? mentors[0];
-  const activeMentorDetails = activeMentor ? mentorDetails[activeMentor.id] : undefined;
+  const activeMentor = (isMentorStack
+    ? displayMentors[0]
+    : mentors.find((member) => member.id === selectedMentorId)) ?? mentors[0];
+  const activeMentorDetails = activeMentor ? resolveMentorSectionContent(activeMentor) : undefined;
   const core = members.filter((m) => m.group === 'core');
   const coreSignature = core.map((member) => member.id).join('|');
   const selectedCoreId = core.some((member) => member.id === activeCoreId) ? activeCoreId : core[0]?.id;
@@ -486,22 +468,49 @@ export function LeadershipTeamSection() {
     mentorOrderRef.current = mentorOrder;
   }, [mentorOrder]);
 
-  const cycleMentors = (direction: 1 | -1) => {
+  const cycleMentors = (direction: 1 | -1, manual = false): boolean => {
     const current = mentorOrderRef.current;
-    if (current.length < 2 || mentorTransitioningRef.current) return;
+    if (current.length < 2 || mentorTransitioningRef.current) return false;
     const now = performance.now();
-    if (!canAdvanceMentor(now, mentorLastTransitionAtRef.current)) return;
-    const next = direction === 1
-      ? [...current.slice(1), current[0]]
-      : [current[current.length - 1], ...current.slice(0, -1)];
+    if (!manual && !canAdvanceMentor(now, mentorLastTransitionAtRef.current)) return false;
+    const next = cycleMentorIds(current, direction);
     mentorLastTransitionAtRef.current = now;
     mentorTransitioningRef.current = direction === 1;
     if (direction === 1) setFlickingMentorId(current[0]);
     else setFlickingMentorId(null);
     mentorOrderRef.current = next;
     setMentorOrder(next);
+    return true;
   };
   cycleMentorsRef.current = cycleMentors;
+
+  const focusMentorCard = (memberId: string) => {
+    window.requestAnimationFrame(() => {
+      const cards = mentorCarouselRef.current?.querySelectorAll<HTMLLIElement>('[data-mentor-id]');
+      Array.from(cards ?? []).find((card) => card.dataset.mentorId === memberId)?.focus();
+    });
+  };
+
+  const activateMentor = (memberId: string) => {
+    const current = mentorOrderRef.current;
+    if (isMentorStack && current[0] === memberId) {
+      const nextMentorId = current[1];
+      if (nextMentorId && cycleMentors(1, true)) focusMentorCard(nextMentorId);
+      return;
+    }
+    selectMentor(memberId);
+  };
+
+  const selectMentor = (memberId: string) => {
+    setSelectedMentorId(memberId);
+    if (!isMentorStack) return;
+    const next = promoteMentor(mentorOrderRef.current, memberId);
+    if (next === mentorOrderRef.current) return;
+    mentorTransitioningRef.current = false;
+    setFlickingMentorId(null);
+    mentorOrderRef.current = next;
+    setMentorOrder(next);
+  };
 
   const handleMentorAnimationEnd = (event: AnimationEvent<HTMLLIElement>, memberId: string) => {
     if (event.animationName === 'ng-mentor-flick-out') {
@@ -511,9 +520,24 @@ export function LeadershipTeamSection() {
   };
 
   const handleMentorKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    if (!isMentorStack || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    if (isMentorStack && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      const direction = event.key === 'ArrowRight' ? 1 : -1;
+      const current = mentorOrderRef.current;
+      const nextMentorId = direction === 1
+        ? current[1]
+        : current[current.length - 1];
+      if (nextMentorId && cycleMentors(direction, true)) focusMentorCard(nextMentorId);
+      return;
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('a, button, select')) return;
+    const item = target.closest<HTMLLIElement>('[data-mentor-id]');
+    const memberId = item?.dataset.mentorId;
+    if (!memberId) return;
     event.preventDefault();
-    cycleMentors(event.key === 'ArrowRight' ? 1 : -1);
+    activateMentor(memberId);
   };
 
   useEffect(() => {
@@ -584,44 +608,61 @@ export function LeadershipTeamSection() {
           <div className="mb-16">
             <SubHeading eyebrow="Strategic Mentors" title="Experienced voices behind our strategy" />
             <div className="ng-mentor-feature">
-              <ul
-                ref={mentorCarouselRef}
-                className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
-                aria-label="Strategic mentors"
-                onKeyDown={isMentorStack ? handleMentorKeyDown : undefined}
-              >
-                {displayMentors.map((m, index) => (
-                  <li
-                    key={m.id}
-                    className={`group min-w-0${m.id === flickingMentorId ? ' is-flicking' : ''}`}
-                    data-stack-position={isMentorStack ? index : undefined}
-                    aria-current={isMentorStack && index === 0 ? 'true' : undefined}
-                    tabIndex={isMentorStack ? 0 : undefined}
-                    onAnimationEnd={isMentorStack ? (event) => handleMentorAnimationEnd(event, m.id) : undefined}
-                  >
-                    <MentorCard member={m} active={!isMentorStack || index === 0} />
-                  </li>
-                ))}
-              </ul>
+              <div className={`ng-mentor-stack-stage${isMentorStack ? ' is-stack' : ''}`}>
+                <ul
+                  ref={mentorCarouselRef}
+                  className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
+                  aria-label="Strategic mentors"
+                  aria-describedby={isMentorStack ? 'ng-mentor-keyboard-hint' : undefined}
+                  onKeyDown={handleMentorKeyDown}
+                >
+                  {displayMentors.map((m, index) => (
+                    <li
+                      key={m.id}
+                      className={`group min-w-0${m.id === flickingMentorId ? ' is-flicking' : ''}`}
+                      data-mentor-id={m.id}
+                      data-stack-position={isMentorStack ? getMentorStackLayer(index) : undefined}
+                      aria-current={(isMentorStack ? index === 0 : m.id === activeMentor?.id) ? 'true' : undefined}
+                      aria-label={`Select ${m.name}`}
+                      aria-hidden={isMentorStack && index >= MAX_VISIBLE_MENTOR_STACK_LAYERS ? true : undefined}
+                      aria-keyshortcuts={isMentorStack ? 'ArrowLeft ArrowRight Enter Space' : 'Enter Space'}
+                      tabIndex={isMentorStack ? (index < MAX_VISIBLE_MENTOR_STACK_LAYERS ? 0 : -1) : 0}
+                      style={isMentorStack ? { zIndex: displayMentors.length - index + 10 } : undefined}
+                      onClick={(event) => {
+                        if (event.target instanceof Element && event.target.closest('a, button')) return;
+                        activateMentor(m.id);
+                      }}
+                      onAnimationEnd={isMentorStack ? (event) => handleMentorAnimationEnd(event, m.id) : undefined}
+                    >
+                      <MentorCard member={m} active={!isMentorStack || index === 0} />
+                    </li>
+                  ))}
+                </ul>
+                {isMentorStack && (
+                  <p id="ng-mentor-keyboard-hint" className="sr-only">
+                    Focus a visible mentor card and use the left or right arrow keys to browse all mentors. Press Enter or Space to select a card. Activating the front card advances to the next mentor.
+                  </p>
+                )}
+              </div>
               {activeMentor && (
                 <aside className="ng-mentor-details" aria-labelledby="ng-mentor-details-title">
                   <div key={activeMentor.id} className="ng-mentor-details-content">
                     <span className="ng-mentor-details-eyebrow">Mentor profile</span>
                     <span className="ng-mentor-details-tag">{activeMentor.tag || 'Strategic Mentor'}</span>
-                    <h3 id="ng-mentor-details-title">{activeMentor.name}</h3>
+                    <h3 id="ng-mentor-details-title" aria-live="polite" aria-atomic="true">{activeMentor.name}</h3>
                     <p className="ng-mentor-details-role">{activeMentor.role}</p>
                     <div className="ng-mentor-details-divider" aria-hidden="true" />
                     <div className="ng-mentor-details-block">
                       <h4>Overview</h4>
-                      <p>{activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.overview || 'Profile overview coming soon.'}</p>
                     </div>
                     <div className="ng-mentor-details-block">
                       <h4>Our vision &amp; purpose</h4>
-                      <p>{activeMentorDetails?.vision ?? activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.vision || 'Purpose information coming soon.'}</p>
                     </div>
                     <blockquote className="ng-mentor-insight">
                       <span>Mentor insight</span>
-                      <p>{activeMentorDetails?.insight ?? activeMentor.bio}</p>
+                      <p>{activeMentorDetails?.insight || 'A mentor insight will be shared soon.'}</p>
                     </blockquote>
                   </div>
                 </aside>
@@ -681,7 +722,6 @@ export function LeadershipTeamSection() {
                         />
                         <div aria-hidden="true" className="ng-core-carousel-gradient" />
                         <div className="ng-core-carousel-copy">
-                          <span className="ng-core-detail-index">NEARGROW ADS · {String(index + 1).padStart(2, '0')}</span>
                           <h4>{member.name}</h4>
                           <p>{member.role}</p>
                         </div>
@@ -695,11 +735,10 @@ export function LeadershipTeamSection() {
               </ul>
             </div>
             <ul className="ng-core-accordion" aria-label="Core team members">
-              {core.map((member, index) => (
+              {core.map((member) => (
                 <CoreAccordionCard
                   key={member.id}
                   member={member}
-                  index={index}
                   active={member.id === selectedCoreId}
                   onActivate={setActiveCoreId}
                 />
