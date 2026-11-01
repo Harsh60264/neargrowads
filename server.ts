@@ -347,6 +347,10 @@ function validateWebsiteServiceImageVariants(value: unknown): ThemeImageVariants
       }
       variant.url = item.url;
     }
+    if (item.backgroundImageRemoved !== undefined) {
+      if (typeof item.backgroundImageRemoved !== 'boolean') return undefined;
+      variant.backgroundImageRemoved = item.backgroundImageRemoved;
+    }
     if (item.altText !== undefined) {
       if (typeof item.altText !== 'string' || item.altText.length > 300) return undefined;
       variant.altText = item.altText.trim();

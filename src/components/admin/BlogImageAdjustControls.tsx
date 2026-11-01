@@ -1,8 +1,14 @@
-import { useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent } from 'react';
 import {
   BLOG_ARTICLE_IMAGE_ASPECT_RATIO,
   BLOG_IMAGE_CONTROL_LABELS,
+  createBlogImageAdjustmentDraft,
+  getBlogImageAdjustmentStyle,
+  getBlogImagePanOverflow,
+  hasBlogImageCropFrame,
   normalizeBlogImageAdjustment,
+  serializeBlogImageAdjustment,
+  type BlogImageEditMode,
   type BlogImageAdjustment,
 } from '../../data/blogImageAdjustments';
 
@@ -15,18 +21,28 @@ interface Props {
 }
 
 export function BlogImageAdjustControls({ src, alt, value, defaultFit, onChange }: Props) {
-  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [editMode, setEditMode] = useState<BlogImageEditMode | null>(null);
+  const [draft, setDraft] = useState(() => normalizeBlogImageAdjustment(value, defaultFit));
+  const previewId = useId();
   const frameRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const dragStart = useRef<{ pointerX: number; pointerY: number; positionX: number; positionY: number } | null>(null);
-  const adjustment = normalizeBlogImageAdjustment(value, defaultFit);
+  useEffect(() => {
+    if (editMode === null) setDraft(normalizeBlogImageAdjustment(value, defaultFit));
+  }, [defaultFit, editMode, value]);
 
-  const update = (patch: Partial<BlogImageAdjustment>) => onChange({
-    imageSize: adjustment.fit,
-    imagePositionX: adjustment.positionX,
-    imagePositionY: adjustment.positionY,
-    imageZoom: adjustment.zoom,
-    ...patch,
-  });
+  const adjustment = editMode === null ? normalizeBlogImageAdjustment(value, defaultFit) : draft;
+  const hasCropFrame = hasBlogImageCropFrame(adjustment);
+  const imageStyle = getBlogImageAdjustmentStyle(adjustment);
+
+  const update = (patch: Partial<BlogImageAdjustment>) => setDraft((current) =>
+    normalizeBlogImageAdjustment({
+      imageSize: current.fit,
+      imagePositionX: current.positionX,
+      imagePositionY: current.positionY,
+      imageZoom: current.zoom,
+      ...patch,
+    }, defaultFit));
 
   const startPan = (event: PointerEvent<HTMLDivElement>) => {
     if (adjustment.fit !== 'cover') return;
@@ -42,55 +58,87 @@ export function BlogImageAdjustControls({ src, alt, value, defaultFit, onChange 
   const pan = (event: PointerEvent<HTMLDivElement>) => {
     const start = dragStart.current;
     const frame = frameRef.current;
-    if (!start || !frame) return;
+    const image = imageRef.current;
+    if (!start || !frame || !image?.naturalWidth || !image.naturalHeight) return;
     const bounds = frame.getBoundingClientRect();
+    const overflow = getBlogImagePanOverflow(
+      bounds.width,
+      bounds.height,
+      image.naturalWidth,
+      image.naturalHeight,
+      adjustment.zoom,
+    );
     update({
-      imagePositionX: Math.max(0, Math.min(100, start.positionX - ((event.clientX - start.pointerX) / bounds.width) * 100)),
-      imagePositionY: Math.max(0, Math.min(100, start.positionY - ((event.clientY - start.pointerY) / bounds.height) * 100)),
+      ...(overflow.x > 0 ? {
+        imagePositionX: Math.max(0, Math.min(100, start.positionX - ((event.clientX - start.pointerX) / overflow.x) * 100)),
+      } : {}),
+      ...(overflow.y > 0 ? {
+        imagePositionY: Math.max(0, Math.min(100, start.positionY - ((event.clientY - start.pointerY) / overflow.y) * 100)),
+      } : {}),
     });
   };
 
-  const reset = () => onChange({
-    imageSize: defaultFit,
-    imagePositionX: 50,
-    imagePositionY: 50,
-    imageZoom: 100,
-  });
+  const cancel = () => {
+    setDraft(normalizeBlogImageAdjustment(value, defaultFit));
+    setEditMode(null);
+  };
+
+  const apply = () => {
+    onChange(serializeBlogImageAdjustment(draft));
+    setEditMode(null);
+  };
 
   return (
     <div className="mt-3 space-y-3 rounded-xl border border-[#304135] bg-[#101713] p-3" data-testid="blog-image-adjust-controls">
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          aria-pressed={adjustment.fit === 'cover'}
-          onClick={() => update({ imageSize: 'cover' })}
+          aria-pressed={editMode === 'crop'}
+          aria-expanded={editMode !== null}
+          aria-controls={previewId}
+          onClick={() => {
+            setDraft(createBlogImageAdjustmentDraft(value, defaultFit, 'crop'));
+            setEditMode('crop');
+          }}
           className="rounded-lg border border-[#405248] px-3 py-2 text-xs font-semibold text-[#EAF1EB] hover:border-[#67D8B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
         >
           {BLOG_IMAGE_CONTROL_LABELS.crop}
         </button>
         <button
           type="button"
-          aria-expanded={adjustOpen}
-          onClick={() => setAdjustOpen((open) => !open)}
+          aria-pressed={editMode === 'adjust'}
+          aria-expanded={editMode !== null}
+          aria-controls={previewId}
+          onClick={() => {
+            if (editMode === 'adjust') {
+              cancel();
+              return;
+            }
+            if (editMode === null) setDraft(createBlogImageAdjustmentDraft(value, defaultFit, 'adjust'));
+            setEditMode('adjust');
+          }}
           className="rounded-lg border border-[#405248] px-3 py-2 text-xs font-semibold text-[#EAF1EB] hover:border-[#67D8B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
         >
           {BLOG_IMAGE_CONTROL_LABELS.adjust}
         </button>
         <button
           type="button"
-          onClick={reset}
+          onClick={() => {
+            setDraft(createBlogImageAdjustmentDraft(undefined, defaultFit, editMode ?? 'adjust'));
+            setEditMode((current) => current ?? 'adjust');
+          }}
           className="rounded-lg px-3 py-2 text-xs font-semibold text-[#A9B8AD] hover:bg-[#26372B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67D8B7]"
         >
           {BLOG_IMAGE_CONTROL_LABELS.reset}
         </button>
       </div>
-      {adjustOpen && (
-        <div className="space-y-3">
+      {editMode !== null && (
+        <div id={previewId} className="space-y-3" data-adjustment-mode={editMode}>
           {src && (
             <div
               ref={frameRef}
-              className={`relative mx-auto w-full max-w-xl overflow-hidden rounded-lg bg-black/30 ${adjustment.fit === 'cover' ? 'touch-none cursor-grab active:cursor-grabbing' : ''}`}
-              style={adjustment.fit === 'cover' ? { aspectRatio: BLOG_ARTICLE_IMAGE_ASPECT_RATIO } : undefined}
+              className={`relative mx-auto flex w-full max-w-xl justify-center overflow-hidden rounded-lg bg-black/30 ${adjustment.fit === 'cover' ? 'touch-none cursor-grab active:cursor-grabbing' : ''}`}
+              style={hasCropFrame ? { aspectRatio: BLOG_ARTICLE_IMAGE_ASPECT_RATIO } : undefined}
               onPointerDown={startPan}
               onPointerMove={pan}
               onPointerUp={() => { dragStart.current = null; }}
@@ -98,25 +146,30 @@ export function BlogImageAdjustControls({ src, alt, value, defaultFit, onChange 
               aria-label={adjustment.fit === 'cover' ? 'Drag image to reposition crop' : 'Image fit preview'}
             >
               <img
+                ref={imageRef}
                 src={src}
                 alt={alt}
                 draggable={false}
-                className={adjustment.fit === 'cover' ? 'absolute inset-0 h-full w-full select-none' : 'block h-auto w-full select-none'}
-                style={{
-                  objectFit: adjustment.fit,
-                  objectPosition: `${adjustment.positionX}% ${adjustment.positionY}%`,
-                  transform: `scale(${adjustment.zoom / 100})`,
-                  transformOrigin: `${adjustment.positionX}% ${adjustment.positionY}%`,
-                }}
+                className={hasCropFrame
+                  ? 'absolute inset-0 h-full w-full select-none'
+                  : 'block h-auto w-auto max-w-full select-none'}
+                style={imageStyle}
               />
             </div>
           )}
+          <p className="text-[11px] leading-5 text-[#A9B8AD]">
+            Drag the crop to reposition it. Changes are staged until you apply them; cancel discards them.
+          </p>
           <label className="block text-xs text-[#B8C7BC]">
             Fit mode
             <select
               aria-label="Image fit mode"
               value={adjustment.fit}
-              onChange={(event) => update({ imageSize: event.target.value as 'cover' | 'contain' })}
+              onChange={(event) => {
+                if (event.target.value === 'cover' || event.target.value === 'contain') {
+                  update({ imageSize: event.target.value });
+                }
+              }}
               className="mt-1 w-full rounded-lg border border-[#405248] bg-[#19241D] px-3 py-2 text-[#EAF1EB]"
             >
               <option value="cover">Cover · crop to fill</option>
@@ -163,6 +216,14 @@ export function BlogImageAdjustControls({ src, alt, value, defaultFit, onChange 
                 className="mt-2 block w-full accent-[#67D8B7]"
               />
             </label>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-[#304135] pt-3">
+            <button type="button" onClick={cancel} className="rounded-lg border border-[#405248] px-3 py-2 text-xs font-semibold text-[#A9B8AD] hover:bg-[#26372B]">
+              Cancel
+            </button>
+            <button type="button" onClick={apply} className="rounded-lg bg-[#286D3B] px-3 py-2 text-xs font-semibold text-white hover:bg-[#347E49]">
+              {editMode === 'crop' ? 'Apply crop' : 'Apply adjustments'}
+            </button>
           </div>
         </div>
       )}

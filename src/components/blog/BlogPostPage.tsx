@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveBlogImage, type BlogPost } from '../../data/blogData';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { ArrowLeft, ArrowRight, Calendar, Check, ChevronRight, Clock, Copy, ListTree, Share2, User } from 'lucide-react';
-import { blogImageMarker, sanitizeBlogHtml } from '../../utils/blogRichText';
+import { blogImageMarker, renderBlogInlineImage, sanitizeBlogHtml } from '../../utils/blogRichText';
 import { BLOG_FEATURED_IMAGE_CLASS_NAME } from './blogImagePresentation';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
-import { normalizeBlogImageAdjustment } from '../../data/blogImageAdjustments';
+import { getBlogImageAdjustmentStyle, normalizeBlogImageAdjustment } from '../../data/blogImageAdjustments';
 
 interface BlogPostPageProps {
   post: BlogPost;
@@ -101,14 +101,12 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
     [post.contentSections],
   );
   const inlineImages = post.inlineImages || [];
+  const featuredImageStyle = getBlogImageAdjustmentStyle(featuredImageAdjustment);
   const placedImage = (sectionId: string | undefined, placement: 'before-heading' | 'after-heading' | 'section-end') =>
     inlineImages.filter((image) => image.sectionId === sectionId && image.placement === placement);
   const renderPlacedImages = (images: typeof inlineImages) => images.map((image, index) => image.id
     ? <div key={image.id} style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: sanitizeBlogHtml(blogImageMarker(image.id), inlineImages, theme) }} />
-    : <figure key={`${image.url}-${index}`} data-blog-image-index={inlineImages.indexOf(image)} className="overflow-hidden rounded-2xl border border-white/10 bg-[#0D1724]">
-      <img src={resolveBlogImage(image.url, image.altText, image.imageVariants, theme).image.url} alt={resolveBlogImage(image.url, image.altText, image.imageVariants, theme).image.altText ?? ''} loading="lazy" className="max-h-[620px] w-full object-cover" />
-      {image.caption && <figcaption className="px-4 py-3 text-center text-xs leading-5 text-white/55 sm:px-6">{image.caption}</figcaption>}
-    </figure>);
+    : <div key={`${image.url}-${index}`} style={{ margin: 0 }} dangerouslySetInnerHTML={{ __html: renderBlogInlineImage(image, theme, inlineImages.indexOf(image)) }} />);
 
   useEffect(() => {
     let frame = 0;
@@ -275,12 +273,7 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
             alt={featuredImage.altText ?? ''}
             fetchPriority="high"
             className={BLOG_FEATURED_IMAGE_CLASS_NAME}
-            style={{
-              objectFit: featuredImageAdjustment.fit,
-              objectPosition: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
-              transform: `scale(${featuredImageAdjustment.zoom / 100})`,
-              transformOrigin: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
-            }}
+            style={featuredImageStyle}
           />
         </div>
       )}
@@ -310,7 +303,8 @@ export const BlogPostPage = ({ post, onNavigate, theme, previewEditing }: BlogPo
           onClick={(event) => {
             if (!previewEditing || !(event.target instanceof HTMLElement)) return;
             const image = event.target.closest<HTMLElement>('[data-blog-image-id], [data-blog-image-index]');
-            const selectedId = image?.dataset.blogImageId || (image?.dataset.blogImageIndex ? `legacy:${image.dataset.blogImageIndex}` : '');
+            const legacyIndex = image?.dataset.blogImageIndex;
+            const selectedId = image?.dataset.blogImageId || (legacyIndex !== undefined ? `legacy:${legacyIndex}` : '');
             if (selectedId) {
               event.preventDefault();
               previewEditing.onSelectImage(selectedId);

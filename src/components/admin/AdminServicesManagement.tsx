@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ImageThemeTabs } from './ImageThemeTabs';
-import { resolveThemeImage, type PublicImageTheme, type ThemeImageFields } from '../../data/themeImages';
+import { type PublicImageTheme, type ThemeImageFields } from '../../data/themeImages';
 import { ArrowDown, ArrowUp, Check, Eye, LoaderCircle, Plus, Save, Send, Trash2, Upload, X } from 'lucide-react';
-import type { WebsiteService } from '../../data/websiteServices';
+import { removeWebsiteServiceImageVariant, resolveWebsiteServiceImage, type WebsiteService } from '../../data/websiteServices';
 import { uploadAdminMedia } from './uploadAdminMedia';
 
 type ServiceDraft = Omit<WebsiteService, 'id' | 'status' | 'hasUnpublishedChanges'> & {
@@ -56,19 +56,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function PreviewCard({ service, theme }: { service: ServiceDraft; theme: PublicImageTheme }) {
-  const resolvedImage = resolveThemeImage(
-    {
-      url: service.backgroundImageUrl,
-      altText: '',
-      backgroundEnabled: service.backgroundEnabled,
-      backgroundFit: service.backgroundFit,
-      backgroundOpacity: service.backgroundOpacity,
-      backgroundPositionX: service.backgroundPositionX,
-      backgroundPositionY: service.backgroundPositionY,
-    },
-    service.backgroundImageVariants,
-    theme,
-  ).image;
+  const resolvedImage = resolveWebsiteServiceImage(service, theme);
   const image = resolvedImage.backgroundEnabled && resolvedImage.url;
   return (
     <article
@@ -168,19 +156,7 @@ export function AdminServicesManagement({ canCreate, canEdit, canDelete, canPubl
     setError('');
     setNotice('');
   };
-  const resolvedBackground = editing ? resolveThemeImage(
-    {
-      url: editing.backgroundImageUrl,
-      altText: '',
-      backgroundEnabled: editing.backgroundEnabled,
-      backgroundFit: editing.backgroundFit,
-      backgroundOpacity: editing.backgroundOpacity,
-      backgroundPositionX: editing.backgroundPositionX,
-      backgroundPositionY: editing.backgroundPositionY,
-    },
-    editing.backgroundImageVariants,
-    imageTheme,
-  ) : null;
+  const resolvedBackground = editing ? resolveWebsiteServiceImage(editing, imageTheme) : null;
   const updateBackgroundVariant = (patch: Partial<ThemeImageFields>) => {
     if (!editing) return;
     update({
@@ -300,7 +276,12 @@ export function AdminServicesManagement({ canCreate, canEdit, canDelete, canPubl
       update({
         backgroundImageVariants: {
           ...editing.backgroundImageVariants,
-          [theme]: { ...editing.backgroundImageVariants?.[theme], url: result.url },
+          [theme]: {
+            ...editing.backgroundImageVariants?.[theme],
+            url: result.url,
+            backgroundEnabled: true,
+            backgroundImageRemoved: false,
+          },
         },
       });
       setNotice('Background image uploaded. Save the draft and publish to display it publicly.');
@@ -408,20 +389,20 @@ export function AdminServicesManagement({ canCreate, canEdit, canDelete, canPubl
                 <h3 className="text-sm font-semibold">Individual background image</h3>
                 <p className="text-xs text-[#819087]">JPG, PNG or WebP up to 15 MB. Transparent PNG/WebP remains transparent. Image changes are private until saved and published.</p>
                 <ImageThemeTabs theme={imageTheme} source={resolvedBackground?.source ?? 'empty'} onChange={setImageTheme} />
-                {resolvedBackground?.image.url && <img src={resolvedBackground.image.url} alt={resolvedBackground.image.altText ?? ''} className="aspect-video w-full rounded-xl object-cover" style={{ objectFit: resolvedBackground.image.backgroundFit, objectPosition: `${resolvedBackground.image.backgroundPositionX}% ${resolvedBackground.image.backgroundPositionY}%`, opacity: (resolvedBackground.image.backgroundOpacity ?? 100) / 100 }} />}
+                {resolvedBackground?.url && <img src={resolvedBackground.url} alt={resolvedBackground.altText ?? ''} className="aspect-video w-full rounded-xl object-cover" style={{ objectFit: resolvedBackground.backgroundFit, objectPosition: `${resolvedBackground.backgroundPositionX}% ${resolvedBackground.backgroundPositionY}%`, opacity: (resolvedBackground.backgroundOpacity ?? 100) / 100 }} />}
                 <div className="flex flex-wrap gap-2">
                   <label className={`${buttonClass} cursor-pointer`}>
-                    {uploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{editing.backgroundImageVariants?.[imageTheme]?.url ? 'Replace image' : `Upload ${imageTheme === 'light' ? 'Light' : 'Dark'} Mode image`}
+                    {uploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{resolvedBackground?.url ? 'Replace image' : `Upload ${imageTheme === 'light' ? 'Light' : 'Dark'} Mode image`}
                     <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" disabled={!canChangeDraft || !editing.id || saving || uploading} onChange={(event) => { void uploadImage(event.currentTarget.files?.[0], imageTheme); event.currentTarget.value = ''; }} />
                   </label>
-                  {editing.backgroundImageVariants?.[imageTheme]?.url && <button type="button" disabled={!canChangeDraft || saving || uploading} onClick={() => updateBackgroundVariant({ url: '' })} className={`${secondaryButtonClass} admin-services-remove-image`}><Trash2 className="h-4 w-4" />Remove {imageTheme === 'light' ? 'Light' : 'Dark'} Mode image</button>}
+                  {resolvedBackground?.url && <button type="button" disabled={!canChangeDraft || saving || uploading} onClick={() => update({ backgroundImageVariants: removeWebsiteServiceImageVariant(editing.backgroundImageVariants, imageTheme) })} className={`${secondaryButtonClass} admin-services-remove-image`}><Trash2 className="h-4 w-4" />Remove {imageTheme === 'light' ? 'Light' : 'Dark'} Mode image</button>}
                 </div>
                 {!editing.id && <p className="text-[11px] text-amber-200">Save this service as a draft before uploading its image.</p>}
-                <label className="flex items-center justify-between gap-3 text-xs font-medium text-[#B8C7BC]">Enable background image<input type="checkbox" checked={resolvedBackground?.image.backgroundEnabled ?? false} disabled={!canChangeDraft || saving || !resolvedBackground?.image.url} onChange={(event) => updateBackgroundVariant({ backgroundEnabled: event.target.checked })} className="h-5 w-5 accent-[#72D28B]" /></label>
-                {resolvedBackground?.image.backgroundEnabled && <>
-                  <label className={labelClass}>Image Fit<select className={inputClass} disabled={!canChangeDraft || saving} value={resolvedBackground.image.backgroundFit ?? 'cover'} onChange={(event) => updateBackgroundVariant({ backgroundFit: event.target.value as 'cover' | 'contain' })}><option value="cover">Cover</option><option value="contain">Contain</option></select></label>
-                  <label className={`${labelClass} flex justify-between`}>Background opacity <span>{resolvedBackground.image.backgroundOpacity ?? 100}%</span><input className="mt-2 w-full accent-[#72D28B]" type="range" min="0" max="100" value={resolvedBackground.image.backgroundOpacity ?? 100} disabled={!canChangeDraft || saving} onChange={(event) => updateBackgroundVariant({ backgroundOpacity: Number(event.target.value) })} /></label>
-                  <div className="grid gap-3 sm:grid-cols-2">{([['backgroundPositionX', 'Horizontal position'], ['backgroundPositionY', 'Vertical position']] as const).map(([key, label]) => <label key={key} className={`${labelClass} flex justify-between`}>{label}<span>{resolvedBackground.image[key] ?? 50}%</span><input className="mt-2 w-full accent-[#72D28B]" type="range" min="0" max="100" value={resolvedBackground.image[key] ?? 50} disabled={!canChangeDraft || saving} onChange={(event) => updateBackgroundVariant({ [key]: Number(event.target.value) })} /></label>)}</div>
+                <label className="flex items-center justify-between gap-3 text-xs font-medium text-[#B8C7BC]">Enable background image<input type="checkbox" checked={resolvedBackground?.backgroundEnabled ?? false} disabled={!canChangeDraft || saving || !resolvedBackground?.url} onChange={(event) => updateBackgroundVariant({ backgroundEnabled: event.target.checked })} className="h-5 w-5 accent-[#72D28B]" /></label>
+                {resolvedBackground?.backgroundEnabled && <>
+                  <label className={labelClass}>Image Fit<select className={inputClass} disabled={!canChangeDraft || saving} value={resolvedBackground.backgroundFit ?? 'cover'} onChange={(event) => updateBackgroundVariant({ backgroundFit: event.target.value as 'cover' | 'contain' })}><option value="cover">Cover</option><option value="contain">Contain</option></select></label>
+                  <label className={`${labelClass} flex justify-between`}>Background opacity <span>{resolvedBackground.backgroundOpacity ?? 100}%</span><input className="mt-2 w-full accent-[#72D28B]" type="range" min="0" max="100" value={resolvedBackground.backgroundOpacity ?? 100} disabled={!canChangeDraft || saving} onChange={(event) => updateBackgroundVariant({ backgroundOpacity: Number(event.target.value) })} /></label>
+                  <div className="grid gap-3 sm:grid-cols-2">{([['backgroundPositionX', 'Horizontal position'], ['backgroundPositionY', 'Vertical position']] as const).map(([key, label]) => <label key={key} className={`${labelClass} flex justify-between`}>{label}<span>{resolvedBackground[key] ?? 50}%</span><input className="mt-2 w-full accent-[#72D28B]" type="range" min="0" max="100" value={resolvedBackground[key] ?? 50} disabled={!canChangeDraft || saving} onChange={(event) => updateBackgroundVariant({ [key]: Number(event.target.value) })} /></label>)}</div>
                 </>}
               </section>
               <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Live card preview</h3><button type="button" onClick={() => setShowPreview((value) => !value)} className={secondaryButtonClass}><Eye className="h-4 w-4" />{showPreview ? 'Hide preview' : 'Preview changes'}</button></div>
