@@ -1,7 +1,11 @@
 import { resolveBlogImage, type BlogPost } from '../data/blogData';
 import type { PublicImageTheme } from '../data/themeImages';
 import { isSupportedBlogImageWidth } from '../data/blogImagePlacement';
-import { normalizeBlogImageAdjustment } from '../data/blogImageAdjustments';
+import {
+  getBlogImageAdjustmentStyle,
+  hasBlogImageCropFrame,
+  normalizeBlogImageAdjustment,
+} from '../data/blogImageAdjustments';
 
 const allowedTags = new Set([
   'a', 'b', 'blockquote', 'br', 'caption', 'code', 'del', 'div', 'em', 'figure', 'figcaption', 'h2', 'h3', 'h4',
@@ -166,7 +170,7 @@ export function sanitizeBlogHtml(value: string, inlineImages?: InlineImage[], th
   return Array.from(document.body.childNodes).map(serialize).join('');
 }
 
-export function renderBlogInlineImage(image: InlineImage, theme: PublicImageTheme): string {
+export function renderBlogInlineImage(image: InlineImage, theme: PublicImageTheme, imageIndex?: number): string {
   const resolved = resolveBlogImage(image.url, image.altText, image.imageVariants, theme).image;
   if (!safeImageSource(resolved.url)) return '';
   const width = isSupportedBlogImageWidth(image.width)
@@ -175,6 +179,8 @@ export function renderBlogInlineImage(image: InlineImage, theme: PublicImageThem
   const alignment = image.alignment || 'center';
   const layout = image.layout || 'standalone';
   const adjustment = normalizeBlogImageAdjustment(resolved, 'contain');
+  const hasCropFrame = hasBlogImageCropFrame(adjustment);
+  const adjustmentStyle = getBlogImageAdjustmentStyle(adjustment);
   const above = Number.isInteger(image.spacingAbove) ? Math.max(0, Math.min(120, image.spacingAbove!)) : 16;
   const below = Number.isInteger(image.spacingBelow) ? Math.max(0, Math.min(120, image.spacingBelow!)) : 16;
   const flow = layout === 'wrap-left' ? 'float:left;margin-right:1rem' : layout === 'wrap-right' ? 'float:right;margin-left:1rem' : '';
@@ -183,11 +189,9 @@ export function renderBlogInlineImage(image: InlineImage, theme: PublicImageThem
       : alignment === 'right' ? 'margin-left:auto;margin-right:0'
         : 'margin-left:auto;margin-right:auto'
     : '';
-  const hasCropFrame = adjustment.fit === 'cover' || adjustment.zoom > 100 ||
-    adjustment.positionX !== 50 || adjustment.positionY !== 50;
   const figureStyle = `${hasCropFrame ? `width:min(${width},100%)` : `width:fit-content;max-width:min(${width},100%)`};margin-top:${above}px;margin-bottom:${below}px;${flow};${alignMargins}`;
   const imageStyle = hasCropFrame
-    ? `display:block;width:100%;height:100%;object-fit:${adjustment.fit};object-position:${adjustment.positionX}% ${adjustment.positionY}%;transform:scale(${adjustment.zoom / 100});transform-origin:${adjustment.positionX}% ${adjustment.positionY}%`
+    ? `display:block;width:100%;height:100%;object-fit:${adjustmentStyle.objectFit};object-position:${adjustmentStyle.objectPosition};transform:${adjustmentStyle.transform};transform-origin:${adjustmentStyle.transformOrigin}`
     : 'display:block;width:auto;max-width:100%;height:auto;object-fit:contain';
   const imageMarkup = hasCropFrame
     ? `<span class="blog-inline-image-viewport" style="display:block;width:100%;aspect-ratio:16/8;overflow:hidden"><img src="${escapeHtml(resolved.url)}" alt="${escapeHtml(resolved.altText || '')}" loading="lazy" style="${imageStyle}"></span>`
@@ -195,7 +199,10 @@ export function renderBlogInlineImage(image: InlineImage, theme: PublicImageThem
   const caption = image.caption.trim()
     ? `<figcaption class="blog-inline-image-caption">${escapeHtml(image.caption.trim().slice(0, 500))}</figcaption>`
     : '';
-  return `<figure class="blog-inline-image" data-blog-image-id="${escapeHtml(image.id || '')}" style="${figureStyle}">${imageMarkup}${caption}</figure>`;
+  const imageIndexAttribute = typeof imageIndex === 'number' && Number.isInteger(imageIndex) && imageIndex >= 0
+    ? ` data-blog-image-index="${imageIndex}"`
+    : '';
+  return `<figure class="blog-inline-image" data-blog-image-id="${escapeHtml(image.id || '')}"${imageIndexAttribute} style="${figureStyle}">${imageMarkup}${caption}</figure>`;
 }
 
 function markdownInline(value: string): string {

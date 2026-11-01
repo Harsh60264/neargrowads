@@ -3,6 +3,7 @@ export type PublicImageTheme = 'light' | 'dark';
 export interface ThemeImageFields {
   url?: string;
   altText?: string;
+  backgroundImageRemoved?: boolean;
   focalX?: number;
   focalY?: number;
   backgroundEnabled?: boolean;

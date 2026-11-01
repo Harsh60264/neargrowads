@@ -8,7 +8,13 @@ import { blogImageMarker, blogTextToEditorHtml, normalizeBlogTextColor, renderBl
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSupportedBlogImageWidth } from '../../data/blogImagePlacement';
-import { BLOG_ARTICLE_IMAGE_RATIO_HELPER, BLOG_ARTICLE_IMAGE_SIZE_HELPER, normalizeBlogImageAdjustment } from '../../data/blogImageAdjustments';
+import {
+  BLOG_ARTICLE_IMAGE_RATIO_HELPER,
+  BLOG_ARTICLE_IMAGE_SIZE_HELPER,
+  getBlogImageAdjustmentStyle,
+  normalizeBlogImageAdjustment,
+  type BlogImageAdjustment,
+} from '../../data/blogImageAdjustments';
 import { BlogPostPage } from '../blog/BlogPostPage';
 import { BLOG_FEATURED_IMAGE_CLASS_NAME } from '../blog/blogImagePresentation';
 import { BlogImageAdjustControls } from './BlogImageAdjustControls';
@@ -197,10 +203,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     layout: 'standalone' | 'wrap-left' | 'wrap-right';
     spacingAbove: number;
     spacingBelow: number;
-    imageSize: 'cover' | 'contain';
-    imagePositionX: number;
-    imagePositionY: number;
-    imageZoom: number;
+    imageAdjustments: Partial<Record<PublicImageTheme, BlogImageAdjustment>>;
   } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<PublicImageTheme>('dark');
@@ -223,6 +226,15 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
     post.author.imageVariants,
     imageTheme,
   );
+  const imageDialogVariants = (() => {
+    if (!imageDialog) return undefined;
+    const variants = { ...post.inlineImages?.[imageDialog.imageIndex ?? -1]?.imageVariants };
+    for (const theme of ['light', 'dark'] as const) {
+      const adjustment = imageDialog.imageAdjustments[theme];
+      if (adjustment) variants[theme] = { ...variants[theme], ...adjustment };
+    }
+    return variants;
+  })();
   const imageDialogPreview = imageDialog
     ? {
       ...(imageDialog.imageIndex === undefined ? {} : post.inlineImages?.[imageDialog.imageIndex]),
@@ -235,17 +247,17 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: imageDialog.layout,
       spacingAbove: imageDialog.spacingAbove,
       spacingBelow: imageDialog.spacingBelow,
-      imageVariants: {
-        ...post.inlineImages?.[imageDialog.imageIndex ?? -1]?.imageVariants,
-        [imageTheme]: {
-          ...post.inlineImages?.[imageDialog.imageIndex ?? -1]?.imageVariants?.[imageTheme],
-          imageSize: imageDialog.imageSize,
-          imagePositionX: imageDialog.imagePositionX,
-          imagePositionY: imageDialog.imagePositionY,
-          imageZoom: imageDialog.imageZoom,
-        },
-      },
+      imageVariants: imageDialogVariants,
     }
+    : undefined;
+  const imageDialogResolved = imageDialog && imageDialogPreview
+    ? resolveBlogImage(imageDialog.source, imageDialog.altText, imageDialogPreview.imageVariants, imageTheme).image
+    : undefined;
+  const imageDialogAdjustment = imageDialog
+    ? normalizeBlogImageAdjustment({
+      ...imageDialogResolved,
+      ...imageDialog.imageAdjustments[imageTheme],
+    }, 'contain')
     : undefined;
   const imageDialogImage = imageDialog && imageDialogPreview
     ? resolveBlogImage(imageDialog.source, imageDialog.altText, imageDialogPreview.imageVariants, imageTheme).image
@@ -469,10 +481,14 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: image?.layout || 'standalone',
       spacingAbove: image?.spacingAbove ?? 16,
       spacingBelow: image?.spacingBelow ?? 16,
-      imageSize: imageAdjustment.fit,
-      imagePositionX: imageAdjustment.positionX,
-      imagePositionY: imageAdjustment.positionY,
-      imageZoom: imageAdjustment.zoom,
+      imageAdjustments: {
+        [imageTheme]: {
+          imageSize: imageAdjustment.fit,
+          imagePositionX: imageAdjustment.positionX,
+          imagePositionY: imageAdjustment.positionY,
+          imageZoom: imageAdjustment.zoom,
+        },
+      },
     });
   };
 
@@ -618,6 +634,11 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       }
     }
 
+    const imageVariants = { ...currentImage?.imageVariants };
+    for (const theme of ['light', 'dark'] as const) {
+      const adjustment = imageDialog.imageAdjustments[theme];
+      if (adjustment) imageVariants[theme] = { ...imageVariants[theme], ...adjustment };
+    }
     const updatedImage: InlineImage = {
       ...currentImage,
       id,
@@ -633,16 +654,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
       layout: imageDialog.layout,
       spacingAbove: imageDialog.spacingAbove,
       spacingBelow: imageDialog.spacingBelow,
-      imageVariants: {
-        ...currentImage?.imageVariants,
-        [imageTheme]: {
-          ...currentImage?.imageVariants?.[imageTheme],
-          imageSize: imageDialog.imageSize,
-          imagePositionX: imageDialog.imagePositionX,
-          imagePositionY: imageDialog.imagePositionY,
-          imageZoom: imageDialog.imageZoom,
-        },
-      },
+      imageVariants,
     };
     if (imageDialog.imageIndex === undefined) images.push(updatedImage);
     else images[imageDialog.imageIndex] = updatedImage;
@@ -1424,12 +1436,7 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                           src={featuredImagePreview.image.url}
                           alt={featuredImagePreview.image.altText || 'Featured article preview'}
                           className={BLOG_FEATURED_IMAGE_CLASS_NAME}
-                          style={{
-                            objectFit: featuredImageAdjustment.fit,
-                            objectPosition: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
-                            transform: `scale(${featuredImageAdjustment.zoom / 100})`,
-                            transformOrigin: `${featuredImageAdjustment.positionX}% ${featuredImageAdjustment.positionY}%`,
-                          }}
+                          style={getBlogImageAdjustmentStyle(featuredImageAdjustment)}
                         />
                         {post.featuredImageVariants?.[imageTheme]?.url && (
                           <button type="button" onClick={() => setField('featuredImageVariants', {
@@ -1649,13 +1656,16 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                     src={imageDialogImage?.url || imageDialog.source}
                     alt={imageDialogImage?.altText || imageDialog.altText}
                     value={{
-                      imageSize: imageDialog.imageSize,
-                      imagePositionX: imageDialog.imagePositionX,
-                      imagePositionY: imageDialog.imagePositionY,
-                      imageZoom: imageDialog.imageZoom,
+                      imageSize: imageDialogAdjustment?.fit,
+                      imagePositionX: imageDialogAdjustment?.positionX,
+                      imagePositionY: imageDialogAdjustment?.positionY,
+                      imageZoom: imageDialogAdjustment?.zoom,
                     }}
                     defaultFit="contain"
-                    onChange={(adjustment) => setImageDialog((current) => current ? { ...current, ...adjustment } : current)}
+                    onChange={(adjustment) => setImageDialog((current) => current ? {
+                      ...current,
+                      imageAdjustments: { ...current.imageAdjustments, [imageTheme]: adjustment },
+                    } : current)}
                   />
                 )}
 
@@ -1731,6 +1741,9 @@ export function AdminBlogManager({ mode, onBack, onNavigate, canCreate = true, c
                   <input maxLength={500} value={imageDialog.caption} onChange={(event) => setImageDialog((current) => current ? { ...current, caption: event.target.value } : current)} className={field} placeholder="Add an image caption" />
                 </label>
                 {uploadError && <p role="alert" className="text-xs text-rose-300">{uploadError}</p>}
+                <p className="text-[11px] leading-5 text-[#A9B8AD]">
+                  Save image changes applies these settings to the article draft. Then choose Save draft or Publish live to persist the article.
+                </p>
               </div>
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
