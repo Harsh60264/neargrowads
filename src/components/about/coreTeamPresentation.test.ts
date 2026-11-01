@@ -17,3 +17,26 @@ test('public Core Team cards retain names, roles, profile links, and accessible 
   assert.match(section, /aria-label=\{`\$\{index \+ 1\} of \$\{core\.length\}: \$\{member\.name\}, \$\{member\.role\}`\}/);
   assert.match(section, /<SocialLink member=\{member\} variant="icon"/);
 });
+
+test('expanded Core Team photos preserve their natural framing without image zoom', () => {
+  const photoStyles = styles.match(/\.ng-core-photo\s*\{([^}]*)\}/)?.[1] ?? '';
+  const activePhotoStyles = styles.match(/\.ng-core-accordion-item\.is-active \.ng-core-photo\s*\{([^}]*)\}/)?.[1] ?? '';
+
+  assert.match(section, /className="ng-core-photo"/);
+  assert.match(photoStyles, /object-fit:\s*contain/);
+  assert.match(photoStyles, /object-position:\s*center/);
+  assert.match(photoStyles, /background-color:\s*#071426/);
+  assert.doesNotMatch(photoStyles, /transform:\s*scale/);
+  assert.doesNotMatch(activePhotoStyles, /transform:\s*scale/);
+});
+
+test('mobile Core Team carousel contains square and portrait photos without cropping', () => {
+  const carouselPhotoStyles = styles.match(/\.ng-core-carousel-photo\s*\{([^}]*)\}/)?.[1] ?? '';
+
+  assert.match(section, /className="ng-core-carousel-photo"/);
+  assert.match(carouselPhotoStyles, /object-fit:\s*contain/);
+  assert.match(carouselPhotoStyles, /object-position:\s*center/);
+  assert.match(styles, /@media\s*\(max-width:\s*767px\)[\s\S]*?\.ng-core-carousel-card\s*\{[^}]*height:\s*360px/s);
+  assert.match(styles, /@media\s*\(max-width:\s*1023px\)[\s\S]*?\.ng-core-photo\s*\{[^}]*width:\s*86px;[^}]*height:\s*108px/s);
+  assert.match(styles, /@media\s*\(max-width:\s*480px\)[\s\S]*?\.ng-core-photo\s*\{[^}]*width:\s*72px;[^}]*height:\s*94px/s);
+});

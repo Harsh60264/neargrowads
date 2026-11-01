@@ -2202,15 +2202,14 @@ html[data-theme='light'] .ng-global-reach-fallback {
   height: 100%;
   border: 0;
   background-color: #071426;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   opacity: 0.58;
-  transform: scale(1.08);
-  transition: opacity 600ms ease, transform 700ms var(--ng-core-ease);
+  transition: opacity 600ms ease;
 }
 
 .ng-core-accordion-item.is-active .ng-core-photo {
   opacity: 0.72;
-  transform: scale(1.015);
 }
 
 .ng-core-copy {
@@ -2558,8 +2557,8 @@ html[data-theme='light'] .ng-global-reach-fallback {
     height: 100%;
     border: 0;
     background-color: #071426;
-    object-fit: cover;
-    object-position: center 30%;
+    object-fit: contain;
+    object-position: center;
   }
 
   .ng-core-carousel-gradient {
@@ -7286,6 +7285,10 @@ html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .
   border-color: var(--brand-green-deep);
   background: linear-gradient(145deg, #164C35, #123D2B 72%, #0D3021);
   box-shadow: 0 12px 30px rgba(18, 61, 43, 0.2);
+}
+
+html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-photo {
+  background-color: #123D2B;
 }
 
 html[data-theme='light'] [data-public-theme='light'] .about-leadership-section .ng-core-compact-name {
