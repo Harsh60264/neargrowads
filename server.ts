@@ -43,6 +43,7 @@ import {
 import {
   revokeSupabaseRefreshTokensWithAccessToken,
 } from './server/supabaseAuthSessions';
+import { matchesTeamRevision, teamContentRevision } from './server/teamRevision';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import {
   resolveAdminOwnerConfiguration,
@@ -8714,7 +8715,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       res.setHeader('Cache-Control', 'no-store');
       const members = await readTeam();
-      const revision = contentRevision(members);
+      const revision = teamContentRevision(members);
       res.setHeader('ETag', revision);
       res.json({ members, revision });
     } catch (err) {
@@ -8731,17 +8732,25 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       await withTeamMutation(async () => {
         const currentMembers = await readTeam();
         const expectedRevision = req.get('If-Match');
-        if (!expectedRevision || expectedRevision !== contentRevision(currentMembers)) {
-          res.status(expectedRevision ? 409 : 428).json({ message: 'Team content changed or the revision is missing. Reload before saving to avoid overwriting newer edits.' });
+        if (!expectedRevision) {
+          res.status(428).json({ message: 'The team revision is missing. Reload the page before saving.' });
+          return;
+        }
+        if (!matchesTeamRevision(expectedRevision, currentMembers)) {
+          res.status(409).json({ message: 'Another administrator saved newer team content. Your edits are still here, but reload the latest team content before saving again.' });
           return;
         }
         await writeTeam(members);
-        const revision = contentRevision(members);
+        const revision = teamContentRevision(members);
         res.setHeader('ETag', revision);
         res.json({ members, revision });
       });
     } catch (err) {
       console.error('[NearGrow Ads] Admin team save error:', err);
+      if (err instanceof CmsDocumentWriteConflictError) {
+        res.status(409).json({ message: 'Another administrator saved newer team content. Your edits are still here, but reload the latest team content before saving again.' });
+        return;
+      }
       res.status(503).json({ message: 'The team could not be saved on the server.' });
     }
   });

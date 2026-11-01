@@ -80,6 +80,7 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
   const [notice, setNotice] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const revisionRef = useRef('');
+  const saveInFlightRef = useRef(false);
   const uploadSequenceRef = useRef(new Map<string, number>());
   const uploadControllersRef = useRef(new Map<string, AbortController>());
   const retryFilesRef = useRef(new Map<string, File>());
@@ -273,8 +274,13 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
   };
 
   const save = async () => {
-    if (saving || members.some((member) => photoUploads[member.id]?.status === 'uploading')) return;
+    if (saveInFlightRef.current || saving || members.some((member) => photoUploads[member.id]?.status === 'uploading')) return;
+    if (!revisionRef.current) {
+      setError('The latest team revision has not been loaded. Reload the page before saving.');
+      return;
+    }
     const submittedVersion = changeVersionRef.current;
+    saveInFlightRef.current = true;
     setSaving(true); setError(''); setErrorProfileId(''); setNotice('');
     try {
       const invalidPhotos = members.filter((member) => !isSupportedTeamPhotoReference(member.imageUrl));
@@ -301,6 +307,9 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
       });
       if (!response.ok) throw new Error(await apiMessage(response));
       const data = await apiData<{ members: TeamMember[]; revision: string }>(response);
+      if (!Array.isArray(data.members) || !data.revision) {
+        throw new Error('The server may have saved the team, but did not confirm the latest revision. Reload before saving again.');
+      }
       revisionRef.current = data.revision;
       setSavedIds(new Set(data.members.map((member) => member.id)));
       if (changeVersionRef.current === submittedVersion) {
@@ -314,6 +323,7 @@ export function AdminTeamManager({ onBack, canCreate = true, canEdit = true, can
     } catch (err) {
       setError(requestError(err));
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
