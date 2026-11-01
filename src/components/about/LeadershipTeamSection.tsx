@@ -15,12 +15,12 @@ const LinkedInGlyph = ({ className = 'h-4 w-4' }: { className?: string }) => (
 );
 
 /** Photo with graceful fallback to a branded initials tile (no image set, or image fails to load). */
-function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,6vw,2.75rem)]' }: { member: TeamMember; className?: string; ratio: { w: number; h: number }; initialsClass?: string }) {
+function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,6vw,2.75rem)]', decorativeBackdrop = false }: { member: TeamMember; className?: string; ratio: { w: number; h: number }; initialsClass?: string; decorativeBackdrop?: boolean }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [member.imageUrl]);
 
   if (member.imageUrl && !failed) {
-    return (
+    const image = (
       <img
         src={member.imageUrl}
         alt={`Portrait of ${member.name}`}
@@ -29,8 +29,31 @@ function Avatar({ member, className, ratio, initialsClass = 'text-[clamp(1.5rem,
         loading="lazy"
         decoding="async"
         onError={() => setFailed(true)}
-        className={`object-cover ${className ?? ''}`}
+        className={`${decorativeBackdrop ? '' : 'object-cover'} ${className ?? ''}`}
       />
+    );
+
+    if (decorativeBackdrop) {
+      return (
+        <div className="ng-core-photo-frame">
+          <img
+            src={member.imageUrl}
+            alt=""
+            aria-hidden="true"
+            width={ratio.w}
+            height={ratio.h}
+            loading="lazy"
+            decoding="async"
+            onError={() => setFailed(true)}
+            className="ng-core-photo-backdrop"
+          />
+          {image}
+        </div>
+      );
+    }
+
+    return (
+      image
     );
   }
   return (
@@ -168,6 +191,7 @@ function CoreAccordionCard({
             ratio={{ w: 720, h: 960 }}
             initialsClass="text-5xl"
             className="ng-core-photo"
+            decorativeBackdrop
           />
           <div className="ng-core-copy">
             <h4>{member.name}</h4>
@@ -719,6 +743,7 @@ export function LeadershipTeamSection() {
                           ratio={{ w: 720, h: 960 }}
                           initialsClass="text-6xl"
                           className="ng-core-carousel-photo"
+                          decorativeBackdrop
                         />
                         <div aria-hidden="true" className="ng-core-carousel-gradient" />
                         <div className="ng-core-carousel-copy">
