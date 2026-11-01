@@ -1175,6 +1175,12 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   gap: 2rem;
 }
 
+.ng-mentor-stack-stage.is-stack {
+  position: relative;
+  min-width: 0;
+  height: 640px;
+}
+
 .ng-mentor-details {
   min-width: 0;
   border: 1px solid rgba(103, 216, 183, 0.18);
@@ -1317,20 +1323,59 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
   .ng-mentor-carousel.is-stack {
     --cycle-interval: 5000ms;
     --flick-duration: 540ms;
-    --stack-offset: clamp(30px, 4.8vw, 42px);
+    --stack-offset: clamp(16px, 3vw, 36px);
     position: relative;
     display: block;
-    height: 620px;
+    height: 100%;
     margin: 0;
     padding: 0;
     gap: 0;
     overflow: visible;
   }
 
+  .ng-mentor-stack-picker {
+    position: absolute;
+    z-index: 60;
+    right: 0;
+    bottom: 8px;
+    left: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .ng-mentor-stack-picker button {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 9999px;
+    background: rgba(11, 16, 20, 0.88);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    font-weight: 700;
+    transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease;
+  }
+
+  .ng-mentor-stack-picker button[aria-pressed="true"] {
+    border-color: #67D8B7;
+    background: #67D8B7;
+    color: #0B1014;
+  }
+
+  .ng-mentor-stack-picker button:focus-visible {
+    outline: 3px solid #67D8B7;
+    outline-offset: 3px;
+  }
+
   .ng-mentor-carousel.is-stack > li {
     position: absolute;
     top: 50%;
-    left: 44%;
+    left: 36%;
     width: clamp(220px, 24vw, 260px);
     height: auto;
     transform-origin: center;
@@ -1373,6 +1418,12 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
     opacity: 0.5;
     filter: blur(1.8px) brightness(0.66) saturate(0.74);
     transform: translate(-50%, -50%) translate(calc(var(--stack-offset) * 2.8), -50px) rotate(9deg) scale(0.91);
+  }
+
+  .ng-mentor-carousel.is-stack > li[data-stack-position="3"] ~ li[data-stack-position="3"] {
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .ng-mentor-carousel.is-stack > li[data-stack-position="0"] {
@@ -1418,7 +1469,14 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
 
 @media (min-width: 1200px) {
   .ng-mentor-carousel.is-stack > li {
+    left: 44%;
     width: clamp(280px, 21vw, 320px);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1199px) {
+  .ng-mentor-carousel.is-stack > li {
+    left: 44%;
   }
 }
 
@@ -1431,6 +1489,10 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
     display: grid;
     height: auto;
     overflow: visible;
+  }
+
+  .ng-mentor-stack-stage.is-stack {
+    height: auto;
   }
 
   .ng-mentor-carousel.is-stack > li {
@@ -1446,6 +1508,7 @@ html[data-theme='dark'] .ng-reveal.ng-revealed {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ng-mentor-stack-picker button { transition: none; }
   .ng-team-card:hover { transform: none; }
 }
 

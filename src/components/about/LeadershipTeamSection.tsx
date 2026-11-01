@@ -4,6 +4,7 @@ import { TEAM_SEED, fetchTeam, initials, socialKind, sortTeam, type TeamMember }
 import { normalizeTeamUrl } from '../../data/teamLinks';
 import { resolveMentorSectionContent } from '../../data/teamMentorContent';
 import { canAdvanceMentor, MENTOR_AUTOPLAY_DWELL_MS, shouldRunMentorAutoplay } from './mentorCarouselTiming';
+import { getMentorStackLayer, MAX_VISIBLE_MENTOR_STACK_LAYERS, promoteMentor } from './mentorStackLayout';
 
 /* ---------- small primitives ---------- */
 
@@ -485,6 +486,15 @@ export function LeadershipTeamSection() {
   };
   cycleMentorsRef.current = cycleMentors;
 
+  const selectMentor = (memberId: string) => {
+    const next = promoteMentor(mentorOrderRef.current, memberId);
+    if (next === mentorOrderRef.current) return;
+    mentorTransitioningRef.current = false;
+    setFlickingMentorId(null);
+    mentorOrderRef.current = next;
+    setMentorOrder(next);
+  };
+
   const handleMentorAnimationEnd = (event: AnimationEvent<HTMLLIElement>, memberId: string) => {
     if (event.animationName === 'ng-mentor-flick-out') {
       mentorTransitioningRef.current = false;
@@ -493,9 +503,20 @@ export function LeadershipTeamSection() {
   };
 
   const handleMentorKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    if (!isMentorStack || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    if (!isMentorStack) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      cycleMentors(event.key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('a, button')) return;
+    const item = target.closest<HTMLLIElement>('[data-mentor-id]');
+    const memberId = item?.dataset.mentorId;
+    if (!memberId) return;
     event.preventDefault();
-    cycleMentors(event.key === 'ArrowRight' ? 1 : -1);
+    selectMentor(memberId);
   };
 
   useEffect(() => {
@@ -566,25 +587,50 @@ export function LeadershipTeamSection() {
           <div className="mb-16">
             <SubHeading eyebrow="Strategic Mentors" title="Experienced voices behind our strategy" />
             <div className="ng-mentor-feature">
-              <ul
-                ref={mentorCarouselRef}
-                className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
-                aria-label="Strategic mentors"
-                onKeyDown={isMentorStack ? handleMentorKeyDown : undefined}
-              >
-                {displayMentors.map((m, index) => (
-                  <li
-                    key={m.id}
-                    className={`group min-w-0${m.id === flickingMentorId ? ' is-flicking' : ''}`}
-                    data-stack-position={isMentorStack ? index : undefined}
-                    aria-current={isMentorStack && index === 0 ? 'true' : undefined}
-                    tabIndex={isMentorStack ? 0 : undefined}
-                    onAnimationEnd={isMentorStack ? (event) => handleMentorAnimationEnd(event, m.id) : undefined}
-                  >
-                    <MentorCard member={m} active={!isMentorStack || index === 0} />
-                  </li>
-                ))}
-              </ul>
+              <div className={`ng-mentor-stack-stage${isMentorStack ? ' is-stack' : ''}`}>
+                <ul
+                  ref={mentorCarouselRef}
+                  className={`ng-mentor-carousel grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-4${isMentorStack ? ' is-stack' : ''}`}
+                  aria-label="Strategic mentors"
+                  onKeyDown={isMentorStack ? handleMentorKeyDown : undefined}
+                >
+                  {displayMentors.map((m, index) => (
+                    <li
+                      key={m.id}
+                      className={`group min-w-0${m.id === flickingMentorId ? ' is-flicking' : ''}`}
+                      data-mentor-id={isMentorStack ? m.id : undefined}
+                      data-stack-position={isMentorStack ? getMentorStackLayer(index) : undefined}
+                      aria-current={isMentorStack && index === 0 ? 'true' : undefined}
+                      aria-label={isMentorStack ? `Select ${m.name}` : undefined}
+                      aria-hidden={isMentorStack && index >= MAX_VISIBLE_MENTOR_STACK_LAYERS ? true : undefined}
+                      tabIndex={isMentorStack ? (index < MAX_VISIBLE_MENTOR_STACK_LAYERS ? 0 : -1) : undefined}
+                      style={isMentorStack ? { zIndex: displayMentors.length - index + 10 } : undefined}
+                      onClick={isMentorStack ? (event) => {
+                        if (event.target instanceof Element && event.target.closest('a, button')) return;
+                        selectMentor(m.id);
+                      } : undefined}
+                      onAnimationEnd={isMentorStack ? (event) => handleMentorAnimationEnd(event, m.id) : undefined}
+                    >
+                      <MentorCard member={m} active={!isMentorStack || index === 0} />
+                    </li>
+                  ))}
+                </ul>
+                {isMentorStack && displayMentors.length > 1 && (
+                  <div className="ng-mentor-stack-picker" role="group" aria-label="Select a strategic mentor">
+                    {displayMentors.map((member, index) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        aria-label={`Show ${member.name}`}
+                        aria-pressed={index === 0}
+                        onClick={() => selectMentor(member.id)}
+                      >
+                        {index + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {activeMentor && (
                 <aside className="ng-mentor-details" aria-labelledby="ng-mentor-details-title">
                   <div key={activeMentor.id} className="ng-mentor-details-content">
