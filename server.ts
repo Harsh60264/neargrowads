@@ -45,6 +45,10 @@ import {
 import {
   revokeSupabaseRefreshTokensWithAccessToken,
 } from './server/supabaseAuthSessions';
+import {
+  decideAdminAuthCleanup,
+  isPermanentDeletionConfirmationValid,
+} from './server/adminPermanentDeletion';
 import { teamContentRevision, teamRevisionConflictStatus } from './server/teamRevision';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import {
@@ -4014,6 +4018,20 @@ async function findSupabaseUserByEmail(email: string): Promise<{ id: string; ema
   throw new Error('The administrator directory is too large to search safely. Add the Auth user before inviting it.');
 }
 
+async function assertAdminEmailNotReserved(email: string): Promise<void> {
+  const query = new URLSearchParams({
+    email: `eq.${email.toLowerCase()}`,
+    select: 'email',
+    limit: '1',
+  });
+  const reservations = await readSupabaseJson<Array<{ email: string }>>(
+    await supabaseAdminRequest(`rest/v1/admin_permanent_deletion_email_reservations?${query}`),
+  );
+  if (reservations.length) {
+    throw new Error('This email is reserved while archived administrator identity cleanup is pending. Retry the pending deletion before inviting it again.');
+  }
+}
+
 async function ensurePrimaryOwnerAccount(): Promise<void> {
   if (!adminConfigIsReady()) {
     console.warn('[NearGrow Ads] Admin access is disabled until Supabase Auth, Supabase database, ADMIN_OWNER_USER_ID, and ADMIN_SESSION_SECRET are configured.');
@@ -5936,11 +5954,29 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     if (!requireOwner(req, res)) return;
     try {
       const query = new URLSearchParams({
-        select: 'id,email,username,role,status,permissions,is_primary_owner,must_change_password,last_login_at,last_password_reset_at,invited_by,created_at,updated_at,archived_at',
+        select: 'id,email,username,role,status,permissions,is_primary_owner,must_change_password,last_login_at,last_password_reset_at,invited_by,created_at,updated_at,archived_at,inviter:admin_identity_history!admin_users_invited_by_fkey(email)',
         order: 'created_at.desc',
         limit: '300',
       });
       const users = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_users?${query}`));
+      const deletionState = await readSupabaseJson<{
+        eligibleUserIds?: string[];
+        pendingDeletions?: Array<{
+          targetId: string;
+          email: string;
+          status: 'auth_delete_pending';
+          startedAt: string;
+          lastAttemptedAt: string;
+          attemptCount: number;
+          lastErrorStage?: string | null;
+          lastErrorCode?: string | null;
+        }>;
+      }>(await supabaseAdminRequest('rest/v1/rpc/get_admin_permanent_deletion_state', {
+        method: 'POST',
+        body: JSON.stringify({ p_actor_id: currentAdmin(res)!.id }),
+      }));
+      const eligibleUserIds = new Set(deletionState.eligibleUserIds ?? []);
+      const pendingDeletionIds = new Set((deletionState.pendingDeletions ?? []).map((deletion) => deletion.targetId));
       const authStatuses: Array<AdminAuthStatus | undefined> = [];
       for (let index = 0; index < users.length; index += 10) {
         const batch = await Promise.all(users.slice(index, index + 10).map((user) =>
@@ -5960,11 +5996,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           permissions: user.permissions || {},
           isPrimaryOwner: user.is_primary_owner === true,
           archivedAt: typeof user.archived_at === 'string' ? user.archived_at : null,
+          permanentlyDeleteEligible: eligibleUserIds.has(String(user.id)),
+          permanentlyDeletePending: pendingDeletionIds.has(String(user.id)),
           mustChangePassword: user.must_change_password === true,
           lastLoginAt: user.last_login_at || null,
           lastPasswordResetAt: user.last_password_reset_at || null,
           invitedBy: user.invited_by,
-          invitedByEmail: userEmailById.get(String(user.invited_by)) || null,
+          invitedByEmail: (user.inviter as { email?: string } | null)?.email ||
+            userEmailById.get(String(user.invited_by)) || null,
           createdAt: user.created_at,
           updatedAt: user.updated_at,
           authIdentityExists: Boolean(authUser),
@@ -5975,13 +6014,15 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           authLastSignInAt: authUser?.last_sign_in_at || null,
           authBannedUntil: authUser?.banned_until || null,
         };
-      }) });
+      }), pendingDeletions: deletionState.pendingDeletions ?? [] });
     } catch (error) {
       console.error('[NearGrow Ads] Admin user list failed:', error);
       res.status(503).json({
         message: error instanceof SupabaseRequestError && /archived_at/i.test(error.providerMessage)
           ? 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql before using administrator archival.'
-          : isMissingAdminAccountManagementSchema(error)
+        : error instanceof SupabaseRequestError && /admin_identity_history|admin_permanent_deletion/i.test(error.providerMessage)
+          ? 'Apply supabase/migrations/20261102100000_secure_archived_admin_permanent_deletion.sql before using permanent administrator deletion.'
+        : isMissingAdminAccountManagementSchema(error)
           ? 'Apply supabase/migrations/20261020000000_admin_account_management.sql before using Settings account management.'
           : 'Administrator records are temporarily unavailable.',
       });
@@ -6026,6 +6067,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let temporaryPasswordExpiry: string | undefined;
     let operationStage = 'admin_count';
     try {
+      operationStage = 'permanent_deletion_reservation_check';
+      await assertAdminEmailNotReserved(email);
       const duplicateQuery = new URLSearchParams({
         email: `eq.${email}`,
         select: 'id,email,username,role,status,is_primary_owner,archived_at',
@@ -6109,6 +6152,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         status = 'pending';
       }
       operationStage = 'admin_record_insert';
+      await assertAdminEmailNotReserved(email);
       const createResponse = await supabaseAdminRequest('rest/v1/admin_users', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
@@ -7094,6 +7138,182 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  app.post('/api/admin/users/:id/permanent-delete', async (req: Request, res: Response): Promise<void> => {
+    if (!requireOwner(req, res)) return;
+    const actor = currentAdmin(res)!;
+    if (actor.role !== 'owner' || !actor.isPrimaryOwner) {
+      res.status(403).json({ message: 'Only the verified Primary Owner can permanently delete an archived administrator.' });
+      return;
+    }
+    if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many administrator deletion attempts. Please wait 15 minutes and try again.')) return;
+    if (!isPermanentDeletionConfirmationValid(
+      typeof req.body?.targetEmail === 'string' ? req.body.targetEmail : '',
+      req.body?.targetEmail,
+      req.body?.confirmation,
+    )) {
+      res.status(400).json({ message: 'Type the target email and DELETE exactly to confirm permanent deletion.' });
+      return;
+    }
+    if (!await reauthenticateAdminRequest(
+      req,
+      res,
+      actor,
+      req.body?.currentPassword,
+      'Re-enter the Primary Owner password to permanently delete this archived administrator.',
+    )) return;
+
+    const targetId = req.params.id;
+    const targetEmail = String(req.body.targetEmail).trim().toLowerCase();
+    let stage: 'auth_lookup' | 'auth_delete' | 'auth_verification' | 'database_finalization' = 'auth_lookup';
+    const recordFailure = async (errorCode: string): Promise<void> => {
+      try {
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(
+          'rest/v1/rpc/record_admin_permanent_deletion_failure',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              p_actor_id: actor.id,
+              p_target_id: targetId,
+              p_stage: stage,
+              p_error_code: errorCode,
+            }),
+          },
+        ));
+      } catch (recordError) {
+        console.error('[NearGrow Ads] Permanent administrator deletion failure state could not be recorded.', {
+          stage,
+          errorName: recordError instanceof Error ? recordError.name : 'UnknownError',
+        });
+      }
+    };
+
+    try {
+      const started = await readSupabaseJson<{ status?: string; email?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/begin_admin_permanent_deletion', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_actor_id: actor.id,
+            p_target_id: targetId,
+            p_target_email: targetEmail,
+            p_confirmation: req.body.confirmation,
+          }),
+        }),
+      );
+      if (started.status === 'already_completed') {
+        res.status(409).json({ message: 'This administrator identity has already been permanently deleted.' });
+        return;
+      }
+      if (started.status !== 'auth_delete_pending' || started.email !== targetEmail) {
+        res.status(409).json({
+          message: started.status === 'email_reserved'
+            ? 'This email is already reserved by another identity-cleanup operation.'
+            : 'This account is not eligible. Only disabled archived or removed non-Owner accounts with no ownership-transfer history can be permanently deleted.',
+        });
+        return;
+      }
+
+      const readCleanupState = async () => {
+        const [authIdentity, emailIdentity] = await Promise.all([
+          readAdminAuthStatus(targetId),
+          findSupabaseUserByEmail(targetEmail),
+        ]);
+        const identityById = authIdentity
+          ? { id: authIdentity.id, email: authIdentity.email || '' }
+          : undefined;
+        const identityByEmail = emailIdentity
+          ? { id: emailIdentity.id, email: emailIdentity.email }
+          : undefined;
+        return {
+          decision: decideAdminAuthCleanup(targetId, targetEmail, identityById, identityByEmail),
+          authIdentityAbsent: !authIdentity,
+          emailIdentityAbsent: !emailIdentity,
+        };
+      };
+
+      stage = 'auth_lookup';
+      let cleanupState = await readCleanupState();
+      if (cleanupState.decision === 'identity-conflict') {
+        await recordFailure('auth_identity_mismatch');
+        res.status(409).json({
+          message: 'The target Auth identity does not match the archived account, or another Auth identity now uses this email. The email remains reserved; review the pending deletion before retrying.',
+        });
+        return;
+      }
+
+      if (cleanupState.decision === 'delete-auth-user') {
+        stage = 'auth_delete';
+        try {
+          await deleteSupabaseUser(targetId);
+        } catch (deleteError) {
+          cleanupState = await readCleanupState();
+          if (cleanupState.decision !== 'finalize') throw deleteError;
+        }
+      }
+
+      stage = 'auth_verification';
+      cleanupState = await readCleanupState();
+      if (cleanupState.decision === 'identity-conflict') {
+        await recordFailure('auth_identity_mismatch_after_delete');
+        res.status(409).json({
+          message: 'Auth cleanup completed for the archived identity, but the email is associated with another Auth identity. The email remains reserved pending review.',
+        });
+        return;
+      }
+      if (cleanupState.decision !== 'finalize' ||
+        !cleanupState.authIdentityAbsent ||
+        !cleanupState.emailIdentityAbsent) {
+        await recordFailure('auth_identity_still_present');
+        res.status(503).json({
+          message: 'The administrator has no CMS access, but Supabase Auth cleanup is not yet confirmed. The email remains reserved; retry this pending deletion.',
+        });
+        return;
+      }
+
+      stage = 'database_finalization';
+      const completed = await readSupabaseJson<{ status?: string; email?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/complete_admin_permanent_deletion', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_actor_id: actor.id,
+            p_target_id: targetId,
+          }),
+        }),
+      );
+      if (completed.status === 'auth_identity_present') {
+        await recordFailure('auth_identity_present_at_finalization');
+        res.status(409).json({
+          message: 'A Supabase Auth identity still uses this email. The deletion remains pending and the email remains reserved until identity cleanup is verified.',
+        });
+        return;
+      }
+      if (completed.status !== 'completed' || completed.email !== targetEmail) {
+        await recordFailure('database_finalization_not_confirmed');
+        res.status(503).json({
+          message: 'Auth identity absence was verified, but the database did not confirm finalization. The email remains reserved; retry this pending deletion.',
+        });
+        return;
+      }
+      res.json({
+        status: 'completed',
+        message: `The archived Admin and matching Supabase Auth identity were permanently deleted. Audit attribution was retained. ${targetEmail} is available for a new invitation.`,
+      });
+    } catch (error) {
+      const errorCode = error instanceof SupabaseRequestError
+        ? `supabase_${error.status}_${error.code || 'request'}`
+        : error instanceof Error ? error.name : 'unknown';
+      await recordFailure(errorCode);
+      console.error('[NearGrow Ads] Permanent administrator deletion is pending retry.', {
+        stage,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        status: error instanceof SupabaseRequestError ? error.status : undefined,
+        code: error instanceof SupabaseRequestError ? error.code : undefined,
+      });
+      res.status(503).json({
+        message: 'Permanent deletion did not finish. CMS access remains revoked and the email remains reserved. Retry the pending deletion after resolving the reported Supabase service issue.',
+      });
+    }
+  });
+
   app.post('/api/admin/profile/password', async (req: Request, res: Response): Promise<void> => {
     if (!requireAdmin(req, res)) return;
     const identity = currentAdmin(res)!;
@@ -7299,7 +7519,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'leads.export.generated',
       ];
       const auditDetectionParams = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(is_primary_owner)',
+        select: 'id,actor_id,target_id,action,details,created_at,actor:admin_identity_history!admin_audit_logs_actor_id_fkey(is_primary_owner)',
         action: `in.(${privilegedActions.join(',')})`,
         created_at: `gte.${detectionStart}`,
         order: 'created_at.desc,id.desc',
@@ -7409,7 +7629,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'admin.permissions.updated', 'admin.disabled', 'admin.removed', 'admin.access.updated',
       ];
       const accessParams = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(is_primary_owner)',
+        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_identity_history!admin_audit_logs_actor_id_fkey(is_primary_owner)',
         action: `in.(${accessActions.join(',')})`,
         order: 'created_at.desc,id.desc',
         limit: '10',
@@ -7607,7 +7827,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     const identity = currentAdmin(res)!;
     const filters = new URLSearchParams({
-      select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(email),target:admin_users!admin_audit_logs_target_id_fkey(email)',
+      select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_identity_history!admin_audit_logs_actor_id_fkey(email),target:admin_identity_history!admin_audit_logs_target_id_fkey(email)',
       'created_at': `lt.${snapshotCutoff}`,
     });
     if (dateRange) {
@@ -7761,7 +7981,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     if (!requireOwner(req, res)) return;
     try {
       const query = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(email),target:admin_users!admin_audit_logs_target_id_fkey(email)',
+        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_identity_history!admin_audit_logs_actor_id_fkey(email),target:admin_identity_history!admin_audit_logs_target_id_fkey(email)',
         order: 'created_at.desc',
         limit: '1000',
       });
@@ -7783,7 +8003,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       const query = new URLSearchParams({
         or: `(from_user_id.eq.${identity.id},to_user_id.eq.${identity.id})`,
-        select: 'id,from_user_id,to_user_id,status,created_at,expires_at,accepted_at,from_user:admin_users!admin_ownership_transfers_from_user_id_fkey(email),to_user:admin_users!admin_ownership_transfers_to_user_id_fkey(email)',
+        select: 'id,from_user_id,to_user_id,status,created_at,expires_at,accepted_at,from_user:admin_identity_history!admin_ownership_transfers_from_user_id_fkey(email),to_user:admin_identity_history!admin_ownership_transfers_to_user_id_fkey(email)',
         order: 'created_at.desc',
         limit: '100',
       });

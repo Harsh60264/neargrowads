@@ -1,6 +1,6 @@
 # Supabase Admin Auth Email Templates
 
-These are manual hosted-project settings. No API credentials, Auth configuration, SMTP settings, or production email templates are changed by this repository.
+These are manual hosted-project settings. No API credentials, Auth configuration, SMTP settings, or production email templates are changed by this repository. A local recovery template in another development checkout is not a hosted Staging setting; this Staging workflow does not use or deploy local Supabase CLI configuration. Configure and verify the hosted Staging template separately in its Supabase Dashboard.
 
 ## Installation
 
@@ -12,7 +12,7 @@ Use the exact subject and HTML for each corresponding template:
 - **Confirm signup** is used by new-admin setup and verification resend. The CMS creates or reuses the Auth identity first and requests a signup confirmation email. For a newly created identity, a separate branded application email carries the 24-hour temporary password; do not add a password or dynamic password placeholder to this template.
 - **Reset password** is used for verified-identity setup recovery and ordinary administrator password resets.
 
-The manually issued **Invite user** template uses Supabase's `{{ .ConfirmationURL }}` variable. The CMS **Confirm signup** and **Reset password** flows use the requested, allow-listed `{{ .RedirectTo }}` plus `{{ .TokenHash }}` so the callback can verify the one-time token on the server. Recovery completion accepts only a fresh `type=recovery` token hash; an existing Auth access token or PKCE session is not recovery authorization. Their redirect URLs always include a query parameter; preserve the `&token_hash=...&type=...` suffix exactly. Do not substitute a hard-coded host. The invitation callback validates the current pending invitation generation before verifying the one-time token and requires the recipient to select **Verify invitation & continue**; merely opening the page does not consume the link. The callback immediately removes token parameters from browser history, and the site's `Referrer-Policy: no-referrer` prevents forwarding them to other origins.
+The manually issued **Invite user** template uses Supabase's `{{ .ConfirmationURL }}` variable. The CMS **Confirm signup** and **Reset password** flows use the requested, allow-listed `{{ .RedirectTo }}` plus `{{ .TokenHash }}` so the callback can verify the one-time token on the server. Recovery completion accepts only a fresh `type=recovery` token hash; an existing Auth access token or PKCE session is not recovery authorization. Their redirect URLs always include a query parameter; preserve the `&token_hash=...&type=...` suffix exactly. Do not substitute a hard-coded host. The invitation callback validates the current pending invitation generation before verifying the one-time token and requires the recipient to select **Verify invitation & continue**; merely opening the page does not consume the link. Both invitation and recovery callback pages are excluded from third-party analytics before the analytics script is loaded. The callback immediately removes token parameters from browser history, and the site's `Referrer-Policy: no-referrer` prevents forwarding them to other origins.
 
 ## Invite user
 

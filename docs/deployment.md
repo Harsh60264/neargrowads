@@ -96,6 +96,21 @@ For an isolated staging project whose first three migrations were applied manual
 
    For an existing Production project, verify the migration version `20261028230000` is listed as applied in the Supabase Dashboard migration history before enabling these routes. Also confirm `public.admin_users.archived_at` and the `cancel_admin_invitation`, `prepare_admin_invitation_recovery`, and `archive_admin_account` RPCs exist with execution restricted to `service_role`. Use the Dashboard's schema/function inspectors or read-only catalog inspection; do not invoke the mutation RPCs as a verification step. If the version is absent, do not deploy the matching application until the migration is reviewed and applied through the normal production process.
 
+### Archived Admin Permanent Delete — Staging release gates
+
+This package adds Primary-Owner-only permanent deletion for eligible disabled/archived delegated Admins. Migration 36 preserves identity attribution in `admin_identity_history`, keeps audit/ownership references valid, reserves the email while Auth cleanup is pending, and installs an `auth.users` email-reservation trigger. The migration does not itself delete Admin records. No Production rollout is authorized by this Staging package.
+
+Before any Staging migration or app deployment:
+
+1. Confirm the Dashboard project is Staging `kdaixomygsuxadofoieb`; verify a current backup and an authorized, usable recovery/restore path. This repository does not create or validate backups.
+2. Verify migrations 1–35 are already applied/reconciled, including migration 35's actual objects and privileges. Preserve the runner's private local log. Do not execute migrations 1–35 again.
+3. Run the migration runner's `-PermanentDeleteOnly -DryRun` and read-only `-PermanentDeleteOnly -PreflightOnly` modes. Stop unless migration 36 is the only listed write and the current database role has `TRIGGER` privilege on `auth.users` and the required schema privileges for the trigger.
+4. Review the migration, then execute only migration 36 with `-PermanentDeleteOnly`. Run the read-only migration verifier and require all migration 36 table, function, trigger, privilege, and identity-history checks to pass.
+5. Deploy the matching application to the Staging Preview only after migration 36 verifies. Confirm the Preview environment pins Staging Supabase and a dedicated Staging Owner. Test the UI, authorization rejections, pending-delete retry path, invitations, recovery, and same-email reuse only with synthetic Staging identities; never test against real Admins.
+6. Configure hosted Staging invitation/recovery templates separately in the Staging Supabase Dashboard. Any local recovery-template configuration in a development checkout is not deployed to hosted Staging. Verify callback token privacy and recovery completion on the Preview.
+
+Migration 36 is transactional. If it fails, stop and inspect before retrying; the runner records failures and refuses automatic retries. Do not perform an ad hoc schema rollback after permanent deletion has occurred: identity history and its foreign keys protect audit attribution. Prefer a reviewed forward repair; if data recovery is required, use the approved Staging backup/restore procedure and reconcile Auth and database state before reopening the workflow. Production requires a separate reviewed migration/app release and backup/permission verification.
+
 Before deploying this repair, review and apply `supabase/migrations/20261025180000_harden_leads_access_and_consent.sql` to staging first. Confirm the current policies and grants, verify authorized leads access through the server API, and verify direct anonymous/authenticated access is denied. Apply it to production only through the normal reviewed migration process; the application never applies database migrations automatically.
 
 Apply `supabase/migrations/20261021130000_create_site_content_cms.sql` to enable the Page Content Manager's private draft and published content records. The server accesses this table with the server-only Supabase service role; browser clients cannot read or write it directly. Existing file-based website content remains the initial fallback until a new draft is published.

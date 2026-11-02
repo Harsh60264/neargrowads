@@ -14,6 +14,7 @@ $poolerPort = 5432
 $databaseName = 'postgres'
 $databaseUser = "postgres.$stagingProjectRef"
 $manualSqlEditorMigrationName = '20261031010000_complete_admin_temporary_password_setup.sql'
+$permanentDeletionMigrationName = '20261102100000_secure_archived_admin_permanent_deletion.sql'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $migrationDirectory = Join-Path $repoRoot 'supabase\migrations'
 $logPath = Join-Path $env:LOCALAPPDATA "NearGrowAds\staging-migration-logs\$stagingProjectRef.log"
@@ -40,8 +41,8 @@ if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^psql \(PostgreSQL\) 18(?:
 }
 
 $allMigrationFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -Filter '*.sql' | Sort-Object Name)
-if ($allMigrationFiles.Count -ne 35) {
-  throw "Expected 35 repository migration files; found $($allMigrationFiles.Count)."
+if ($allMigrationFiles.Count -ne 36) {
+  throw "Expected 36 repository migration files; found $($allMigrationFiles.Count)."
 }
 $manualSqlEditorMigration = @($allMigrationFiles | Where-Object { $_.Name -ceq $manualSqlEditorMigrationName })
 if ($manualSqlEditorMigration.Count -ne 1) {
@@ -53,11 +54,11 @@ $expectedMigrationNames = @(
     Where-Object { $_.Name -cne $manualSqlEditorMigrationName } |
     ForEach-Object { $_.Name }
 )
-if ($expectedMigrationNames.Count -ne 31) {
-  throw 'Expected exactly 31 migrations in the staging application range (4-34).'
+if ($expectedMigrationNames.Count -ne 32) {
+  throw 'Expected 31 runner-managed migrations 4-34 and migration 36.'
 }
-if ($allMigrationFiles[-1].Name -cne $manualSqlEditorMigrationName) {
-  throw "The verification-only migration must remain the newest repository migration: $manualSqlEditorMigrationName"
+if ($allMigrationFiles[-1].Name -cne $permanentDeletionMigrationName) {
+  throw "Migration 36 must be the newest repository migration: $permanentDeletionMigrationName"
 }
 
 $logPassed = $false
@@ -83,7 +84,7 @@ $missingLogNames = @($expectedMigrationNames | Where-Object { -not $successCount
 $duplicateLogNames = @($expectedMigrationNames | Where-Object { $successCounts.ContainsKey($_) -and $successCounts[$_] -ne 1 })
 $extraLogNames = @($logSuccessNames | Where-Object { $expectedMigrationNames -notcontains $_ })
 $logPassed = (Test-Path -LiteralPath $logPath -PathType Leaf) -and
-  $logSuccessNames.Count -eq 31 -and
+  $logSuccessNames.Count -eq 32 -and
   $missingLogNames.Count -eq 0 -and
   $duplicateLogNames.Count -eq 0 -and
   $extraLogNames.Count -eq 0 -and
@@ -93,9 +94,9 @@ Write-Output 'NearGrowAds staging migration verification'
 Write-Output "Project ref: $stagingProjectRef"
 Write-Output "Local migration log: $(if (Test-Path -LiteralPath $logPath) { 'present' } else { 'missing' })"
 if ($logPassed) {
-  Write-Output 'PASS | MIGRATION_LOG | exactly 31 runner-managed migrations (4-34); no failed entries'
+  Write-Output 'PASS | MIGRATION_LOG | exactly migrations 4-34 and 36; no failed entries'
 } else {
-  Write-Output "FAIL | MIGRATION_LOG | expected 31 runner-managed migrations (4-34); success entries=$($logSuccessNames.Count); missing=$($missingLogNames.Count); duplicate=$($duplicateLogNames.Count); unexpected=$($extraLogNames.Count); failures=$($logFailures.Count)"
+  Write-Output "FAIL | MIGRATION_LOG | expected 31 runner-managed migrations (4-34) and migration 36; success entries=$($logSuccessNames.Count); missing=$($missingLogNames.Count); duplicate=$($duplicateLogNames.Count); unexpected=$($extraLogNames.Count); failures=$($logFailures.Count)"
   foreach ($name in $missingLogNames) { Write-Output "  MISSING_LOG_SUCCESS | $name" }
   foreach ($name in $duplicateLogNames) { Write-Output "  DUPLICATE_LOG_SUCCESS | $name" }
   foreach ($name in $extraLogNames) { Write-Output "  UNEXPECTED_LOG_SUCCESS | $name" }
@@ -110,6 +111,9 @@ WITH expected_tables(name) AS (
     ('admin_sessions'),
     ('admin_audit_logs'),
     ('admin_ownership_transfers'),
+    ('admin_identity_history'),
+    ('admin_permanent_deletion_jobs'),
+    ('admin_permanent_deletion_email_reservations'),
     ('service_packages'),
     ('service_enquiry_requests'),
     ('site_content_cms'),
@@ -138,6 +142,12 @@ expected_columns(table_name, column_name) AS (
     ('admin_users', 'temporary_password_expires_at'),
     ('admin_users', 'temporary_password_used_at'),
     ('admin_users', 'is_primary_owner'),
+    ('admin_identity_history', 'deleted_at'),
+    ('admin_permanent_deletion_jobs', 'target_email'),
+    ('admin_permanent_deletion_jobs', 'status'),
+    ('admin_permanent_deletion_jobs', 'attempt_count'),
+    ('admin_permanent_deletion_email_reservations', 'email'),
+    ('admin_permanent_deletion_email_reservations', 'target_id'),
     ('admin_audit_logs', 'idempotency_key'),
     ('admin_sessions', 'last_activity_at'),
     ('leads', 'notification_status'),
@@ -162,7 +172,11 @@ expected_rpcs(name, signature) AS (
     ('archive_admin_account', 'public.archive_admin_account(uuid,uuid)'),
     ('consume_admin_temporary_password_login', 'public.consume_admin_temporary_password_login(uuid)'),
     ('get_active_admin_session', 'public.get_active_admin_session(uuid,uuid)'),
-    ('complete_admin_temporary_password_setup', 'public.complete_admin_temporary_password_setup(uuid,uuid)')
+    ('complete_admin_temporary_password_setup', 'public.complete_admin_temporary_password_setup(uuid,uuid)'),
+    ('get_admin_permanent_deletion_state', 'public.get_admin_permanent_deletion_state(uuid)'),
+    ('begin_admin_permanent_deletion', 'public.begin_admin_permanent_deletion(uuid,uuid,text,text)'),
+    ('record_admin_permanent_deletion_failure', 'public.record_admin_permanent_deletion_failure(uuid,uuid,text,text)'),
+    ('complete_admin_permanent_deletion', 'public.complete_admin_permanent_deletion(uuid,uuid)')
 ),
 expected_buckets(bucket_id, is_public, size_limit) AS (
   VALUES
@@ -293,6 +307,124 @@ checks AS (
   ) AS expected(table_name)
   LEFT JOIN pg_class relation
     ON relation.oid = to_regclass('public.' || expected.table_name)
+
+  UNION ALL
+
+  SELECT
+    'PERMANENT_DELETION_TABLE_PRIVILEGE',
+    expected.table_name,
+    COALESCE(
+      relation.relrowsecurity
+      AND has_table_privilege('service_role', relation.oid, 'SELECT')
+      AND has_table_privilege('service_role', relation.oid, 'INSERT')
+      AND has_table_privilege('service_role', relation.oid, 'UPDATE')
+      AND has_table_privilege('service_role', relation.oid, 'DELETE')
+      AND NOT has_table_privilege('anon', relation.oid, 'SELECT')
+      AND NOT has_table_privilege('anon', relation.oid, 'INSERT')
+      AND NOT has_table_privilege('anon', relation.oid, 'UPDATE')
+      AND NOT has_table_privilege('anon', relation.oid, 'DELETE')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'SELECT')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'INSERT')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'UPDATE')
+      AND NOT has_table_privilege('authenticated', relation.oid, 'DELETE')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+        WHERE acl.grantee = 0
+      ),
+      false
+    ),
+    CASE
+      WHEN relation.oid IS NULL THEN 'permanent-deletion relation is missing'
+      WHEN NOT relation.relrowsecurity THEN 'RLS is disabled'
+      WHEN NOT has_table_privilege('service_role', relation.oid, 'SELECT')
+        OR NOT has_table_privilege('service_role', relation.oid, 'INSERT')
+        OR NOT has_table_privilege('service_role', relation.oid, 'UPDATE')
+        OR NOT has_table_privilege('service_role', relation.oid, 'DELETE')
+        THEN 'service_role privileges are incomplete'
+      WHEN has_table_privilege('anon', relation.oid, 'SELECT')
+        OR has_table_privilege('anon', relation.oid, 'INSERT')
+        OR has_table_privilege('anon', relation.oid, 'UPDATE')
+        OR has_table_privilege('anon', relation.oid, 'DELETE')
+        OR has_table_privilege('authenticated', relation.oid, 'SELECT')
+        OR has_table_privilege('authenticated', relation.oid, 'INSERT')
+        OR has_table_privilege('authenticated', relation.oid, 'UPDATE')
+        OR has_table_privilege('authenticated', relation.oid, 'DELETE')
+        OR EXISTS (
+          SELECT 1
+          FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+          WHERE acl.grantee = 0
+        ) THEN 'client or PUBLIC direct privileges remain'
+      ELSE 'RLS enabled; service_role access only'
+    END
+  FROM (VALUES
+    ('admin_identity_history'),
+    ('admin_permanent_deletion_jobs'),
+    ('admin_permanent_deletion_email_reservations')
+  ) AS expected(table_name)
+  LEFT JOIN pg_class relation
+    ON relation.oid = to_regclass('public.' || expected.table_name)
+
+  UNION ALL
+
+  SELECT
+    'PERMANENT_DELETION_TRIGGER',
+    'auth_users_guard_reserved_email',
+    COALESCE(
+      trigger_entry.oid IS NOT NULL
+      AND trigger_entry.tgenabled = 'O'
+      AND function_entry.prosecdef
+      AND lower(pg_get_functiondef(function_entry.oid)) LIKE '%admin_permanent_deletion_email_reservations%'
+      AND lower(pg_get_functiondef(function_entry.oid)) LIKE '%lock_admin_email_reservation%',
+      false
+    ),
+    CASE
+      WHEN trigger_entry.oid IS NULL THEN 'auth.users email reservation trigger is missing'
+      WHEN function_entry.oid IS NULL THEN 'auth.users trigger function is missing or has an unexpected signature'
+      WHEN trigger_entry.tgenabled <> 'O' THEN 'trigger is disabled'
+      WHEN NOT function_entry.prosecdef THEN 'trigger function is not SECURITY DEFINER'
+      WHEN lower(pg_get_functiondef(function_entry.oid)) NOT LIKE '%admin_permanent_deletion_email_reservations%'
+        OR lower(pg_get_functiondef(function_entry.oid)) NOT LIKE '%lock_admin_email_reservation%'
+        THEN 'trigger function lacks reservation lock/check safeguards'
+      ELSE 'enabled Auth email reservation trigger and SECURITY DEFINER function are present'
+    END
+  FROM (VALUES (1)) required(dummy)
+  LEFT JOIN pg_trigger trigger_entry
+    ON trigger_entry.tgrelid = to_regclass('auth.users')
+    AND trigger_entry.tgname = 'auth_users_guard_reserved_email'
+    AND NOT trigger_entry.tgisinternal
+    AND pg_get_triggerdef(trigger_entry.oid) ILIKE '%BEFORE INSERT OR UPDATE OF email%'
+  LEFT JOIN pg_proc function_entry
+    ON function_entry.oid = trigger_entry.tgfoid
+    AND function_entry.oid = to_regprocedure('public.guard_auth_email_reservation()')
+
+  UNION ALL
+
+  SELECT
+    'PERMANENT_DELETION_FOREIGN_KEY',
+    expected.constraint_name,
+    COALESCE(
+      constraint_entry.contype = 'f'
+      AND constraint_entry.confrelid = to_regclass('public.admin_identity_history'),
+      false
+    ),
+    CASE
+      WHEN constraint_entry.oid IS NULL THEN 'expected identity-history foreign key is missing'
+      WHEN constraint_entry.confrelid <> to_regclass('public.admin_identity_history')
+        THEN 'foreign key still references admin_users'
+      ELSE 'foreign key preserves identity attribution through admin_identity_history'
+    END
+  FROM (VALUES
+    ('admin_users', 'admin_users_invited_by_fkey'),
+    ('admin_audit_logs', 'admin_audit_logs_actor_id_fkey'),
+    ('admin_audit_logs', 'admin_audit_logs_target_id_fkey'),
+    ('admin_ownership_transfers', 'admin_ownership_transfers_from_user_id_fkey'),
+    ('admin_ownership_transfers', 'admin_ownership_transfers_to_user_id_fkey')
+  ) AS expected(table_name, constraint_name)
+  LEFT JOIN pg_constraint constraint_entry
+    ON constraint_entry.conrelid = to_regclass('public.' || expected.table_name)
+    AND constraint_entry.conname = expected.constraint_name
+    AND constraint_entry.contype = 'f'
 
   UNION ALL
 

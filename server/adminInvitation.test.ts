@@ -289,6 +289,13 @@ test('recovery callback failures ask for a new recovery email, not invitation se
   assert.match(callback.error || '', /password-reset link.*invalid, expired, or already used.*new recovery email/i);
 });
 
+test('Admin invitation and recovery callback pages never load third-party analytics', () => {
+  const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+  assert.match(indexHtml, /if \(window\.location\.pathname !== '\/admin\/accept-invite' &&\s*window\.location\.pathname !== '\/admin\/password-reset'\) \{[\s\S]*?analyticsScript\.src = 'https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=/);
+  assert.doesNotMatch(indexHtml, /<script[^>]+src="https:\/\/www\.googletagmanager\.com\/gtag\/js/);
+});
+
 test('only invite and recovery GET invitation-context checks bypass CMS-session middleware', () => {
   const serverSource = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
   const middlewareStart = serverSource.indexOf("const authExemptPaths = ['/login'");
