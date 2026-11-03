@@ -5523,6 +5523,15 @@ html[data-theme='light'] .admin-team-manager {
   color: #18251E;
 }
 
+html[data-theme='light'] .admin-team-manager .team-photo-adjustments {
+  border-color: var(--brand-border) !important;
+  background-color: var(--brand-green-light) !important;
+}
+
+html[data-theme='light'] .admin-team-manager .team-photo-adjustments [class~='text-[#829187]'] {
+  color: var(--brand-text-muted) !important;
+}
+
 html[data-theme='light'] .admin-team-manager [class~='bg-[#19241D]'],
 html[data-theme='light'] .admin-team-manager [class~='bg-[#131D16]'],
 html[data-theme='light'] .admin-team-manager [class~='bg-[#202D24]'] {

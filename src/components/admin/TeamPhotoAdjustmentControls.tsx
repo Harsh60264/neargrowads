@@ -28,7 +28,7 @@ export function TeamPhotoAdjustmentControls({ src, name, role, bio, value, disab
   const update = (patch: Partial<TeamPhotoSettings>) => onChange(normalizeTeamPhotoSettings({ ...settings, ...patch }));
 
   return (
-    <section className="space-y-4 rounded-2xl border border-[#304135] bg-[#101713] p-4" aria-label="Core Team photo adjustments">
+    <section className="team-photo-adjustments space-y-4 rounded-2xl border border-[#304135] bg-[#101713] p-4" aria-label="Core Team photo adjustments">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-bold text-[#ECF3EE]">Photo adjustments</h3>
         <button

@@ -10,6 +10,7 @@ import {
 
 const adminSource = readFileSync(new URL('../components/admin/AdminTeamManager.tsx', import.meta.url), 'utf8');
 const controlsSource = readFileSync(new URL('../components/admin/TeamPhotoAdjustmentControls.tsx', import.meta.url), 'utf8');
+const stylesSource = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 const publicSource = readFileSync(new URL('../components/about/LeadershipTeamSection.tsx', import.meta.url), 'utf8');
 const serverSource = readFileSync(new URL('../../server.ts', import.meta.url), 'utf8');
 
@@ -113,6 +114,16 @@ test('Admin controls are Core-only, live-update the selected member and use the 
   assert.match(controlsSource, /aspect-\[5\/4\][\s\S]*max-sm:aspect-\[7\/9\]/);
   assert.match(controlsSource, /bg-gradient-to-t from-\[#071426\]/);
   assert.match(controlsSource, /Cover mode is the only setting that intentionally crops it/);
+});
+
+test('photo adjustment controls have readable light-mode contrast while preserving the navy preview', () => {
+  assert.match(controlsSource, /className="team-photo-adjustments[^"]*bg-\[#101713\]/);
+  assert.match(stylesSource, /html\[data-theme='light'\] \.admin-team-manager \.team-photo-adjustments\s*\{\s*border-color:\s*var\(--brand-border\) !important;\s*background-color:\s*var\(--brand-green-light\) !important;/);
+  assert.match(stylesSource, /html\[data-theme='light'\] \.admin-team-manager \[class~='text-\[#ECF3EE\]'\],[\s\S]*?\[class~='text-\[#B8C7BC\]'\]\s*\{\s*color: #18251E !important;/);
+  assert.match(stylesSource, /html\[data-theme='light'\] \.admin-team-manager \[class~='text-\[#A9B8AD\]'\],[\s\S]*?\[class~='text-\[#526056\]'\]\s*\{\s*color: #59665E !important;/);
+  assert.match(stylesSource, /html\[data-theme='light'\] \.admin-team-manager \.team-photo-adjustments \[class~='text-\[#829187\]'\]\s*\{\s*color:\s*var\(--brand-text-muted\) !important;/);
+  assert.match(controlsSource, /team-photo-adjust-preview[^"]*bg-\[#071426\]/);
+  assert.match(controlsSource, /bg-gradient-to-t from-\[#071426\]/);
 });
 
 test('settings are validated, persisted in the existing Team document and rendered only on Core Team photos', () => {
