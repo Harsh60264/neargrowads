@@ -8,6 +8,7 @@
     "start": "tsx server.ts",
     "build": "node scripts/build-vercel-function.mjs && vite build",
     "preview": "vite preview",
+    "pretest": "npm run build",
     "test": "node --import tsx --test",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
