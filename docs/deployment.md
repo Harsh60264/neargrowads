@@ -161,6 +161,27 @@ Before any Production change, in the existing Production project's Supabase Dash
 
 Migration 36 is not an application-level reversible change. The compatibility application is the minimum safe serving version on either side of the migration; the prior application release is not a safe post-migration rollback. Do not try to undo the database migration by dropping tables, constraints, or triggers. Database recovery would require the approved restore procedure in the existing Production project. A point-in-time database restore can discard all later database changes, including customer and Auth changes, so it requires incident/change approval, an explicit recovery timestamp, and coordinated maintenance. The supplied pre-migration archive was readable and its object list includes Auth and affected Admin data, but no full restore has been tested. Treat it as backup evidence, not proof of restoreability; confirm recovery authority/procedure and document the residual restore risk before approval. Re-verify the resulting migration history and schema before re-enabling the application.
 
+#### Recovery readiness assessment — release `3e0b185`
+
+The supplied `production-before-permanent-delete-20261103-102334.dump` is a readable PostgreSQL custom-format archive (1,046,668 bytes; SHA-256 `BF2CB3AD9EF5FF0363FF1AEA9751FBB32DB9954949B0BC4A331E20E70C1ABADB`). A read-only `pg_restore --list` inspection succeeded and showed table-data entries for `auth.users`, `public.admin_users`, `public.admin_sessions`, `public.admin_audit_logs`, and `public.admin_ownership_transfers`. This confirms that the archive directory can be read and those objects/data are listed; it does not validate every archived data block, prove a consistent/recoverable Supabase project, or prove that restore succeeds. It predates Migration 36, so it is not expected to contain `admin_identity_history` or the new deletion tables. The TOC is not evidence that every Auth-related setting, project secret, Storage object, or external service configuration is backed up.
+
+**No isolated recovery drill is authorized or feasible under the current constraints.** PostgreSQL client/server tools are installed, but a restore drill needs a separate writable database target. Creating a local database, a new Supabase project, or using either existing Production or Staging would violate the stated constraints or risk overwriting protected data. Docker is unavailable, and there is no approved isolated target. Do not run `pg_restore` against Production or Staging. Therefore restoreability remains untested and is a residual risk requiring explicit change-owner approval before the Production migration.
+
+**Forward recovery if Migration 36 fails or leaves a partial schema:**
+
+1. Stop the migration attempt; preserve the exact error and operator/change record. Keep the compatibility application serving, keep permanent deletion disabled, and do not redeploy the older application. Do not blindly rerun the full migration or drop/roll back objects.
+2. After confirming no migration execution is still in progress, collect read-only diagnostics and compare the live schema to the reviewed Migration 36 file. Use the strict verifier for its schema checks:
+
+   ```powershell
+   .\scripts\verify-production-admin-permanent-deletion-post-migration.ps1 -ProjectRef axbjzmdokfoftzfgwiql -SchemaEvidenceOnly
+   ```
+
+   Treat any failure or unexpected state as a stop. A schema-evidence pass does not establish historical migration execution.
+3. Have the database owner review the exact partial state and prepare a narrowly scoped, forward-only repair that preserves existing Admin identities, historical audit attribution, and unrelated data. Apply it only with explicit Production change approval; then rerun the read-only verifier and application smoke checks. Do not use manual ledger edits to make verification pass.
+4. If a reviewed forward repair cannot safely restore the expected state, escalate as an incident. Any point-in-time/in-place restore requires separate approval, a selected recovery timestamp, authorized Supabase operator access, and coordinated maintenance with application writes stopped as required by the provider procedure. Such recovery can discard all database and Auth changes after the selected point. Confirm with Supabase that the approved recovery method covers the required Auth state; do not assume the custom-format dump restores the whole managed project. Re-verify data, Auth behavior, schema, and application compatibility before resuming writes or enabling deletion.
+
+The release remains **NO-GO** for a destructive schema change until the change owner explicitly accepts this untested-restore risk and confirms an authorized, workable forward-recovery and escalation path. A successful archive listing or the pre-migration schema-evidence preflight does not satisfy that recovery gate.
+
 Known hosted Auth limitation: deleting the Auth identity prevents refresh-token renewal but cannot guarantee immediate invalidation of already-issued access JWTs; those may remain valid until expiry. The workflow revokes NearGrow CMS sessions. Production must continue to deny direct access to private CMS data through Auth-token grants/RLS and accept the remaining JWT lifetime, or treat this as a release blocker if immediate global token invalidation is required.
 
 ### Admin invitation security and email templates
