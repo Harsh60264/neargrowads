@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
 import { getAdminArchiveOutcome } from './adminArchiveOutcome';
 import { canCancelAdminInvitation } from './adminInvitationPolicy';
+import {
+  ADMIN_SECTION_ACTIONS,
+  DEFAULT_SUPER_ADMIN_PERMISSIONS,
+  type AdminAction,
+  type AdminSection,
+  type AdminPermissions as Permissions,
+} from '../../../shared/adminPermissions';
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
 type AdminStatus = 'pending' | 'active' | 'disabled';
 type AdminHistoryStatus = AdminStatus | 'cancelled' | 'removed' | 'archived';
-type AdminAction = 'view' | 'create' | 'edit' | 'delete' | 'publish' | 'export';
-type AdminSection = 'dashboard' | 'leads' | 'serviceStore' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'blogs' | 'team' | 'categories' | 'securityMonitoring' | 'settings';
-type Permissions = Partial<Record<AdminSection, Partial<Record<AdminAction, boolean>>>>;
 
 interface AdminUser {
   id: string;
@@ -114,36 +118,7 @@ const sectionLabels: Record<AdminSection, string> = {
   settings: 'Settings',
 };
 
-const sectionActions: Record<AdminSection, AdminAction[]> = {
-  dashboard: ['view'],
-  leads: ['view', 'edit', 'export'],
-  serviceStore: ['view', 'create', 'edit', 'delete', 'publish'],
-  content: ['view', 'edit'],
-  mascot: ['view', 'edit', 'publish'],
-  caseStudies: ['view', 'create', 'edit', 'delete', 'publish'],
-  servicesManagement: ['view', 'create', 'edit', 'delete', 'publish'],
-  blogs: ['view', 'create', 'edit', 'delete', 'publish'],
-  team: ['view', 'create', 'edit', 'delete'],
-  categories: ['view', 'create', 'edit', 'delete'],
-  securityMonitoring: ['view', 'edit'],
-  settings: ['view'],
-};
-
 const initialPermissions: Permissions = {};
-
-const fullSuperAdminPermissions: Permissions = {
-  dashboard: { view: true },
-  leads: { view: true, edit: true, export: true },
-  serviceStore: { view: true, create: true, edit: true, delete: true, publish: true },
-  content: { view: true, edit: true },
-  mascot: { view: true, edit: true, publish: true },
-  caseStudies: { view: true, create: true, edit: true, delete: true, publish: true },
-  servicesManagement: { view: true, create: true, edit: true, delete: true, publish: true },
-  blogs: { view: true, create: true, edit: true, delete: true, publish: true },
-  team: { view: true, create: true, edit: true, delete: true },
-  categories: { view: true, create: true, edit: true, delete: true },
-  settings: { view: true },
-};
 
 const inputClass = 'min-h-11 w-full rounded-xl border border-[#33453A] bg-[#101913] px-3.5 py-2.5 text-sm text-[#EAF1EB] outline-none placeholder:text-[#76867B] focus:border-[#67D8B7] focus:ring-2 focus:ring-[#67D8B7]/15';
 const buttonClass = 'admin-settings-primary inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-[#286D3B] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#347E49] disabled:cursor-not-allowed disabled:opacity-50';
@@ -619,7 +594,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const changeUserRole = (user: AdminUser, nextRole: AdminRole) => {
     changeUser(user.id, {
       role: nextRole,
-      permissions: nextRole === 'super_admin' ? fullSuperAdminPermissions : initialPermissions,
+      permissions: nextRole === 'super_admin' ? DEFAULT_SUPER_ADMIN_PERMISSIONS : initialPermissions,
     });
   };
 
@@ -636,7 +611,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const changePermission = (user: AdminUser, section: AdminSection, action: AdminAction, enabled: boolean) => {
     const currentActions = { ...user.permissions[section], [action]: enabled };
     if (action === 'view' && !enabled) {
-      for (const item of sectionActions[section]) currentActions[item] = false;
+      for (const item of ADMIN_SECTION_ACTIONS[section]) currentActions[item] = false;
     } else if (action !== 'view' && enabled) {
       currentActions.view = true;
     }
@@ -662,7 +637,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
     setPermissions((current) => {
       const currentActions = { ...current[section], [action]: enabled };
       if (action === 'view' && !enabled) {
-        for (const item of sectionActions[section]) currentActions[item] = false;
+        for (const item of ADMIN_SECTION_ACTIONS[section]) currentActions[item] = false;
       } else if (action !== 'view' && enabled) {
         currentActions.view = true;
       }
@@ -1071,7 +1046,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 <select className={`${inputClass} mt-1.5`} value={role} onChange={(event) => {
                   const nextRole = event.target.value as AdminRole;
                   setRole(nextRole);
-                  setPermissions(nextRole === 'super_admin' ? fullSuperAdminPermissions : initialPermissions);
+                  setPermissions(nextRole === 'super_admin' ? DEFAULT_SUPER_ADMIN_PERMISSIONS : initialPermissions);
                 }}>
                   <option value="custom_admin">Custom Admin</option><option value="super_admin">Super Admin</option>
                 </select>
@@ -1084,7 +1059,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                     <fieldset key={section} className="rounded-lg border border-[#304135] p-3">
                       <legend className="px-1 text-[11px] font-semibold text-[#DCE8DD]">{label}</legend>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-2">
-                        {sectionActions[section as AdminSection].map((action) => (
+                        {ADMIN_SECTION_ACTIONS[section as AdminSection].map((action) => (
                           <label key={action} className="flex items-center gap-1.5 text-[10px] capitalize text-[#A9B8AD]">
                             <input type="checkbox" checked={permissions[section as AdminSection]?.[action] === true} onChange={(event) => toggleInvitePermission(section as AdminSection, action, event.target.checked)} />
                             {action}
@@ -1157,7 +1132,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                           <fieldset key={section} className="rounded-lg border border-[#304135] p-3">
                             <legend className="px-1 text-[11px] font-semibold text-[#DCE8DD]">{label}</legend>
                             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-2">
-                              {sectionActions[section as AdminSection].map((action) => (
+                              {ADMIN_SECTION_ACTIONS[section as AdminSection].map((action) => (
                                 <label key={action} className="flex items-center gap-1.5 text-[10px] capitalize text-[#A9B8AD]">
                                   <input type="checkbox" checked={user.permissions?.[section as AdminSection]?.[action] === true} onChange={(event) => changePermission(user, section as AdminSection, action, event.target.checked)} />
                                   {action}

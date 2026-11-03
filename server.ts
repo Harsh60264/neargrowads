@@ -105,6 +105,13 @@ import {
 import { resolveSiteContentState } from './server/siteContentFallback';
 import { blogSeoAdminPermission } from './server/blogSeoPermissions';
 import {
+  DEFAULT_SUPER_ADMIN_PERMISSIONS,
+  validateAdminPermissions,
+  type AdminAction,
+  type AdminSection,
+  type AdminPermissions,
+} from './shared/adminPermissions';
+import {
   isWebsiteVisitorId,
   normalizeWebsiteActivityPath,
   websiteDeviceFromUserAgent,
@@ -3327,9 +3334,6 @@ async function readCaseStudyImage(objectKey: string): Promise<{ bytes: Buffer; c
 }
 
 type AdminRole = 'owner' | 'super_admin' | 'custom_admin';
-type AdminSection = 'dashboard' | 'leads' | 'serviceStore' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'blogs' | 'team' | 'categories' | 'securityMonitoring' | 'settings';
-type AdminAction = 'view' | 'create' | 'edit' | 'delete' | 'publish' | 'export';
-type AdminPermissions = Partial<Record<AdminSection, Partial<Record<AdminAction, boolean>>>>;
 
 interface AdminIdentity {
   id: string;
@@ -3350,21 +3354,6 @@ interface AdminSessionToken {
   userId: string;
   expiresAt: number;
 }
-
-const adminSectionActions: Record<AdminSection, AdminAction[]> = {
-  dashboard: ['view'],
-  leads: ['view', 'edit', 'export'],
-  serviceStore: ['view', 'create', 'edit', 'delete', 'publish'],
-  content: ['view', 'edit'],
-  mascot: ['view', 'edit', 'publish'],
-  caseStudies: ['view', 'create', 'edit', 'delete', 'publish'],
-  servicesManagement: ['view', 'create', 'edit', 'delete', 'publish'],
-  blogs: ['view', 'create', 'edit', 'delete', 'publish'],
-  team: ['view', 'create', 'edit', 'delete'],
-  categories: ['view', 'create', 'edit', 'delete'],
-  securityMonitoring: ['view', 'edit'],
-  settings: ['view'],
-};
 
 function adminConfigIssues(): string[] {
   const issues: string[] = [];
@@ -3978,38 +3967,6 @@ function enforceAdminRateLimit(req: Request, res: Response, attemptsByIp: Map<st
   attempts.push(now);
   attemptsByIp.set(clientIp, attempts);
   return true;
-}
-
-function validateAdminPermissions(value: unknown): AdminPermissions | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const output: AdminPermissions = {};
-  for (const [section, rawActions] of Object.entries(value)) {
-    if (!Object.prototype.hasOwnProperty.call(adminSectionActions, section) || !rawActions || typeof rawActions !== 'object' || Array.isArray(rawActions)) return undefined;
-    const actions: Partial<Record<AdminAction, boolean>> = {};
-    for (const [action, enabled] of Object.entries(rawActions)) {
-      if (!(adminSectionActions[section as AdminSection].includes(action as AdminAction)) || typeof enabled !== 'boolean') return undefined;
-      actions[action as AdminAction] = enabled;
-    }
-    if (Object.entries(actions).some(([action, enabled]) => action !== 'view' && enabled) && actions.view !== true) return undefined;
-    output[section as AdminSection] = actions;
-  }
-
-  return output;
-}
-
-function defaultSuperAdminPermissions(): AdminPermissions {
-  return {
-    dashboard: { view: true },
-    leads: { view: true, edit: true, export: true },
-    serviceStore: { view: true, create: true, edit: true, delete: true, publish: true },
-    content: { view: true, edit: true },
-    mascot: { view: true, edit: true, publish: true },
-    servicesManagement: { view: true, create: true, edit: true, delete: true, publish: true },
-    blogs: { view: true, create: true, edit: true, delete: true, publish: true },
-    team: { view: true, create: true, edit: true, delete: true },
-    categories: { view: true, create: true, edit: true, delete: true },
-    settings: { view: true },
-  };
 }
 
 function normalizeUsername(value: unknown): string | undefined {
@@ -6140,7 +6097,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const permissions = role === 'owner'
       ? {}
       : req.body?.permissions == null && role === 'super_admin'
-        ? defaultSuperAdminPermissions()
+        ? DEFAULT_SUPER_ADMIN_PERMISSIONS
         : validateAdminPermissions(req.body?.permissions);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254 ||
       !['owner', 'super_admin', 'custom_admin'].includes(role) ||
@@ -6541,7 +6498,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const permissions = role === 'owner'
       ? {}
       : role === 'super_admin' && req.body?.permissions == null
-        ? defaultSuperAdminPermissions()
+        ? DEFAULT_SUPER_ADMIN_PERMISSIONS
         : validateAdminPermissions(req.body?.permissions);
     if (!['owner', 'super_admin', 'custom_admin'].includes(role) ||
       !['pending', 'active', 'disabled'].includes(status) ||
