@@ -114,6 +114,90 @@ The Primary Owner must reauthenticate, verify the Test API credentials, and expl
 
 ## 6. Hosting and deployment
 
+### Production permanent-delete release preparation
+
+The verified Staging release commit is `db86fb85961c670497cffcac54ee7803547e6982`; it is based on the Staging-specific `6f83b04` history, not Production `main` commit `74fd6ccc6a8b6daa953035cf6c8f64d454e2cda0`. Do not promote the Staging commit wholesale: its changes include Staging migration-runner work. Prepare the Production release on `74fd6cc` with only the Admin permanent-delete UI/API, schema-compatible Admin history lookups, callback analytics privacy change, Production preflight/post-check scripts, relevant tests/docs, and `supabase/migrations/20261102100000_secure_archived_admin_permanent_deletion.sql`. Keep unrelated Admin or website changes out of the release. The local Supabase CLI configuration, recovery template, and `supabase/.branches/` state are not Production settings or deployment inputs. SQL regression tests are test-only; do not run them against a hosted project.
+
+The following scripts are **read-only checks**, not migration runners. They require the exact Production project ref and use the Dashboard-verified Session Pooler at `aws-0-ap-northeast-2.pooler.supabase.com:5432`, database `postgres`, and user `postgres.axbjzmdokfoftzfgwiql`, with TLS certificate verification. They require PostgreSQL 18 `psql` and set the session read-only before querying. They prompt for the exact ref before connecting. They do not accept a host override, run DDL/DML, modify migration history, or change Admin accounts. They require the PostgreSQL root certificate described in `scripts/psqlEnvironment.ps1`. If the verified pooler endpoint is unreachable from the operator's network, stop and use an independently reviewed read-only route; do not weaken the endpoint/ref guard or substitute Staging credentials.
+
+This Production-specific workflow supersedes generic guidance below to apply all unapplied repository migrations: do not bulk-apply missing versions. Reconcile migration history and live schema first, then consider only Migration 36 for this release.
+
+```powershell
+.\scripts\verify-production-admin-permanent-deletion-preflight.ps1 -ProjectRef axbjzmdokfoftzfgwiql
+.\scripts\verify-production-admin-permanent-deletion-post-migration.ps1 -ProjectRef axbjzmdokfoftzfgwiql
+```
+
+The default preflight reports every local migration filename/version against `supabase_migrations.schema_migrations`. It distinguishes an absent schema/table, inaccessible table, readable-but-empty ledger, and readable ledger. With a readable ledger it requires all repository migrations before Migration 36 to be recorded with matching names. This includes `20261031010000_complete_admin_temporary_password_setup.sql`: the repository only documents its manual SQL-Editor application on Staging, which is not evidence of Production execution. It rejects missing/renamed history, unknown database versions, an already-recorded Migration 36, and partial Migration 36 objects. A missing or ambiguous history row is not evidence that a migration is unapplied.
+
+If Production's Supabase CLI ledger is absent or unreadable, a schema-evidence-only check is available:
+
+```powershell
+.\scripts\verify-production-admin-permanent-deletion-preflight.ps1 -ProjectRef axbjzmdokfoftzfgwiql -SchemaEvidenceFallback
+```
+
+This mode still requires every live Migration 36 prerequisite to pass: Admin/CMS tables and required columns, the Auth identity cascade FK, 16 exact Admin FKs, core table RLS and service-role/client grants, UUID generation, deployed temporary-password setup safeguards and RPC grants, Production/Auth trigger permissions, and proof that no Migration 36 object is partially installed. The Auth, Realtime, and Storage service-owned migration tables are not treated as application migration-history candidates; any other candidate is reported and blocks fallback pending reconciliation. The verifier explicitly reports when application migration execution history is unavailable. It never writes migration history, infers applied versions, or treats a partial/unexpected schema as ready. `SCHEMA EVIDENCE PASS` establishes only that the current live database satisfies Migration 36's checked preconditions; it does **not** prove which historical migrations ran or that all migrations 1–35 were applied. A readable but incomplete or mismatched Supabase ledger is never bypassed by this fallback.
+
+Evidence review found no GitHub Actions workflows/runs for this repository and no local Git tags or Production migration execution log. The repository runbook's manual SQL Editor application record for `20261031010000_complete_admin_temporary_password_setup.sql` is explicitly Staging-only. Production deployment records may exist in Vercel or the Supabase Dashboard, which were not available to this local review. Before approving Migration 36 under fallback, an authorized reviewer must reconcile the Production Vercel release/commit and any Supabase SQL Editor or external migration records with the live schema evidence. If that evidence conflicts with the schema, stop.
+
+The preflight also checks the deployed Admin/CMS prerequisites, PostgreSQL role and `auth.users` trigger privilege, and the exact pre-migration topology of all 16 Admin foreign keys.
+
+The application compatibility release must go first while the existing schema is still in place. Its Admin history reads resolve identities from `admin_users` before Migration 36 and from `admin_identity_history` afterwards; it also keeps permanent deletion unavailable until both the migration state RPC and identity-history table are present. A partial schema mismatch returns an error rather than exposing deletion. Its email-reservation check is a no-op only while both the reservation and identity-history tables are absent; if the identity-history table exists but reservations do not, invitation requests fail closed. Confirm the new application is live and ordinary Admin, audit, ownership, and invitation screens work before applying SQL.
+
+After that compatibility release is serving traffic, an approved operator applies only the reviewed Migration 36 through the normal Production change process, then runs the post-migration verifier. It requires the migration ledger entry and checks all four enabled triggers, exact `SECURITY DEFINER` RPC signatures/search paths and service-role-only execute permissions, RLS/table privileges, identity-history backfill, and all 16 Admin foreign keys. Fifteen historical Admin references must target `admin_identity_history`; `admin_sessions.user_id` intentionally continues to target `admin_users`. Any failed check means stop and keep the compatibility release in place while investigating; do not restore the pre-Migration-36 application after the schema transition.
+
+When the Production application migration ledger is confirmed absent or empty, the post-migration verifier also has a strict read-only schema-evidence mode:
+
+```powershell
+.\scripts\verify-production-admin-permanent-deletion-post-migration.ps1 -ProjectRef axbjzmdokfoftzfgwiql -SchemaEvidenceOnly
+```
+
+This mode checks the exact Migration 36 table columns, defaults and constraints/indexes; required routine signatures and implementation clauses; trigger definitions and enablement; function/table privileges and RLS; identity-history backfill; the three Migration 36 foreign keys; and all 16 historical Admin foreign keys. It accepts only an absent or empty application ledger, fails if the ledger is readable/inaccessible/malformed or an alternate migration-history candidate exists, and never records or infers a migration version. It reports `SCHEMA EVIDENCE PASS` separately from `MIGRATION HISTORY: NOT VERIFIED`; that result is **not proof that migrations 1–35 ran**. If the application ledger is readable, use the normal history-based verifier instead; its requirements are unchanged. Unnamed or ambiguous SQL Editor entries are not treated as migration execution evidence.
+
+Release order is: (1) preflight PASS and application-history evidence reviewed; (2) backup/recovery gate confirmed; (3) deploy the compatibility application from the clean Production-main-based feature-only release and verify it against the pre-Migration-36 schema; (4) apply only Migration 36; (5) require post-migration verification PASS and recheck Admin/audit/ownership/invitation views; (6) only then enable use of permanent deletion through the approved process and perform non-destructive health/login checks. Keep the compatibility application serving throughout the schema transition. After Migration 36 starts, recover forward with a reviewed repair and keep deletion disabled on any mismatch; do not redeploy the old Production application or reverse/drop schema objects. If recovery requires restoring the database, use the authorized in-place recovery procedure and coordinate maintenance because later writes can be lost.
+
+#### Backup and recovery gate
+
+Before any Production change, in the existing Production project's Supabase Dashboard, confirm that the plan's automated backup/PITR coverage includes the intended change window and database/Auth schema, record the latest usable recovery point and retention expiry, and confirm the authorized operator's in-place restore procedure and recovery access. This preparation does not create a backup, database, or Supabase project and does not initiate a restore. If the backup window, Auth coverage, or recovery authority cannot be confirmed, do not proceed.
+
+Migration 36 is not an application-level reversible change. The compatibility application is the minimum safe serving version on either side of the migration; the prior application release is not a safe post-migration rollback. Do not try to undo the database migration by dropping tables, constraints, or triggers. Database recovery would require the approved restore procedure in the existing Production project. A point-in-time database restore can discard all later database changes, including customer and Auth changes, so it requires incident/change approval, an explicit recovery timestamp, and coordinated maintenance. The supplied pre-migration archive was readable and its object list includes Auth and affected Admin data, but no full restore has been tested. Treat it as backup evidence, not proof of restoreability; confirm recovery authority/procedure and document the residual restore risk before approval. Re-verify the resulting migration history and schema before re-enabling the application.
+
+#### Recovery readiness assessment — release `3e0b185`
+
+The supplied `production-before-permanent-delete-20261103-102334.dump` is a readable PostgreSQL custom-format archive (1,046,668 bytes; SHA-256 `BF2CB3AD9EF5FF0363FF1AEA9751FBB32DB9954949B0BC4A331E20E70C1ABADB`). A read-only `pg_restore --list` inspection succeeded and showed table-data entries for `auth.users`, `public.admin_users`, `public.admin_sessions`, `public.admin_audit_logs`, and `public.admin_ownership_transfers`. This confirms that the archive directory can be read and those objects/data are listed; it does not validate every archived data block, prove a consistent/recoverable Supabase project, or prove that restore succeeds. It predates Migration 36, so it is not expected to contain `admin_identity_history` or the new deletion tables. The TOC is not evidence that every Auth-related setting, project secret, Storage object, or external service configuration is backed up.
+
+**No isolated recovery drill is authorized or feasible under the current constraints.** PostgreSQL client/server tools are installed, but a restore drill needs a separate writable database target. Creating a local database, a new Supabase project, or using either existing Production or Staging would violate the stated constraints or risk overwriting protected data. Docker is unavailable, and there is no approved isolated target. Do not run `pg_restore` against Production or Staging. Therefore restoreability remains untested and is a residual risk requiring explicit change-owner approval before the Production migration.
+
+**Forward recovery if Migration 36 fails or leaves a partial schema:**
+
+1. Stop the migration attempt; preserve the exact error and operator/change record. Keep the compatibility application serving, keep permanent deletion disabled, and do not redeploy the older application. Do not blindly rerun the full migration or drop/roll back objects.
+2. After confirming no migration execution is still in progress, collect read-only diagnostics and compare the live schema to the reviewed Migration 36 file. Use the strict verifier for its schema checks:
+
+   ```powershell
+   .\scripts\verify-production-admin-permanent-deletion-post-migration.ps1 -ProjectRef axbjzmdokfoftzfgwiql -SchemaEvidenceOnly
+   ```
+
+   Treat any failure or unexpected state as a stop. A schema-evidence pass does not establish historical migration execution.
+3. Have the database owner review the exact partial state and prepare a narrowly scoped, forward-only repair that preserves existing Admin identities, historical audit attribution, and unrelated data. Apply it only with explicit Production change approval; then rerun the read-only verifier and application smoke checks. Do not use manual ledger edits to make verification pass.
+4. If a reviewed forward repair cannot safely restore the expected state, escalate as an incident. Any point-in-time/in-place restore requires separate approval, a selected recovery timestamp, authorized Supabase operator access, and coordinated maintenance with application writes stopped as required by the provider procedure. Such recovery can discard all database and Auth changes after the selected point. Confirm with Supabase that the approved recovery method covers the required Auth state; do not assume the custom-format dump restores the whole managed project. Re-verify data, Auth behavior, schema, and application compatibility before resuming writes or enabling deletion.
+
+The release remains **NO-GO** for a destructive schema change until the change owner explicitly accepts this untested-restore risk and confirms an authorized, workable forward-recovery and escalation path. A successful archive listing or the pre-migration schema-evidence preflight does not satisfy that recovery gate.
+
+Known hosted Auth limitation: deleting the Auth identity prevents refresh-token renewal but cannot guarantee immediate invalidation of already-issued access JWTs; those may remain valid until expiry. The workflow revokes NearGrow CMS sessions. Production must continue to deny direct access to private CMS data through Auth-token grants/RLS and accept the remaining JWT lifetime, or treat this as a release blocker if immediate global token invalidation is required.
+
+#### Permanent Delete concurrency verification
+
+The two PostgreSQL concurrency tests in `server/adminPermanentDeletionConcurrency.test.ts` are skipped unless `ADMIN_PERMANENT_DELETION_TEST_DATABASE_URL` is configured. They require a real PostgreSQL server with the reviewed schema and Migration 36 routines/triggers; mocks or the normal unit suite cannot verify transaction locks, trigger ordering, or `pg_stat_activity` lock waits. The test runner now refuses non-loopback hosts and databases not named `admin_delete_test_*` before it inserts synthetic rows. Never point it at Production or Staging.
+
+Run them only when an authorized disposable local PostgreSQL test database is already available and provisioned with the required Supabase Auth schema and reviewed migrations:
+
+```powershell
+npm test -- server/adminPermanentDeletionConcurrency.test.ts
+```
+
+Provide the test URL through the process environment without printing or committing it. The first test exercises two concurrent deletion starts and competing finalizers; the second holds an Auth email-claim transaction open while deletion attempts to acquire the advisory lock, then confirms reservation and finalization behavior. Both create synthetic test rows and perform cleanup, so use only the isolated test database. If the harness is absent, the skipped result is not a pass.
+
+`supabase/tests/admin_permanent_deletion_auth_email_race.sql` is separately guarded to `admin_delete_test_*` and wraps its fixtures in a transaction that rolls back. Its Auth-email case models the ordering “Auth absence checked, then competing insert while the reservation is pending” sequentially in one transaction. It is a useful trigger/reservation regression but does **not** create parallel sessions or prove that either request waited on a lock. A safe manual substitute for the two concurrency tests is therefore to run the existing Node tests against the isolated local database when available; manually retrying against either hosted project is not safe and does not replace this evidence. Until those tests actually execute and pass in that harness, parallel deletion/email-reservation races remain unverified and require explicit release-risk acceptance.
+
 ### Admin invitation security and email templates
 
 The invitation-session isolation, callback hardening, session-management authorization, and Admin Accounts accordion changes do not require a new database migration. Keep the existing `20261028200000_secure_admin_invitation_recovery.sql` and `20261028230000_admin_account_archiving.sql` schema in place; do not reapply or edit those migrations for this release.

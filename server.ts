@@ -45,6 +45,10 @@ import {
 import {
   revokeSupabaseRefreshTokensWithAccessToken,
 } from './server/supabaseAuthSessions';
+import {
+  decideAdminAuthCleanup,
+  isPermanentDeletionConfirmationValid,
+} from './server/adminPermanentDeletion';
 import { teamContentRevision, teamRevisionConflictStatus } from './server/teamRevision';
 import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import {
@@ -3528,6 +3532,75 @@ function isMissingAdminAccountManagementSchema(error: unknown): boolean {
     /admin_users|username|must_change_password|temporary_password_expires_at|temporary_password_used_at|last_login_at|last_password_reset_at/i.test(error.message);
 }
 
+function isMissingAdminIdentityHistorySchema(error: unknown): error is SupabaseRequestError {
+  return error instanceof SupabaseRequestError &&
+    ['PGRST205', '42P01'].includes(error.code || '') &&
+    /admin_identity_history/i.test(error.providerMessage);
+}
+
+function isMissingPermanentDeletionStateFunction(error: unknown): error is SupabaseRequestError {
+  return error instanceof SupabaseRequestError &&
+    ['PGRST202', '42883'].includes(error.code || '') &&
+    /get_admin_permanent_deletion_state/i.test(error.providerMessage);
+}
+
+function isMissingPermanentDeletionReservations(error: unknown): error is SupabaseRequestError {
+  return error instanceof SupabaseRequestError &&
+    ['PGRST205', '42P01'].includes(error.code || '') &&
+    /admin_permanent_deletion_email_reservations/i.test(error.providerMessage);
+}
+
+async function readAdminIdentityReferences(
+  identityIds: string[],
+): Promise<{
+  source: 'admin_identity_history' | 'admin_users';
+  byId: Map<string, { email: string; isPrimaryOwner: boolean }>;
+}> {
+  const uniqueIds = [...new Set(identityIds.filter(Boolean))];
+  if (uniqueIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+    throw new Error('An administrator history reference contained an invalid identity ID.');
+  }
+  const identityIdBatches = uniqueIds.length
+    ? Array.from({ length: Math.ceil(uniqueIds.length / 100) }, (_unused, index) =>
+      uniqueIds.slice(index * 100, (index + 1) * 100))
+    : [[]];
+  const rows: Array<{ id: string; email: string; is_primary_owner: boolean }> = [];
+  let source: 'admin_identity_history' | 'admin_users' | undefined;
+  for (const identityIdBatch of identityIdBatches) {
+    const query = new URLSearchParams({
+      select: 'id,email,is_primary_owner',
+      limit: String(identityIdBatch.length),
+    });
+    if (identityIdBatch.length) query.set('id', `in.(${identityIdBatch.join(',')})`);
+
+    let batchRows: Array<{ id: string; email: string; is_primary_owner: boolean }>;
+    let batchSource: 'admin_identity_history' | 'admin_users' = 'admin_identity_history';
+    try {
+      batchRows = await readSupabaseJson<Array<{ id: string; email: string; is_primary_owner: boolean }>>(
+        await supabaseAdminRequest(`rest/v1/admin_identity_history?${query}`),
+      );
+    } catch (error) {
+      if (!isMissingAdminIdentityHistorySchema(error)) throw error;
+      batchSource = 'admin_users';
+      batchRows = await readSupabaseJson<Array<{ id: string; email: string; is_primary_owner: boolean }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${query}`),
+      );
+    }
+    if (source && source !== batchSource) {
+      throw new Error('The administrator history schema changed during a reference lookup.');
+    }
+    source = batchSource;
+    rows.push(...batchRows);
+  }
+  return {
+    source: source || 'admin_identity_history',
+    byId: new Map(rows.map((row) => [row.id, {
+      email: row.email,
+      isPrimaryOwner: row.is_primary_owner === true,
+    }])),
+  };
+}
+
 function warnAdminAccountMigrationMissing(error: unknown): void {
   if (warnedAdminAccountMigrationMissing) return;
   warnedAdminAccountMigrationMissing = true;
@@ -4012,6 +4085,36 @@ async function findSupabaseUserByEmail(email: string): Promise<{ id: string; ema
     if (!result.users || result.users.length < 100) return undefined;
   }
   throw new Error('The administrator directory is too large to search safely. Add the Auth user before inviting it.');
+}
+
+async function assertAdminEmailNotReserved(email: string): Promise<void> {
+  const query = new URLSearchParams({
+    email: `eq.${email.toLowerCase()}`,
+    select: 'email',
+    limit: '1',
+  });
+  let reservations: Array<{ email: string }>;
+  try {
+    reservations = await readSupabaseJson<Array<{ email: string }>>(
+      await supabaseAdminRequest(`rest/v1/admin_permanent_deletion_email_reservations?${query}`),
+    );
+  } catch (error) {
+    if (isMissingPermanentDeletionReservations(error)) {
+      try {
+        await readSupabaseJson<unknown>(
+          await supabaseAdminRequest('rest/v1/admin_identity_history?select=id&limit=0'),
+        );
+      } catch (historyError) {
+        if (isMissingAdminIdentityHistorySchema(historyError)) return;
+        throw historyError;
+      }
+      throw new Error('The permanent-deletion schema is partially available; email reservation checks cannot be skipped.');
+    }
+    throw error;
+  }
+  if (reservations.length) {
+    throw new Error('This email is reserved while archived administrator identity cleanup is pending. Retry the pending deletion before inviting it again.');
+  }
 }
 
 async function ensurePrimaryOwnerAccount(): Promise<void> {
@@ -5941,6 +6044,39 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         limit: '300',
       });
       const users = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_users?${query}`));
+      let deletionState: {
+        eligibleUserIds?: string[];
+        pendingDeletions?: Array<{
+          targetId: string;
+          email: string;
+          status: 'auth_delete_pending';
+          startedAt: string;
+          lastAttemptedAt: string;
+          attemptCount: number;
+          lastErrorStage?: string | null;
+          lastErrorCode?: string | null;
+        }>;
+      } = { eligibleUserIds: [], pendingDeletions: [] };
+      let deletionStateAvailable = false;
+      try {
+        deletionState = await readSupabaseJson<typeof deletionState>(
+          await supabaseAdminRequest('rest/v1/rpc/get_admin_permanent_deletion_state', {
+            method: 'POST',
+            body: JSON.stringify({ p_actor_id: currentAdmin(res)!.id }),
+          }),
+        );
+        deletionStateAvailable = true;
+      } catch (error) {
+        if (!isMissingPermanentDeletionStateFunction(error)) throw error;
+      }
+      const identityReferences = await readAdminIdentityReferences(
+        users.map((user) => String(user.invited_by || '')).filter(Boolean),
+      );
+      if ((identityReferences.source === 'admin_identity_history') !== deletionStateAvailable) {
+        throw new Error('The permanent-deletion schema is only partially available.');
+      }
+      const eligibleUserIds = new Set(deletionState.eligibleUserIds ?? []);
+      const pendingDeletionIds = new Set((deletionState.pendingDeletions ?? []).map((deletion) => deletion.targetId));
       const authStatuses: Array<AdminAuthStatus | undefined> = [];
       for (let index = 0; index < users.length; index += 10) {
         const batch = await Promise.all(users.slice(index, index + 10).map((user) =>
@@ -5948,7 +6084,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         ));
         authStatuses.push(...batch);
       }
-      const userEmailById = new Map(users.map((user) => [String(user.id), String(user.email)]));
       res.json({ users: users.map((user, index) => {
         const authUser = authStatuses[index];
         return {
@@ -5960,11 +6095,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           permissions: user.permissions || {},
           isPrimaryOwner: user.is_primary_owner === true,
           archivedAt: typeof user.archived_at === 'string' ? user.archived_at : null,
+          permanentlyDeleteEligible: eligibleUserIds.has(String(user.id)),
+          permanentlyDeletePending: pendingDeletionIds.has(String(user.id)),
           mustChangePassword: user.must_change_password === true,
           lastLoginAt: user.last_login_at || null,
           lastPasswordResetAt: user.last_password_reset_at || null,
           invitedBy: user.invited_by,
-          invitedByEmail: userEmailById.get(String(user.invited_by)) || null,
+          invitedByEmail: identityReferences.byId.get(String(user.invited_by))?.email || null,
           createdAt: user.created_at,
           updatedAt: user.updated_at,
           authIdentityExists: Boolean(authUser),
@@ -5975,13 +6112,15 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           authLastSignInAt: authUser?.last_sign_in_at || null,
           authBannedUntil: authUser?.banned_until || null,
         };
-      }) });
+      }), pendingDeletions: deletionState.pendingDeletions ?? [] });
     } catch (error) {
       console.error('[NearGrow Ads] Admin user list failed:', error);
       res.status(503).json({
         message: error instanceof SupabaseRequestError && /archived_at/i.test(error.providerMessage)
           ? 'Apply supabase/migrations/20261028230000_admin_account_archiving.sql before using administrator archival.'
-          : isMissingAdminAccountManagementSchema(error)
+        : error instanceof SupabaseRequestError && /admin_identity_history|admin_permanent_deletion/i.test(error.providerMessage)
+          ? 'Apply supabase/migrations/20261102100000_secure_archived_admin_permanent_deletion.sql before using permanent administrator deletion.'
+        : isMissingAdminAccountManagementSchema(error)
           ? 'Apply supabase/migrations/20261020000000_admin_account_management.sql before using Settings account management.'
           : 'Administrator records are temporarily unavailable.',
       });
@@ -6026,6 +6165,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let temporaryPasswordExpiry: string | undefined;
     let operationStage = 'admin_count';
     try {
+      operationStage = 'permanent_deletion_reservation_check';
+      await assertAdminEmailNotReserved(email);
       const duplicateQuery = new URLSearchParams({
         email: `eq.${email}`,
         select: 'id,email,username,role,status,is_primary_owner,archived_at',
@@ -6109,6 +6250,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         status = 'pending';
       }
       operationStage = 'admin_record_insert';
+      await assertAdminEmailNotReserved(email);
       const createResponse = await supabaseAdminRequest('rest/v1/admin_users', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
@@ -7094,6 +7236,182 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  app.post('/api/admin/users/:id/permanent-delete', async (req: Request, res: Response): Promise<void> => {
+    if (!requireOwner(req, res)) return;
+    const actor = currentAdmin(res)!;
+    if (actor.role !== 'owner' || !actor.isPrimaryOwner) {
+      res.status(403).json({ message: 'Only the verified Primary Owner can permanently delete an archived administrator.' });
+      return;
+    }
+    if (!enforceAdminRateLimit(req, res, adminManagedRecoveryAttempts, 'Too many administrator deletion attempts. Please wait 15 minutes and try again.')) return;
+    if (!isPermanentDeletionConfirmationValid(
+      typeof req.body?.targetEmail === 'string' ? req.body.targetEmail : '',
+      req.body?.targetEmail,
+      req.body?.confirmation,
+    )) {
+      res.status(400).json({ message: 'Type the target email and DELETE exactly to confirm permanent deletion.' });
+      return;
+    }
+    if (!await reauthenticateAdminRequest(
+      req,
+      res,
+      actor,
+      req.body?.currentPassword,
+      'Re-enter the Primary Owner password to permanently delete this archived administrator.',
+    )) return;
+
+    const targetId = req.params.id;
+    const targetEmail = String(req.body.targetEmail).trim().toLowerCase();
+    let stage: 'auth_lookup' | 'auth_delete' | 'auth_verification' | 'database_finalization' = 'auth_lookup';
+    const recordFailure = async (errorCode: string): Promise<void> => {
+      try {
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(
+          'rest/v1/rpc/record_admin_permanent_deletion_failure',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              p_actor_id: actor.id,
+              p_target_id: targetId,
+              p_stage: stage,
+              p_error_code: errorCode,
+            }),
+          },
+        ));
+      } catch (recordError) {
+        console.error('[NearGrow Ads] Permanent administrator deletion failure state could not be recorded.', {
+          stage,
+          errorName: recordError instanceof Error ? recordError.name : 'UnknownError',
+        });
+      }
+    };
+
+    try {
+      const started = await readSupabaseJson<{ status?: string; email?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/begin_admin_permanent_deletion', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_actor_id: actor.id,
+            p_target_id: targetId,
+            p_target_email: targetEmail,
+            p_confirmation: req.body.confirmation,
+          }),
+        }),
+      );
+      if (started.status === 'already_completed') {
+        res.status(409).json({ message: 'This administrator identity has already been permanently deleted.' });
+        return;
+      }
+      if (started.status !== 'auth_delete_pending' || started.email !== targetEmail) {
+        res.status(409).json({
+          message: started.status === 'email_reserved'
+            ? 'This email is already reserved by another identity-cleanup operation.'
+            : 'This account is not eligible. Only disabled archived or removed non-Owner accounts with no ownership-transfer history can be permanently deleted.',
+        });
+        return;
+      }
+
+      const readCleanupState = async () => {
+        const [authIdentity, emailIdentity] = await Promise.all([
+          readAdminAuthStatus(targetId),
+          findSupabaseUserByEmail(targetEmail),
+        ]);
+        const identityById = authIdentity
+          ? { id: authIdentity.id, email: authIdentity.email || '' }
+          : undefined;
+        const identityByEmail = emailIdentity
+          ? { id: emailIdentity.id, email: emailIdentity.email }
+          : undefined;
+        return {
+          decision: decideAdminAuthCleanup(targetId, targetEmail, identityById, identityByEmail),
+          authIdentityAbsent: !authIdentity,
+          emailIdentityAbsent: !emailIdentity,
+        };
+      };
+
+      stage = 'auth_lookup';
+      let cleanupState = await readCleanupState();
+      if (cleanupState.decision === 'identity-conflict') {
+        await recordFailure('auth_identity_mismatch');
+        res.status(409).json({
+          message: 'The target Auth identity does not match the archived account, or another Auth identity now uses this email. The email remains reserved; review the pending deletion before retrying.',
+        });
+        return;
+      }
+
+      if (cleanupState.decision === 'delete-auth-user') {
+        stage = 'auth_delete';
+        try {
+          await deleteSupabaseUser(targetId);
+        } catch (deleteError) {
+          cleanupState = await readCleanupState();
+          if (cleanupState.decision !== 'finalize') throw deleteError;
+        }
+      }
+
+      stage = 'auth_verification';
+      cleanupState = await readCleanupState();
+      if (cleanupState.decision === 'identity-conflict') {
+        await recordFailure('auth_identity_mismatch_after_delete');
+        res.status(409).json({
+          message: 'Auth cleanup completed for the archived identity, but the email is associated with another Auth identity. The email remains reserved pending review.',
+        });
+        return;
+      }
+      if (cleanupState.decision !== 'finalize' ||
+        !cleanupState.authIdentityAbsent ||
+        !cleanupState.emailIdentityAbsent) {
+        await recordFailure('auth_identity_still_present');
+        res.status(503).json({
+          message: 'The administrator has no CMS access, but Supabase Auth cleanup is not yet confirmed. The email remains reserved; retry this pending deletion.',
+        });
+        return;
+      }
+
+      stage = 'database_finalization';
+      const completed = await readSupabaseJson<{ status?: string; email?: string }>(
+        await supabaseAdminRequest('rest/v1/rpc/complete_admin_permanent_deletion', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_actor_id: actor.id,
+            p_target_id: targetId,
+          }),
+        }),
+      );
+      if (completed.status === 'auth_identity_present') {
+        await recordFailure('auth_identity_present_at_finalization');
+        res.status(409).json({
+          message: 'A Supabase Auth identity still uses this email. The deletion remains pending and the email remains reserved until identity cleanup is verified.',
+        });
+        return;
+      }
+      if (completed.status !== 'completed' || completed.email !== targetEmail) {
+        await recordFailure('database_finalization_not_confirmed');
+        res.status(503).json({
+          message: 'Auth identity absence was verified, but the database did not confirm finalization. The email remains reserved; retry this pending deletion.',
+        });
+        return;
+      }
+      res.json({
+        status: 'completed',
+        message: `The archived Admin and matching Supabase Auth identity were permanently deleted. Audit attribution was retained. ${targetEmail} is available for a new invitation.`,
+      });
+    } catch (error) {
+      const errorCode = error instanceof SupabaseRequestError
+        ? `supabase_${error.status}_${error.code || 'request'}`
+        : error instanceof Error ? error.name : 'unknown';
+      await recordFailure(errorCode);
+      console.error('[NearGrow Ads] Permanent administrator deletion is pending retry.', {
+        stage,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        status: error instanceof SupabaseRequestError ? error.status : undefined,
+        code: error instanceof SupabaseRequestError ? error.code : undefined,
+      });
+      res.status(503).json({
+        message: 'Permanent deletion did not finish. CMS access remains revoked and the email remains reserved. Retry the pending deletion after resolving the reported Supabase service issue.',
+      });
+    }
+  });
+
   app.post('/api/admin/profile/password', async (req: Request, res: Response): Promise<void> => {
     if (!requireAdmin(req, res)) return;
     const identity = currentAdmin(res)!;
@@ -7299,7 +7617,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'leads.export.generated',
       ];
       const auditDetectionParams = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(is_primary_owner)',
+        select: 'id,actor_id,target_id,action,details,created_at',
         action: `in.(${privilegedActions.join(',')})`,
         created_at: `gte.${detectionStart}`,
         order: 'created_at.desc,id.desc',
@@ -7307,6 +7625,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       });
       const auditDetectionEvents = await tableRows<Array<Record<string, unknown>>>(
         `rest/v1/admin_audit_logs?${auditDetectionParams}`,
+      );
+      const auditActorReferences = await readAdminIdentityReferences(
+        auditDetectionEvents.map((event) => String(event.actor_id || '')).filter(Boolean),
       );
       const sourceEvents: SecuritySourceEvent[] = [
         ...detectionEvents.map((event) => ({
@@ -7320,7 +7641,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           details: sanitizeSecurityDetails(event.details),
         })),
         ...auditDetectionEvents.map((event) => {
-          const actor = event.actor && typeof event.actor === 'object' ? event.actor as Record<string, unknown> : {};
+          const actor = auditActorReferences.byId.get(String(event.actor_id));
           return {
             id: String(event.id),
             eventType: 'audit',
@@ -7328,7 +7649,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             actorId: typeof event.actor_id === 'string' ? event.actor_id : null,
             action: String(event.action),
             details: sanitizeSecurityDetails(event.details),
-            ...(typeof actor.is_primary_owner === 'boolean' ? { actorIsPrimaryOwner: actor.is_primary_owner } : {}),
+            ...(actor ? { actorIsPrimaryOwner: actor.isPrimaryOwner } : {}),
           };
         }),
       ];
@@ -7409,7 +7730,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'admin.permissions.updated', 'admin.disabled', 'admin.removed', 'admin.access.updated',
       ];
       const accessParams = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(is_primary_owner)',
+        select: 'id,actor_id,target_id,action,section,details,created_at',
         action: `in.(${accessActions.join(',')})`,
         order: 'created_at.desc,id.desc',
         limit: '10',
@@ -7444,6 +7765,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         tableRows<Array<Record<string, unknown>>>(`rest/v1/security_alerts?${alertParams}`),
         tableRows<Array<Record<string, unknown>>>(`rest/v1/admin_audit_logs?${accessParams}`),
       ]);
+      const recentAccessActorReferences = await readAdminIdentityReferences(
+        recentAccessChanges.map((event) => String(event.actor_id || '')).filter(Boolean),
+      );
       const todayUtc = new Date();
       todayUtc.setUTCHours(0, 0, 0, 0);
       const timelineDaily = await Promise.all(Array.from({ length: 7 }, async (_unused, index) => {
@@ -7490,9 +7814,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           targetId: event.target_id,
           action: event.action,
           createdAt: event.created_at,
-          actorIsPrimaryOwner: typeof (event.actor as Record<string, unknown> | undefined)?.is_primary_owner === 'boolean'
-            ? (event.actor as Record<string, unknown>).is_primary_owner === true
-            : null,
+          actorIsPrimaryOwner: recentAccessActorReferences.byId.get(String(event.actor_id))?.isPrimaryOwner ?? null,
         })),
       });
     } catch (error) {
@@ -7607,7 +7929,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     const identity = currentAdmin(res)!;
     const filters = new URLSearchParams({
-      select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(email),target:admin_users!admin_audit_logs_target_id_fkey(email)',
+      select: 'id,actor_id,target_id,action,section,details,created_at',
       'created_at': `lt.${snapshotCutoff}`,
     });
     if (dateRange) {
@@ -7715,7 +8037,20 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           await pageResponse.text();
           throw new Error(`Audit export page failed (${pageResponse.status}).`);
         }
-        return await readSupabaseJson<Array<Record<string, unknown>>>(pageResponse);
+        const records = await readSupabaseJson<Array<Record<string, unknown>>>(pageResponse);
+        const identityReferences = await readAdminIdentityReferences(
+          records.flatMap((record) => [record.actor_id, record.target_id]
+            .filter((id): id is string => typeof id === 'string')),
+        );
+        return records.map((record) => ({
+          ...record,
+          actor: typeof record.actor_id === 'string'
+            ? { email: identityReferences.byId.get(record.actor_id)?.email || null }
+            : null,
+          target: typeof record.target_id === 'string'
+            ? { email: identityReferences.byId.get(record.target_id)?.email || null }
+            : null,
+        }));
       }, expectedCount)) {
         const safeRecord = sanitizeAuditRecord(normalizeAuditExportRecord(rawRecord));
         redactedValueCount += safeRecord.redactionCount;
@@ -7761,12 +8096,26 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     if (!requireOwner(req, res)) return;
     try {
       const query = new URLSearchParams({
-        select: 'id,actor_id,target_id,action,section,details,created_at,actor:admin_users!admin_audit_logs_actor_id_fkey(email),target:admin_users!admin_audit_logs_target_id_fkey(email)',
+        select: 'id,actor_id,target_id,action,section,details,created_at',
         order: 'created_at.desc',
         limit: '1000',
       });
       const logs = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_audit_logs?${query}`));
-      res.json({ logs });
+      const identityReferences = await readAdminIdentityReferences(
+        logs.flatMap((record) => [record.actor_id, record.target_id]
+          .filter((id): id is string => typeof id === 'string')),
+      );
+      res.json({
+        logs: logs.map((record) => ({
+          ...record,
+          actor: typeof record.actor_id === 'string'
+            ? { email: identityReferences.byId.get(record.actor_id)?.email || null }
+            : null,
+          target: typeof record.target_id === 'string'
+            ? { email: identityReferences.byId.get(record.target_id)?.email || null }
+            : null,
+        })),
+      });
     } catch (error) {
       console.error('[NearGrow Ads] Administrator audit log load failed:', error);
       res.status(503).json({ message: 'Security audit records are temporarily unavailable.' });
@@ -7783,14 +8132,29 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       const query = new URLSearchParams({
         or: `(from_user_id.eq.${identity.id},to_user_id.eq.${identity.id})`,
-        select: 'id,from_user_id,to_user_id,status,created_at,expires_at,accepted_at,from_user:admin_users!admin_ownership_transfers_from_user_id_fkey(email),to_user:admin_users!admin_ownership_transfers_to_user_id_fkey(email)',
+        select: 'id,from_user_id,to_user_id,status,created_at,expires_at,accepted_at',
         order: 'created_at.desc',
         limit: '100',
       });
       const transfers = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_ownership_transfers?${query}`));
+      const identityReferences = await readAdminIdentityReferences(
+        transfers.flatMap((transfer) => [transfer.from_user_id, transfer.to_user_id]
+          .filter((id): id is string => typeof id === 'string')),
+      );
       const ownersQuery = new URLSearchParams({ role: 'eq.owner', status: 'eq.active', select: 'id,email,is_primary_owner', order: 'email.asc' });
       const owners = await readSupabaseJson<Array<Record<string, unknown>>>(await supabaseAdminRequest(`rest/v1/admin_users?${ownersQuery}`));
-      res.json({ transfers, owners });
+      res.json({
+        transfers: transfers.map((transfer) => ({
+          ...transfer,
+          from_user: typeof transfer.from_user_id === 'string'
+            ? { email: identityReferences.byId.get(transfer.from_user_id)?.email || null }
+            : null,
+          to_user: typeof transfer.to_user_id === 'string'
+            ? { email: identityReferences.byId.get(transfer.to_user_id)?.email || null }
+            : null,
+        })),
+        owners,
+      });
     } catch (error) {
       console.error('[NearGrow Ads] Ownership records load failed:', error);
       res.status(503).json({ message: 'Ownership records are temporarily unavailable.' });
