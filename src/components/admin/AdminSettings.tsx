@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { ChevronDown, Download, Eye, EyeOff, LoaderCircle, RefreshCw, Save, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
 import { getAdminArchiveOutcome } from './adminArchiveOutcome';
 import { canCancelAdminInvitation } from './adminInvitationPolicy';
 
@@ -33,6 +33,23 @@ interface AdminUser {
   invitedBy?: string | null;
   invitedByEmail?: string | null;
   updatedAt?: string;
+  permanentlyDeleteEligible?: boolean;
+  permanentlyDeletePending?: boolean;
+}
+
+interface PendingPermanentDeletion {
+  targetId: string;
+  email: string;
+  status: 'auth_delete_pending';
+  startedAt: string;
+  lastAttemptedAt: string;
+  attemptCount: number;
+  lastErrorStage?: string | null;
+}
+
+interface PermanentDeletionTarget {
+  id: string;
+  email: string;
 }
 
 interface SessionRecord {
@@ -181,6 +198,7 @@ function Panel({ title, description, actions, children }: { title: string; descr
 export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: string) => void }) {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [pendingPermanentDeletions, setPendingPermanentDeletions] = useState<PendingPermanentDeletion[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [logs, setLogs] = useState<AuditRecord[]>([]);
   const [transfers, setTransfers] = useState<Array<Record<string, unknown>>>([]);
@@ -203,6 +221,9 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
   const [resetPasswordValues, setResetPasswordValues] = useState({ newPassword: '', confirmPassword: '' });
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [reauthPassword, setReauthPassword] = useState('');
+  const [permanentDeletionTarget, setPermanentDeletionTarget] = useState<PermanentDeletionTarget | null>(null);
+  const [permanentDeletionEmailConfirmation, setPermanentDeletionEmailConfirmation] = useState('');
+  const [permanentDeletionWordConfirmation, setPermanentDeletionWordConfirmation] = useState('');
   const [recipientId, setRecipientId] = useState('');
   const [passwordValues, setPasswordValues] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [showPasswords, setShowPasswords] = useState(false);
@@ -279,12 +300,13 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       setIdentity(session.user);
       if (session.user.isPrimaryOwner) {
         const [userData, auditData, ownershipData, allSessions] = await Promise.all([
-          api<{ users: AdminUser[] }>('/api/admin/users'),
+          api<{ users: AdminUser[]; pendingDeletions: PendingPermanentDeletion[] }>('/api/admin/users'),
           api<{ logs: AuditRecord[] }>('/api/admin/audit-logs'),
           api<{ transfers: Array<Record<string, unknown>>; owners: Array<{ id: string; email: string; is_primary_owner: boolean }> }>('/api/admin/ownership'),
           api<{ sessions: SessionRecord[] }>('/api/admin/sessions'),
         ]);
         setUsers(userData.users);
+        setPendingPermanentDeletions(userData.pendingDeletions ?? []);
         savedUserAccess.current = new Map(userData.users.map((user) => [user.id, adminUserAccessSnapshot(user)]));
         setLogs(auditData.logs);
         setTransfers(ownershipData.transfers);
@@ -292,6 +314,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         setSessions(allSessions.sessions || []);
       } else if (session.user.role === 'owner') {
         setUsers([]);
+        setPendingPermanentDeletions([]);
         setLogs([]);
         setSessions([]);
         const ownershipData = await api<{ transfers: Array<Record<string, unknown>>; owners: Array<{ id: string; email: string; is_primary_owner: boolean }> }>('/api/admin/ownership');
@@ -299,6 +322,7 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
         setOwners(ownershipData.owners);
       } else {
         setUsers([]);
+        setPendingPermanentDeletions([]);
         setLogs([]);
         setSessions([]);
         setTransfers([]);
@@ -324,8 +348,10 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       setNoticeIsWarning(typeof outcome !== 'string' && outcome.warning === true);
       setReauthPassword('');
       await loadData();
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The settings action could not be completed.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -468,6 +494,32 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
       setAdminTab('history');
       return result.message;
     });
+  };
+
+  const permanentlyDeleteAdmin = async () => {
+    const target = permanentDeletionTarget;
+    if (!target) return;
+    const completed = await runAction(async () => {
+      const result = await api<{ status: 'completed'; message: string }>(
+        `/api/admin/users/${encodeURIComponent(target.id)}/permanent-delete`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentPassword: reauthPassword,
+            targetEmail: permanentDeletionEmailConfirmation,
+            confirmation: permanentDeletionWordConfirmation,
+          }),
+        },
+      );
+      setAdminTab('history');
+      return result.message;
+    });
+    if (completed) {
+      setPermanentDeletionTarget(null);
+      setPermanentDeletionEmailConfirmation('');
+      setPermanentDeletionWordConfirmation('');
+    }
   };
 
   const cancelInvitation = async (user: AdminUser) => {
@@ -1138,6 +1190,31 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
               <div className="rounded-xl border border-amber-300/20 bg-amber-950/15 p-3 text-[10px] leading-5 text-amber-100">
                 Expired invitations are not counted because Supabase does not expose a reliable per-invitation expiry value here. Dispatch status means Supabase Auth accepted the request; it does not confirm inbox delivery. Historical acceptance times are shown only where an audit event was recorded.
               </div>
+              {pendingPermanentDeletions.length > 0 && <section className="rounded-xl border border-rose-300/30 bg-rose-950/20 p-4" aria-label="Pending permanent account deletions">
+                <h3 className="text-sm font-semibold text-rose-100">Permanent deletion requires retry</h3>
+                <p className="mt-1 text-[11px] leading-5 text-rose-100/80">CMS access is revoked and each email remains reserved until Auth deletion and database finalization are verified.</p>
+                <div className="mt-3 space-y-2">
+                  {pendingPermanentDeletions.map((pending) => <div key={pending.targetId} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200/10 bg-black/10 p-3">
+                    <div className="min-w-0">
+                      <p className="break-all text-xs font-semibold text-white">{pending.email}</p>
+                      <p className="mt-1 text-[10px] text-rose-100/70">Attempt {pending.attemptCount}; last tried {new Date(pending.lastAttemptedAt).toLocaleString()}{pending.lastErrorStage ? ` · ${pending.lastErrorStage}` : ''}</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy || !reauthPassword}
+                      title={!reauthPassword ? 'Enter the Primary Owner password above before retrying.' : undefined}
+                      className="rounded-lg border border-rose-300/40 px-3 py-2 text-[10px] font-semibold text-rose-100 hover:bg-rose-950/40 disabled:opacity-50"
+                      onClick={() => {
+                        setPermanentDeletionTarget({ id: pending.targetId, email: pending.email });
+                        setPermanentDeletionEmailConfirmation('');
+                        setPermanentDeletionWordConfirmation('');
+                      }}
+                    >
+                      Retry Permanent Delete
+                    </button>
+                  </div>)}
+                </div>
+              </section>}
               <div className="grid gap-3 sm:grid-cols-[1fr_220px]">
                 <label className="text-xs font-medium text-[#B8C7BC]">Search administrators
                   <input className={`${inputClass} mt-1.5`} type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Email, username, role or inviter" />
@@ -1200,8 +1277,19 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                             {!reauthPassword && <span className="text-[10px] leading-4 text-amber-200/80">Enter the Primary Owner password above to enable cancellation.</span>}
                           </>}
                           {user.status === 'active' && <span className="text-[10px] leading-4 text-[#91A195]">Active account: use Remove CMS Access in Admin Accounts instead.</span>}
-                          {user.status === 'disabled' && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists || user.isPrimaryOwner} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : !user.authIdentityExists ? 'The original Supabase Auth identity is unavailable; automatic replacement is blocked.' : user.isPrimaryOwner ? 'Primary Owner identity cannot be recovered through delegated account management.' : undefined} className="rounded-lg border border-[#67D8B7]/30 px-2 py-1.5 text-left text-[10px] text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.archivedAt ? 'Restore / Re-invite CMS Access' : 'Re-invite / Recover CMS Access'}</button>}
+                          {user.status === 'disabled' && !user.permanentlyDeletePending && <button type="button" disabled={busy || !reauthPassword || !user.authIdentityExists || user.isPrimaryOwner} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : !user.authIdentityExists ? 'The original Supabase Auth identity is unavailable; automatic replacement is blocked.' : user.isPrimaryOwner ? 'Primary Owner identity cannot be recovered through delegated account management.' : undefined} className="rounded-lg border border-[#67D8B7]/30 px-2 py-1.5 text-left text-[10px] text-[#B8F1DC] hover:bg-[#67D8B7]/10 disabled:opacity-50" onClick={() => void requestReset(user)}>{user.archivedAt ? 'Restore / Re-invite CMS Access' : 'Re-invite / Recover CMS Access'}</button>}
                           {user.status === 'disabled' && !user.archivedAt && user.role !== 'owner' && <button type="button" disabled={busy || !reauthPassword} title={!reauthPassword ? 'Enter the Primary Owner re-authentication password above first.' : undefined} className="rounded-lg border border-rose-300/20 px-2 py-1.5 text-left text-[10px] text-rose-200 hover:bg-rose-950/20 disabled:opacity-50" onClick={() => void archiveUser(user)}>Archive from Active List</button>}
+                          {user.status === 'disabled' && user.permanentlyDeleteEligible && (user.archivedAt || historyStatus(user) === 'removed') && <button
+                            type="button"
+                            disabled={busy || !reauthPassword}
+                            title={!reauthPassword ? 'Enter the Primary Owner password above before permanent deletion.' : 'Permanently delete this archived identity after typed confirmation.'}
+                            className="rounded-lg border border-rose-400/50 bg-rose-950/30 px-2 py-1.5 text-left text-[10px] font-semibold text-rose-100 hover:bg-rose-900/40 disabled:opacity-50"
+                            onClick={() => {
+                              setPermanentDeletionTarget({ id: user.id, email: user.email });
+                              setPermanentDeletionEmailConfirmation('');
+                              setPermanentDeletionWordConfirmation('');
+                            }}
+                          >Permanently Delete</button>}
                           {user.archivedAt && <time className="px-2 py-1 text-[10px] text-[#91A195]">Archived {new Date(user.archivedAt).toLocaleString()}</time>}
                         </div></td>
                       </tr>;
@@ -1433,6 +1521,58 @@ export function AdminSettings({ onNavigate: _onNavigate }: { onNavigate: (path: 
                 </button>}
             </div>
           </form>
+        </section>
+      </div>}
+      {permanentDeletionTarget && <div
+        className="fixed inset-0 z-[110] grid place-items-center overflow-y-auto bg-black/75 p-4"
+        onMouseDown={(event) => {
+          if (!busy && event.target === event.currentTarget) setPermanentDeletionTarget(null);
+        }}
+      >
+        <section role="dialog" aria-modal="true" aria-labelledby="permanent-delete-title" className="w-full max-w-lg rounded-2xl border border-rose-300/30 bg-[#19241D] p-5 text-[#ECF3EE] shadow-2xl sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-rose-500/10 text-rose-200"><Trash2 className="h-5 w-5" aria-hidden="true" /></div>
+            <div>
+              <h2 id="permanent-delete-title" className="text-base font-semibold text-rose-100">Permanently delete administrator?</h2>
+              <p className="mt-2 text-xs leading-5 text-[#C8D8CA]">This irreversible action removes the archived administrator’s CMS and Supabase Auth identity. Historical audit attribution is retained. The email cannot be reused until cleanup is verified.</p>
+            </div>
+          </div>
+          <div className="mt-4 rounded-lg border border-rose-200/20 bg-rose-950/20 px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-wide text-rose-100/70">Account to delete</p>
+            <p className="mt-1 break-all text-sm font-semibold text-white">{permanentDeletionTarget.email}</p>
+          </div>
+          <div className="mt-4 space-y-3">
+            <label className="block text-xs font-medium text-[#B8C7BC]">Type the account email to confirm
+              <input
+                autoComplete="off"
+                autoFocus
+                className={`${inputClass} mt-1.5`}
+                type="email"
+                value={permanentDeletionEmailConfirmation}
+                onChange={(event) => setPermanentDeletionEmailConfirmation(event.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <label className="block text-xs font-medium text-[#B8C7BC]">Type DELETE to confirm
+              <input
+                autoComplete="off"
+                className={`${inputClass} mt-1.5`}
+                type="text"
+                value={permanentDeletionWordConfirmation}
+                onChange={(event) => setPermanentDeletionWordConfirmation(event.target.value)}
+                disabled={busy}
+              />
+            </label>
+          </div>
+          <div className="mt-5 flex flex-col-reverse gap-2 border-t border-[#304135] pt-4 sm:flex-row sm:justify-end">
+            <button type="button" className="min-h-10 rounded-xl border border-[#47594C] px-4 py-2 text-xs font-semibold text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50" onClick={() => setPermanentDeletionTarget(null)} disabled={busy}>Cancel</button>
+            <button
+              type="button"
+              className="min-h-10 rounded-xl border border-rose-300/50 bg-rose-950/30 px-4 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busy || !reauthPassword || permanentDeletionEmailConfirmation.trim().toLowerCase() !== permanentDeletionTarget.email.trim().toLowerCase() || permanentDeletionWordConfirmation !== 'DELETE'}
+              onClick={() => void permanentlyDeleteAdmin()}
+            >{busy ? 'Processing…' : 'Permanently Delete'}</button>
+          </div>
         </section>
       </div>}
     </div>
