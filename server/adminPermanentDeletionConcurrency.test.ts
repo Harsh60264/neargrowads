@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { test } from 'node:test';
 
 const databaseUrl = process.env.ADMIN_PERMANENT_DELETION_TEST_DATABASE_URL;
@@ -57,26 +58,11 @@ function startPsql(sql: string): {
 test('concurrent deletion requests serialize and retain one pending job', {
   skip: !databaseUrl,
 }, async () => {
+  await assertIsolatedTestDatabase();
   const actorId = randomUUID();
   const targetId = randomUUID();
   const actorEmail = `${actorId}@example.test`;
   const targetEmail = `${targetId}@example.test`;
-  const guardedDatabase = await new Promise<string>((resolve, reject) => {
-    const child = spawn(psqlPath, ['-X', '-v', 'ON_ERROR_STOP=1', '-A', '-t', '-d', databaseUrl!]);
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) reject(new Error(stderr || `psql exited with status ${code}`));
-      else resolve(stdout.trim());
-    });
-    child.stdin.end('select current_database();');
-  });
-  assert.match(guardedDatabase, /^admin_delete_test_/,
-    'concurrency tests must use an isolated admin_delete_test_* database');
-
   const fixture = [
     `insert into auth.users (id,email) values ('${actorId}','${actorEmail}'),('${targetId}','${targetEmail}');`,
     `insert into public.admin_users (id,email,role,status,is_primary_owner,archived_at) values ('${actorId}','${actorEmail}','owner','active',true,null),('${targetId}','${targetEmail}','custom_admin','disabled',false,clock_timestamp());`,
@@ -141,6 +127,7 @@ test('concurrent deletion requests serialize and retain one pending job', {
 test('an Auth email claim already in flight serializes before a reservation is created', {
   skip: !databaseUrl,
 }, async () => {
+  await assertIsolatedTestDatabase();
   const actorId = randomUUID();
   const targetId = randomUUID();
   const competingIdentityId = randomUUID();
@@ -230,4 +217,29 @@ function runPsql(sql: string): Promise<string> {
     });
     child.stdin.end(sql);
   });
+}
+
+async function assertIsolatedTestDatabase(): Promise<void> {
+  let connection: URL;
+  try {
+    connection = new URL(databaseUrl!);
+  } catch {
+    throw new Error('Concurrency tests require a local PostgreSQL URL; no database writes were attempted.');
+  }
+
+  if (!['postgres:', 'postgresql:'].includes(connection.protocol) ||
+    !['localhost', '127.0.0.1', '[::1]'].includes(connection.hostname.toLowerCase())) {
+    throw new Error('Concurrency tests may connect only to local PostgreSQL; no database writes were attempted.');
+  }
+
+  const result = await runPsql(
+    "select current_database() || '|' || coalesce(inet_server_addr()::text, 'local-socket');",
+  );
+  const [databaseName, serverAddress] = result.trim().split('|');
+  if (!/^admin_delete_test_[a-z0-9_]+$/i.test(databaseName || '') ||
+    (serverAddress !== 'local-socket' && isIP(serverAddress || '') !== 6 && isIP(serverAddress || '') !== 4) ||
+    (serverAddress && serverAddress !== 'local-socket' &&
+      serverAddress !== '127.0.0.1' && serverAddress !== '::1')) {
+    throw new Error('Concurrency tests require a local loopback database named admin_delete_test_*; no database writes were attempted.');
+  }
 }

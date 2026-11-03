@@ -16,6 +16,10 @@ const sqlRaceTest = readFileSync(
   new URL('../supabase/tests/admin_permanent_deletion_auth_email_race.sql', import.meta.url),
   'utf8',
 );
+const concurrencyTest = readFileSync(
+  new URL('./adminPermanentDeletionConcurrency.test.ts', import.meta.url),
+  'utf8',
+);
 
 const primaryOwner = { id: 'owner-id', isPrimaryOwner: true };
 const archivedAdmin = {
@@ -151,6 +155,29 @@ test('parallel requests serialize on the target row and only one permanent-delet
   assert.match(migration, /where id = p_target_id\s+for update/i);
   assert.match(migration, /where target_id = p_target_id\s+for update/i);
   assert.match(migration, /email text primary key/i);
+});
+
+test('database concurrency tests require local loopback and an isolated named database before writes', () => {
+  const testBodies = [
+    concurrencyTest.slice(
+      concurrencyTest.indexOf("test('concurrent deletion requests"),
+      concurrencyTest.indexOf("test('an Auth email claim"),
+    ),
+    concurrencyTest.slice(
+      concurrencyTest.indexOf("test('an Auth email claim"),
+      concurrencyTest.indexOf('function runPsql'),
+    ),
+  ];
+
+  assert.match(concurrencyTest, /function assertIsolatedTestDatabase/);
+  assert.match(concurrencyTest, /new URL\(databaseUrl!\)/);
+  assert.match(concurrencyTest, /\['localhost', '127\.0\.0\.1', '\[::1\]'\]/);
+  assert.match(concurrencyTest, /admin_delete_test_\[a-z0-9_\]\+/i);
+  assert.match(concurrencyTest, /serverAddress !== '127\.0\.0\.1' && serverAddress !== '::1'/);
+  for (const body of testBodies) {
+    assert.ok(body.indexOf('await assertIsolatedTestDatabase()') >= 0);
+    assert.ok(body.indexOf('await assertIsolatedTestDatabase()') < body.indexOf('const fixture'));
+  }
 });
 
 test('starting cleanup revokes CMS sessions and invalidates invitation and temporary-password state', () => {

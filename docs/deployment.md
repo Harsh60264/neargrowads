@@ -184,6 +184,20 @@ The release remains **NO-GO** for a destructive schema change until the change o
 
 Known hosted Auth limitation: deleting the Auth identity prevents refresh-token renewal but cannot guarantee immediate invalidation of already-issued access JWTs; those may remain valid until expiry. The workflow revokes NearGrow CMS sessions. Production must continue to deny direct access to private CMS data through Auth-token grants/RLS and accept the remaining JWT lifetime, or treat this as a release blocker if immediate global token invalidation is required.
 
+#### Permanent Delete concurrency verification
+
+The two PostgreSQL concurrency tests in `server/adminPermanentDeletionConcurrency.test.ts` are skipped unless `ADMIN_PERMANENT_DELETION_TEST_DATABASE_URL` is configured. They require a real PostgreSQL server with the reviewed schema and Migration 36 routines/triggers; mocks or the normal unit suite cannot verify transaction locks, trigger ordering, or `pg_stat_activity` lock waits. The test runner now refuses non-loopback hosts and databases not named `admin_delete_test_*` before it inserts synthetic rows. Never point it at Production or Staging.
+
+Run them only when an authorized disposable local PostgreSQL test database is already available and provisioned with the required Supabase Auth schema and reviewed migrations:
+
+```powershell
+npm test -- server/adminPermanentDeletionConcurrency.test.ts
+```
+
+Provide the test URL through the process environment without printing or committing it. The first test exercises two concurrent deletion starts and competing finalizers; the second holds an Auth email-claim transaction open while deletion attempts to acquire the advisory lock, then confirms reservation and finalization behavior. Both create synthetic test rows and perform cleanup, so use only the isolated test database. If the harness is absent, the skipped result is not a pass.
+
+`supabase/tests/admin_permanent_deletion_auth_email_race.sql` is separately guarded to `admin_delete_test_*` and wraps its fixtures in a transaction that rolls back. Its Auth-email case models the ordering “Auth absence checked, then competing insert while the reservation is pending” sequentially in one transaction. It is a useful trigger/reservation regression but does **not** create parallel sessions or prove that either request waited on a lock. A safe manual substitute for the two concurrency tests is therefore to run the existing Node tests against the isolated local database when available; manually retrying against either hosted project is not safe and does not replace this evidence. Until those tests actually execute and pass in that harness, parallel deletion/email-reservation races remain unverified and require explicit release-risk acceptance.
+
 ### Admin invitation security and email templates
 
 The invitation-session isolation, callback hardening, session-management authorization, and Admin Accounts accordion changes do not require a new database migration. Keep the existing `20261028200000_secure_admin_invitation_recovery.sql` and `20261028230000_admin_account_archiving.sql` schema in place; do not reapply or edit those migrations for this release.
