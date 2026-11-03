@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$ProjectRef = 'axbjzmdokfoftzfgwiql',
-  [string]$PsqlPath = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
+  [string]$PsqlPath = 'C:\Program Files\PostgreSQL\18\bin\psql.exe',
+  [switch]$SchemaEvidenceOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,9 +11,12 @@ Assert-ProductionAdminDeletionTarget -ProjectRef $ProjectRef
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $migrationDirectory = Join-Path $repoRoot 'supabase\migrations'
-$localMigrations = Get-ProductionAdminDeletionMigrationInventory -MigrationDirectory $migrationDirectory
 $migrationFile = Join-Path $migrationDirectory '20261102100000_secure_archived_admin_permanent_deletion.sql'
 Write-Output "Verified Migration 36 SHA-256: $((Get-FileHash -LiteralPath $migrationFile -Algorithm SHA256).Hash)"
+$localMigrations = $null
+if (-not $SchemaEvidenceOnly) {
+  $localMigrations = Get-ProductionAdminDeletionMigrationInventory -MigrationDirectory $migrationDirectory
+}
 
 $sql = @'
 SET default_transaction_read_only = on;
@@ -145,18 +149,21 @@ table_checks AS (
         SELECT bool_and(has_table_privilege('service_role', relation.oid, privilege))
         FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) required(privilege)
       )
-      AND NOT has_table_privilege('anon', relation.oid, 'SELECT')
-      AND NOT has_table_privilege('anon', relation.oid, 'INSERT')
-      AND NOT has_table_privilege('anon', relation.oid, 'UPDATE')
-      AND NOT has_table_privilege('anon', relation.oid, 'DELETE')
-      AND NOT has_table_privilege('authenticated', relation.oid, 'SELECT')
-      AND NOT has_table_privilege('authenticated', relation.oid, 'INSERT')
-      AND NOT has_table_privilege('authenticated', relation.oid, 'UPDATE')
-      AND NOT has_table_privilege('authenticated', relation.oid, 'DELETE')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) privilege
+        WHERE has_table_privilege('anon', relation.oid, privilege)
+          OR has_table_privilege('authenticated', relation.oid, privilege)
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
         WHERE acl.grantee = 0
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(relation.relacl, acldefault('r', relation.relowner))) acl
+        WHERE acl.grantee NOT IN (relation.relowner, 'service_role'::regrole)
       ),
       false
     ) AS passed
@@ -169,6 +176,242 @@ SELECT 'CHECK|table_' || table_name || '|' ||
   '|RLS enabled, service_role privileges present, no direct PUBLIC/anon/authenticated access'
 FROM table_checks
 ORDER BY table_name;
+
+WITH expected_columns(table_name, column_name, type_name, is_not_null, default_expression) AS (
+  VALUES
+    ('admin_identity_history', 'id', 'uuid', true, ''),
+    ('admin_identity_history', 'email', 'text', true, ''),
+    ('admin_identity_history', 'role', 'text', true, ''),
+    ('admin_identity_history', 'is_primary_owner', 'boolean', true, 'false'),
+    ('admin_identity_history', 'created_at', 'timestamp with time zone', true, ''),
+    ('admin_identity_history', 'deleted_at', 'timestamp with time zone', false, ''),
+    ('admin_permanent_deletion_jobs', 'target_id', 'uuid', true, ''),
+    ('admin_permanent_deletion_jobs', 'actor_id', 'uuid', true, ''),
+    ('admin_permanent_deletion_jobs', 'target_email', 'text', true, ''),
+    ('admin_permanent_deletion_jobs', 'status', 'text', true, ''),
+    ('admin_permanent_deletion_jobs', 'attempt_count', 'integer', true, '1'),
+    ('admin_permanent_deletion_jobs', 'started_at', 'timestamp with time zone', true, 'now()'),
+    ('admin_permanent_deletion_jobs', 'last_attempted_at', 'timestamp with time zone', true, 'now()'),
+    ('admin_permanent_deletion_jobs', 'completed_at', 'timestamp with time zone', false, ''),
+    ('admin_permanent_deletion_jobs', 'last_error_stage', 'text', false, ''),
+    ('admin_permanent_deletion_jobs', 'last_error_code', 'text', false, ''),
+    ('admin_permanent_deletion_email_reservations', 'email', 'text', true, ''),
+    ('admin_permanent_deletion_email_reservations', 'target_id', 'uuid', true, ''),
+    ('admin_permanent_deletion_email_reservations', 'created_at', 'timestamp with time zone', true, 'now()')
+),
+actual_columns AS (
+  SELECT relation.relname AS table_name,
+    attribute.attname AS column_name,
+    format_type(attribute.atttypid, attribute.atttypmod) AS type_name,
+    attribute.attnotnull AS is_not_null,
+    COALESCE(pg_get_expr(default_value.adbin, default_value.adrelid), '') AS default_expression
+  FROM pg_class relation
+  JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+  JOIN pg_attribute attribute ON attribute.attrelid = relation.oid
+  LEFT JOIN pg_attrdef default_value
+    ON default_value.adrelid = relation.oid AND default_value.adnum = attribute.attnum
+  WHERE namespace.nspname = 'public'
+    AND relation.relname IN (
+      'admin_identity_history',
+      'admin_permanent_deletion_jobs',
+      'admin_permanent_deletion_email_reservations'
+    )
+    AND attribute.attnum > 0
+    AND NOT attribute.attisdropped
+)
+SELECT 'CHECK|migration_36_table_definitions|' ||
+  CASE WHEN
+    (SELECT count(*) FROM actual_columns) = (SELECT count(*) FROM expected_columns)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM expected_columns expected
+      LEFT JOIN actual_columns actual
+        ON actual.table_name = expected.table_name
+        AND actual.column_name = expected.column_name
+      WHERE actual.column_name IS NULL
+        OR actual.type_name IS DISTINCT FROM expected.type_name
+        OR actual.is_not_null IS DISTINCT FROM expected.is_not_null
+        OR actual.default_expression IS DISTINCT FROM expected.default_expression
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM actual_columns actual
+      LEFT JOIN expected_columns expected
+        ON expected.table_name = actual.table_name
+        AND expected.column_name = actual.column_name
+      WHERE expected.column_name IS NULL
+    )
+  THEN 'PASS' ELSE 'FAIL' END ||
+  '|the three Migration 36 tables have exactly the expected columns, types, nullability and defaults';
+
+WITH expected_constraints(table_name, constraint_name, constraint_type, required_fragments, referenced_table) AS (
+  VALUES
+    ('admin_identity_history', 'admin_identity_history_pkey', 'p', ARRAY['primary key', 'id']::text[], null::text),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_jobs_pkey', 'p', ARRAY['primary key', 'target_id']::text[], null::text),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_jobs_target_id_fkey', 'f', ARRAY['foreign key', 'target_id', 'references', 'admin_identity_history', 'id']::text[], 'admin_identity_history'),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_jobs_actor_id_fkey', 'f', ARRAY['foreign key', 'actor_id', 'references', 'admin_identity_history', 'id']::text[], 'admin_identity_history'),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_jobs_status_check', 'c', ARRAY['status', 'auth_delete_pending', 'completed']::text[], null::text),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_jobs_attempt_count_check', 'c', ARRAY['attempt_count', '> 0']::text[], null::text),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_email_lowercase', 'c', ARRAY['target_email', '=', 'lower']::text[], null::text),
+    ('admin_permanent_deletion_jobs', 'admin_permanent_deletion_completion_state', 'c', ARRAY['status', 'completed', 'completed_at', 'auth_delete_pending', 'or']::text[], null::text),
+    ('admin_permanent_deletion_email_reservations', 'admin_permanent_deletion_email_reservations_pkey', 'p', ARRAY['primary key', 'email']::text[], null::text),
+    ('admin_permanent_deletion_email_reservations', 'admin_permanent_deletion_email_reservations_target_id_key', 'u', ARRAY['unique', 'target_id']::text[], null::text),
+    ('admin_permanent_deletion_email_reservations', 'admin_permanent_deletion_email_reservations_target_id_fkey', 'f', ARRAY['foreign key', 'target_id', 'references', 'admin_permanent_deletion_jobs', 'id']::text[], 'admin_permanent_deletion_jobs'),
+    ('admin_permanent_deletion_email_reservations', 'admin_permanent_deletion_reservation_email_lowercase', 'c', ARRAY['email', '=', 'lower']::text[], null::text)
+),
+actual_constraints AS (
+  SELECT relation.relname AS table_name,
+    constraint_row.conname AS constraint_name,
+    constraint_row.contype AS constraint_type,
+    constraint_row.convalidated AS is_validated,
+    lower(pg_get_constraintdef(constraint_row.oid)) AS definition,
+    constraint_row.confrelid AS referenced_table,
+    constraint_row.confdeltype AS delete_action
+  FROM pg_constraint constraint_row
+  JOIN pg_class relation ON relation.oid = constraint_row.conrelid
+  JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+  WHERE namespace.nspname = 'public'
+    AND relation.relname IN (
+      'admin_identity_history',
+      'admin_permanent_deletion_jobs',
+      'admin_permanent_deletion_email_reservations'
+    )
+),
+actual_indexes AS (
+  SELECT index_relation.relname AS index_name,
+    table_relation.relname AS table_name,
+    index_row.indisunique AND index_row.indisvalid AND index_row.indisready AS is_expected_unique_index
+  FROM pg_index index_row
+  JOIN pg_class index_relation ON index_relation.oid = index_row.indexrelid
+  JOIN pg_class table_relation ON table_relation.oid = index_row.indrelid
+  JOIN pg_namespace namespace ON namespace.oid = table_relation.relnamespace
+  WHERE namespace.nspname = 'public'
+    AND table_relation.relname IN (
+      'admin_identity_history',
+      'admin_permanent_deletion_jobs',
+      'admin_permanent_deletion_email_reservations'
+    )
+),
+expected_indexes(index_name, table_name) AS (
+  VALUES
+    ('admin_identity_history_pkey', 'admin_identity_history'),
+    ('admin_permanent_deletion_jobs_pkey', 'admin_permanent_deletion_jobs'),
+    ('admin_permanent_deletion_email_reservations_pkey', 'admin_permanent_deletion_email_reservations'),
+    ('admin_permanent_deletion_email_reservations_target_id_key', 'admin_permanent_deletion_email_reservations')
+)
+SELECT 'CHECK|migration_36_table_constraints|' ||
+  CASE WHEN
+    (SELECT count(*) FROM actual_constraints) = (SELECT count(*) FROM expected_constraints)
+    AND (SELECT count(*) FROM actual_indexes) = (SELECT count(*) FROM expected_indexes)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM expected_indexes expected
+      LEFT JOIN actual_indexes actual
+        ON actual.index_name = expected.index_name
+        AND actual.table_name = expected.table_name
+      WHERE actual.index_name IS NULL
+        OR NOT actual.is_expected_unique_index
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM expected_constraints expected
+      LEFT JOIN actual_constraints actual
+        ON actual.table_name = expected.table_name
+        AND actual.constraint_name = expected.constraint_name
+      WHERE actual.constraint_name IS NULL
+        OR actual.constraint_type IS DISTINCT FROM expected.constraint_type
+        OR NOT actual.is_validated
+        OR NOT COALESCE((
+          SELECT bool_and(position(fragment in actual.definition) > 0)
+          FROM unnest(expected.required_fragments) fragment
+        ), true)
+        OR (expected.constraint_type = 'f' AND (
+          actual.referenced_table <> to_regclass('public.' || expected.referenced_table)
+          OR actual.delete_action <> 'r'
+        ))
+    )
+  THEN 'PASS' ELSE 'FAIL' END ||
+  '|the Migration 36 tables have exactly the expected validated keys, foreign keys and checks';
+
+WITH expected_functions(label, signature, service_role_execute, required_fragments) AS (
+  VALUES
+    ('sync_admin_identity_history', 'public.sync_admin_identity_history()', null::boolean,
+      ARRAY['if tg_op = ''delete'' then', 'set email = old.email', 'deleted_at = coalesce(deleted_at, clock_timestamp())', 'on conflict (id) do update', 'deleted_at = null']::text[]),
+    ('lock_admin_email_reservation', 'public.lock_admin_email_reservation(text)', null::boolean,
+      ARRAY['pg_advisory_xact_lock', 'hashtextextended(lower(p_email), 0)']::text[]),
+    ('guard_admin_email_reservation', 'public.guard_admin_email_reservation()', null::boolean,
+      ARRAY['reservation.email = lower(new.email)', 'errcode = ''23505''', 'admin_permanent_deletion_email_reservations_pkey']::text[]),
+    ('guard_auth_email_reservation', 'public.guard_auth_email_reservation()', null::boolean,
+      ARRAY['reservation.email = lower(new.email)', 'for key share', 'errcode = ''23505''']::text[]),
+    ('guard_admin_permanent_deletion_in_progress', 'public.guard_admin_permanent_deletion_in_progress()', null::boolean,
+      ARRAY['job.status = ''auth_delete_pending''', 'new.email is distinct from old.email', 'new.status <> ''disabled''', 'raise exception']::text[]),
+    ('get_admin_permanent_deletion_state', 'public.get_admin_permanent_deletion_state(uuid)', true::boolean,
+      ARRAY['role = ''owner''', 'is_primary_owner', 'candidate.role <> ''owner''', 'public.admin_ownership_transfers', 'pendingdeletions']::text[]),
+    ('begin_admin_permanent_deletion', 'public.begin_admin_permanent_deletion(uuid,uuid,text,text)', true::boolean,
+      ARRAY['p_confirmation is distinct from ''delete''', 'role = ''owner''', 'public.lock_admin_email_reservation', 'public.admin_permanent_deletion_email_reservations', 'public.admin_sessions', 'admin.permanent_deletion.started']::text[]),
+    ('record_admin_permanent_deletion_failure', 'public.record_admin_permanent_deletion_failure(uuid,uuid,text,text)', true::boolean,
+      ARRAY['role = ''owner''', 'invalid permanent-deletion stage', 'left(coalesce(p_error_code, ''unknown''), 80)']::text[]),
+    ('complete_admin_permanent_deletion', 'public.complete_admin_permanent_deletion(uuid,uuid)', true::boolean,
+      ARRAY['from auth.users', 'delete from public.admin_users', 'delete from public.admin_permanent_deletion_email_reservations', 'admin.permanently_deleted', 'status = ''completed''']::text[])
+),
+function_checks AS (
+  SELECT expected.label, expected.service_role_execute, procedure.oid,
+    COALESCE(
+      procedure.prosecdef
+      AND procedure.proconfig @> ARRAY['search_path=pg_catalog, public']
+      AND pg_get_userbyid(procedure.proowner) = 'postgres'
+      AND NOT has_function_privilege('anon', procedure.oid, 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+        WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+        WHERE acl.grantee NOT IN (procedure.proowner, 'service_role'::regrole)
+          AND acl.privilege_type = 'EXECUTE'
+      )
+      AND (
+        expected.service_role_execute IS NULL
+        OR has_function_privilege('service_role', procedure.oid, 'EXECUTE') = expected.service_role_execute
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM unnest(expected.required_fragments) fragment
+        WHERE position(
+          fragment IN regexp_replace(lower(procedure.prosrc), '\s+', ' ', 'g')
+        ) = 0
+      ),
+      false
+    ) AS passed
+  FROM expected_functions expected
+  LEFT JOIN pg_proc procedure ON procedure.oid = to_regprocedure(expected.signature)
+)
+SELECT 'CHECK|function_definition_' || label || '|' ||
+  CASE WHEN passed THEN 'PASS' ELSE 'FAIL' END ||
+  '|expected security, grants and required Migration 36 implementation clauses'
+FROM function_checks
+ORDER BY label;
+
+SELECT 'CHECK|migration_36_function_overloads|' ||
+  CASE WHEN count(*) = 9 THEN 'PASS' ELSE 'FAIL' END ||
+  '|exactly the nine expected Migration 36 routines exist without extra overloads'
+FROM pg_proc procedure
+JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+WHERE namespace.nspname = 'public'
+  AND procedure.prokind = 'f'
+  AND procedure.proname IN (
+    'sync_admin_identity_history',
+    'lock_admin_email_reservation',
+    'guard_admin_email_reservation',
+    'guard_auth_email_reservation',
+    'guard_admin_permanent_deletion_in_progress',
+    'get_admin_permanent_deletion_state',
+    'begin_admin_permanent_deletion',
+    'record_admin_permanent_deletion_failure',
+    'complete_admin_permanent_deletion'
+  );
 
 SELECT 'CHECK|identity_history_backfill|' ||
   CASE WHEN NOT EXISTS (
@@ -239,7 +482,7 @@ SELECT 'ADMIN_FK|' ||
       ON target_column.attrelid = target_table.oid
       AND target_column.attnum = target_key.attnum
     ORDER BY target_key.ordinality
-  ), ',') || '|' || foreign_key.conname
+  ), ',') || '|' || foreign_key.conname || '|' || foreign_key.convalidated::text
 FROM pg_constraint foreign_key
 JOIN pg_class source_table ON source_table.oid = foreign_key.conrelid
 JOIN pg_namespace source_namespace ON source_namespace.oid = source_table.relnamespace
@@ -265,16 +508,60 @@ WHERE foreign_key.contype = 'f'
     to_regclass('public.admin_identity_history')
   )
 ORDER BY source_namespace.nspname, source_table.relname, foreign_key.conname;
+
+SELECT 'CHECK|migration_36_foreign_keys|' ||
+  CASE WHEN count(*) = 3
+    AND bool_and(foreign_key.convalidated AND foreign_key.confdeltype = 'r')
+    AND count(*) FILTER (
+      WHERE source_table.relname = 'admin_permanent_deletion_jobs'
+        AND foreign_key.conname = 'admin_permanent_deletion_jobs_target_id_fkey'
+        AND target_table.relname = 'admin_identity_history'
+    ) = 1
+    AND count(*) FILTER (
+      WHERE source_table.relname = 'admin_permanent_deletion_jobs'
+        AND foreign_key.conname = 'admin_permanent_deletion_jobs_actor_id_fkey'
+        AND target_table.relname = 'admin_identity_history'
+    ) = 1
+    AND count(*) FILTER (
+      WHERE source_table.relname = 'admin_permanent_deletion_email_reservations'
+        AND foreign_key.conname = 'admin_permanent_deletion_email_reservations_target_id_fkey'
+        AND target_table.relname = 'admin_permanent_deletion_jobs'
+    ) = 1
+  THEN 'PASS' ELSE 'FAIL' END ||
+  '|all three Migration 36 foreign keys are validated and retain their expected targets and RESTRICT behavior'
+FROM pg_constraint foreign_key
+JOIN pg_class source_table ON source_table.oid = foreign_key.conrelid
+JOIN pg_class target_table ON target_table.oid = foreign_key.confrelid
+JOIN pg_namespace source_namespace ON source_namespace.oid = source_table.relnamespace
+WHERE foreign_key.contype = 'f'
+  AND source_namespace.nspname = 'public'
+  AND source_table.relname IN (
+    'admin_permanent_deletion_jobs',
+    'admin_permanent_deletion_email_reservations'
+  );
 '@
 
 Confirm-ProductionAdminDeletionDatabase -ProjectRef $ProjectRef
 $queryOutput = Invoke-ProductionAdminDeletionReadOnlyQuery -ProjectRef $ProjectRef -PsqlPath $PsqlPath -Sql $sql
 $checksPassed = Write-ProductionAdminDeletionChecks -QueryOutput $queryOutput -Phase PostMigration
-$ledgerPassed = Test-ProductionAdminDeletionMigrationLedger `
-  -QueryOutput $queryOutput -LocalMigrations $localMigrations -Phase PostMigration
+$ledgerPassed = if ($SchemaEvidenceOnly) {
+  Test-ProductionAdminDeletionSchemaEvidenceLedger -QueryOutput $queryOutput
+} else {
+  Test-ProductionAdminDeletionMigrationLedger `
+    -QueryOutput $queryOutput -LocalMigrations $localMigrations -Phase PostMigration
+}
 $foreignKeysPassed = Test-ProductionAdminDeletionForeignKeys -QueryOutput $queryOutput -Phase PostMigration
 
 $overallPassed = $checksPassed -and $ledgerPassed -and $foreignKeysPassed
 Write-Output ''
-Write-Output "OVERALL: $(if ($overallPassed) { 'PASS - Production Migration 36 verification complete' } else { 'FAIL - stop rollout and investigate; do not alter Admin accounts' })"
+if ($SchemaEvidenceOnly) {
+  if ($overallPassed) {
+    Write-Output 'SCHEMA EVIDENCE PASS: Migration 36 objects and checked live schema state match the expected definitions.'
+    Write-Output 'MIGRATION HISTORY: NOT VERIFIED. This does not prove migrations 1-35 ran; no historical version was inferred or written.'
+  } else {
+    Write-Output 'SCHEMA EVIDENCE FAIL: stop rollout and investigate; do not alter Admin accounts.'
+  }
+} else {
+  Write-Output "OVERALL: $(if ($overallPassed) { 'PASS - Production Migration 36 schema and migration ledger verification complete' } else { 'FAIL - stop rollout and investigate; do not alter Admin accounts' })"
+}
 if (-not $overallPassed) { exit 1 }

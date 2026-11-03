@@ -11,6 +11,7 @@ const postMigration = readFileSync(
   new URL('../scripts/verify-production-admin-permanent-deletion-post-migration.ps1', import.meta.url),
   'utf8',
 );
+const deployment = readFileSync(new URL('../docs/deployment.md', import.meta.url), 'utf8');
 
 function assertBalancedPsqlConditionals(sql: string) {
   const stack: { elseSeen: boolean }[] = [];
@@ -112,4 +113,39 @@ test('Production post-check covers Auth triggers, trigger-function privileges, R
   assert.match(postMigration, /has_function_privilege\('service_role', procedure\.oid, 'EXECUTE'\)/);
   assert.match(postMigration, /relation\.relrowsecurity/);
   assert.match(postMigration, /identity_history_backfill/);
+});
+
+test('schema-evidence post-check is explicit and does not weaken history verification', () => {
+  assert.match(postMigration, /\[switch\]\$SchemaEvidenceOnly/);
+  assert.match(postMigration, /if \(-not \$SchemaEvidenceOnly\) \{\s*\$localMigrations = Get-ProductionAdminDeletionMigrationInventory/s);
+  assert.match(postMigration, /if \(\$SchemaEvidenceOnly\)\s*\{\s*Test-ProductionAdminDeletionSchemaEvidenceLedger/s);
+  assert.match(postMigration, /Test-ProductionAdminDeletionMigrationLedger `[\s\S]*?-Phase PostMigration/);
+  assert.match(common, /function Test-ProductionAdminDeletionSchemaEvidenceLedger/);
+  assert.ok(common.includes("$allowedUnavailableStates = @('ABSENT_SCHEMA', 'ABSENT_TABLE', 'EMPTY')"));
+  assert.match(common, /schema evidence mode requires an absent or empty application ledger/);
+  assert.match(common, /migration versions were returned despite the absent\/empty ledger diagnostic/);
+  assert.match(common, /alternate_migration_ledger_candidate/);
+  assert.match(postMigration, /SCHEMA EVIDENCE PASS:/);
+  assert.match(postMigration, /MIGRATION HISTORY: NOT VERIFIED\./);
+  assert.match(postMigration, /does not prove migrations 1-35 ran/);
+  assert.match(deployment, /-SchemaEvidenceOnly/);
+  assert.match(deployment, /not proof that migrations 1–35 ran/);
+});
+
+test('schema-evidence checks Migration 36 definitions and preserves exact historical FK verification', () => {
+  for (const check of [
+    'migration_36_table_definitions',
+    'migration_36_table_constraints',
+    'migration_36_function_overloads',
+    'migration_36_foreign_keys',
+  ]) {
+    assert.ok(postMigration.includes(`CHECK|${check}`));
+    assert.match(common, new RegExp(`'${check}'`));
+  }
+  assert.match(postMigration, /expected_functions\(label, signature, service_role_execute, required_fragments\)/);
+  assert.match(postMigration, /pg_get_constraintdef\(constraint_row\.oid\)/);
+  assert.match(postMigration, /identity_history_backfill/);
+  assert.match(postMigration, /'auth', 'users', 'auth_users_guard_reserved_email'/);
+  assert.match(common, /all 16 expected Admin foreign keys/);
+  assert.match(common, /\$parts\[8\] -ne 'true'/);
 });

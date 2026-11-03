@@ -255,6 +255,42 @@ function Test-ProductionAdminDeletionMigrationLedger {
   return $ledgerReady
 }
 
+function Test-ProductionAdminDeletionSchemaEvidenceLedger {
+  param([Parameter(Mandatory = $true)][string[]]$QueryOutput)
+
+  $ledgerChecks = @($QueryOutput | Where-Object { $_ -like 'CHECK|migration_ledger|*' })
+  if ($ledgerChecks.Count -ne 1) {
+    Write-Host 'FAIL | schema_evidence_ledger | exactly one migration-ledger diagnostic is required.'
+    return $false
+  }
+
+  $parts = $ledgerChecks[0].Split([char]124, 4)
+  $allowedUnavailableStates = @('ABSENT_SCHEMA', 'ABSENT_TABLE', 'EMPTY')
+  if ($parts.Count -ne 4) {
+    Write-Host 'FAIL | schema_evidence_ledger | migration-ledger diagnostic is malformed.'
+    return $false
+  }
+  if ($allowedUnavailableStates -notcontains $parts[2]) {
+    Write-Host "FAIL | schema_evidence_ledger | schema evidence mode requires an absent or empty application ledger; state=$($parts[2]). Use the history-based verifier when the ledger is readable."
+    return $false
+  }
+
+  if (@($QueryOutput | Where-Object { $_ -like 'MIGRATION|*' }).Count -gt 0) {
+    Write-Host 'FAIL | schema_evidence_ledger | migration versions were returned despite the absent/empty ledger diagnostic.'
+    return $false
+  }
+  $alternateLedgers = @($QueryOutput | Where-Object { $_ -like 'LEDGER_CANDIDATE|*' })
+  if ($alternateLedgers.Count -gt 0) {
+    foreach ($candidate in $alternateLedgers) {
+      Write-Host "FAIL | alternate_migration_ledger_candidate | $candidate"
+    }
+    return $false
+  }
+
+  Write-Host "REVIEW | migration_history_unverified | $($parts[2]) | no historical versions are inferred or written."
+  return $true
+}
+
 function Test-ProductionAdminDeletionForeignKeys {
   param(
     [Parameter(Mandatory = $true)][string[]]$QueryOutput,
@@ -263,8 +299,12 @@ function Test-ProductionAdminDeletionForeignKeys {
 
   $actualForeignKeys = @()
   foreach ($line in $QueryOutput | Where-Object { $_ -like 'ADMIN_FK|*' }) {
-    $parts = $line.Split([char]124, 8)
-    if ($parts.Count -ne 8) {
+    $parts = $line.Split([char]124, 9)
+    if ($parts.Count -ne 9) {
+      Write-Host "FAIL | malformed_admin_foreign_key | $line"
+      return $false
+    }
+    if ($parts[8] -ne 'true') {
       Write-Host "FAIL | malformed_admin_foreign_key | $line"
       return $false
     }
@@ -338,6 +378,21 @@ function Write-ProductionAdminDeletionChecks {
       'rpc_public.record_admin_permanent_deletion_failure(uuid,uuid,text,text)',
       'rpc_public.complete_admin_permanent_deletion(uuid,uuid)'
     )
+    $expectedNames += @(
+      'migration_36_table_definitions',
+      'migration_36_table_constraints',
+      'function_definition_sync_admin_identity_history',
+      'function_definition_lock_admin_email_reservation',
+      'function_definition_guard_admin_email_reservation',
+      'function_definition_guard_auth_email_reservation',
+      'function_definition_guard_admin_permanent_deletion_in_progress',
+      'function_definition_get_admin_permanent_deletion_state',
+      'function_definition_begin_admin_permanent_deletion',
+      'function_definition_record_admin_permanent_deletion_failure',
+      'function_definition_complete_admin_permanent_deletion',
+      'migration_36_function_overloads',
+      'migration_36_foreign_keys'
+    )
   }
 
   $actualNames = @()
@@ -359,6 +414,16 @@ function Write-ProductionAdminDeletionChecks {
       Write-Host "FAIL | missing_database_check | $expectedName"
       $passed = $false
     }
+  }
+  foreach ($actualName in $actualNames | Sort-Object -Unique) {
+    if ($expectedNames -notcontains $actualName) {
+      Write-Host "FAIL | unexpected_database_check | $actualName"
+      $passed = $false
+    }
+  }
+  if ($actualNames.Count -ne $expectedNames.Count) {
+    Write-Host "FAIL | database_check_count | expected $($expectedNames.Count) checks; received $($actualNames.Count)."
+    $passed = $false
   }
   return $passed
 }

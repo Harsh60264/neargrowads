@@ -241,7 +241,7 @@ SELECT 'ADMIN_FK|' ||
       ON target_column.attrelid = target_table.oid
       AND target_column.attnum = target_key.attnum
     ORDER BY target_key.ordinality
-  ), ',') || '|' || foreign_key.conname
+  ), ',') || '|' || foreign_key.conname || '|' || foreign_key.convalidated::text
 FROM pg_constraint foreign_key
 JOIN pg_class source_table ON source_table.oid = foreign_key.conrelid
 JOIN pg_namespace source_namespace ON source_namespace.oid = source_table.relnamespace
