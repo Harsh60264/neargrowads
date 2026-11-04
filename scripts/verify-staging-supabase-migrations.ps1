@@ -14,6 +14,8 @@ $poolerPort = 5432
 $databaseName = 'postgres'
 $databaseUser = "postgres.$stagingProjectRef"
 $manualSqlEditorMigrationName = '20261031010000_complete_admin_temporary_password_setup.sql'
+$adminPermanentDeletionMigrationName = '20261102100000_secure_archived_admin_permanent_deletion.sql'
+$cashfreeMigrationName = '20261103100000_add_cashfree_service_payment_persistence.sql'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $migrationDirectory = Join-Path $repoRoot 'supabase\migrations'
 $logPath = Join-Path $env:LOCALAPPDATA "NearGrowAds\staging-migration-logs\$stagingProjectRef.log"
@@ -40,8 +42,11 @@ if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^psql \(PostgreSQL\) 18(?:
 }
 
 $allMigrationFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -Filter '*.sql' | Sort-Object Name)
-if ($allMigrationFiles.Count -ne 35) {
-  throw "Expected 35 repository migration files; found $($allMigrationFiles.Count)."
+if ($allMigrationFiles.Count -ne 37 -or
+  $allMigrationFiles[-3].Name -cne $manualSqlEditorMigrationName -or
+  $allMigrationFiles[-2].Name -cne $adminPermanentDeletionMigrationName -or
+  $allMigrationFiles[-1].Name -cne $cashfreeMigrationName) {
+  throw 'Expected 37 repository migrations, with migrations 35, 36 and 37 in their reviewed order.'
 }
 $manualSqlEditorMigration = @($allMigrationFiles | Where-Object { $_.Name -ceq $manualSqlEditorMigrationName })
 if ($manualSqlEditorMigration.Count -ne 1) {
@@ -50,14 +55,11 @@ if ($manualSqlEditorMigration.Count -ne 1) {
 $expectedMigrationNames = @(
   $allMigrationFiles |
     Select-Object -Skip 3 |
-    Where-Object { $_.Name -cne $manualSqlEditorMigrationName } |
+    Where-Object { $_.Name -lt $manualSqlEditorMigrationName } |
     ForEach-Object { $_.Name }
 )
 if ($expectedMigrationNames.Count -ne 31) {
   throw 'Expected exactly 31 migrations in the staging application range (4-34).'
-}
-if ($allMigrationFiles[-1].Name -cne $manualSqlEditorMigrationName) {
-  throw "The verification-only migration must remain the newest repository migration: $manualSqlEditorMigrationName"
 }
 
 $logPassed = $false

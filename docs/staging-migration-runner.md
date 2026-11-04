@@ -114,3 +114,34 @@ $psql = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
 ```
 
 Type the staging project ref when prompted and enter the staging database password in the `psql` prompt. The report checks that the local runner log contains each of migrations 4–34 exactly once, expected CMS/admin/security/leads/activity relations and migration columns exist, invitation and temporary-password RPCs are `SECURITY DEFINER` and executable only by `service_role`, the three Storage buckets have expected visibility and size settings, Storage object RLS has no anonymous/authenticated/PUBLIC write policy, and leads are accessible through the server role rather than direct client grants. Exit code `0` means all checks passed; nonzero means one or more checks failed or the read-only verification could not complete.
+
+## Cashfree Migration 37 Staging checks
+
+The repository inventory now contains 37 migration files. The existing bulk runner remains limited to migrations 4–34. Migration 35 is verification-only; Migrations 36 and 37 are never added to that bulk list. Migration 37 must be reviewed and applied separately through the approved Staging migration process. Do not apply it until its read-only preflight passes. The scripts below do not execute migrations or enable Cashfree; Cashfree remains disabled until a separately reviewed activation step after successful post-verification.
+
+Run the dedicated preflight from this worktree after confirming the Staging project in the Supabase Dashboard:
+
+```powershell
+Set-Location 'D:\neargrowads\neargrow-cashfree-payments'
+$psql = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
+
+& '.\scripts\verify-staging-cashfree-migration-preflight.ps1' `
+  -ProjectRef 'kdaixomygsuxadofoieb' `
+  -PsqlPath $psql
+```
+
+The script pins the Session Pooler endpoint and project-scoped role, requires typing the exact Staging project ref, uses the shared PostgreSQL environment isolation helper and TLS `verify-full`, prompts for the database password, and executes the checks inside a read-only transaction. Default mode requires Migration 36's exact ledger record and live prerequisites, the existing Razorpay payment schema/permissions, and the absence of partial Migration 37 objects. Preserve the printed `RAZORPAY_BASELINE` count and fingerprint exactly; it contains no row data and is required for post-migration comparison.
+
+If `supabase_migrations.schema_migrations` is absent, its schema is absent, or the readable ledger is empty, the separately opted-in `-SchemaEvidenceOnly` mode may verify schema without asserting migration history. It checks Migration 36's expected relations and columns, validated constraints/FKs, exact function signatures and security/grants, trigger definitions, and retained identity-history linkage, plus all payment and partial-Cashfree checks. Migration 36 subchecks are printed individually; the aggregate failure identifies each failed or missing subcheck. The `begin_admin_permanent_deletion` function is verified for its call to `public.lock_admin_email_reservation`, which acquires the advisory lock, rather than requiring a direct advisory-lock call in the caller. It also rejects alternate migration-ledger candidates. A readable non-empty ledger, an unreadable ledger, partial Cashfree objects, any schema mismatch, or any failed check is a stop condition. Success is labeled **SCHEMA EVIDENCE PASS — Migration history UNVERIFIED**. This mode does not infer versions 1–36 and never inserts or fabricates ledger rows. Use the same explicit flag on the post-verifier only when ledger history is absent/empty; all schema, RPC, disabled-default, and Razorpay baseline checks still have to pass.
+
+After a separately approved Staging-only application of the exact Migration 37 file through a migration process that records authentic migration history, run the dedicated read-only post-verifier with the baseline values from the same successful preflight:
+
+```powershell
+& '.\scripts\verify-staging-cashfree-migration-post.ps1' `
+  -ProjectRef 'kdaixomygsuxadofoieb' `
+  -ExpectedRazorpayOrderCount <count-from-preflight> `
+  -ExpectedRazorpayOrderFingerprint '<fingerprint-from-preflight>' `
+  -PsqlPath $psql
+```
+
+The post-verifier independently requires the exact Migration 36 and 37 ledger entries; checks Migration 37 tables, required columns, generated INR-paise alias, validated constraints and identity-history/service-order FKs, named valid indexes, RLS and service-role-only grants, exact RPC signatures and permissions, the Cashfree readiness RPC, Cashfree disabled-by-default state, and the unchanged Razorpay count/content fingerprint. Any failed or missing check is a stop condition. It does not change settings, repair schema, or enable checkout. If the approved migration path cannot record an authentic ledger entry, stop and resolve the migration-history process before applying anything; do not insert one manually.

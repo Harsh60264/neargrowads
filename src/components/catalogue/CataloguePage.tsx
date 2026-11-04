@@ -36,6 +36,20 @@ import {
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
 import { publicText } from '../../data/publicCopy';
+import {
+  cashfreeCustomerPaymentStatus,
+  cashfreeAvailabilityMode,
+  fetchCashfreeOrderStatus,
+  getOrCreateCashfreeAttempt,
+  isCashfreeAvailable,
+  isVerifiedCashfreeSuccess,
+  readCashfreeReturnRecords,
+  removeCashfreeReturnRecord,
+  writeCashfreeReturnRecord,
+  type CashfreeReturnRecord,
+  type CashfreeCheckoutMode,
+  type CashfreeTrackedOrder,
+} from './cashfreeCheckout';
 
 type PackageFilter = 'all' | 'monthly' | 'one_time' | 'add_on';
 type PackageSort = 'featured' | 'price_asc' | 'price_desc' | 'alphabetical';
@@ -79,13 +93,25 @@ interface RazorpayCheckoutOptions {
   modal: { ondismiss: () => void };
 }
 
+interface CashfreeCheckoutResult {
+  error?: { message?: string };
+  redirect?: boolean;
+  paymentDetails?: Record<string, unknown>;
+}
+
+interface CashfreeCheckoutClient {
+  checkout(options: { paymentSessionId: string; redirectTarget: '_modal' }): Promise<CashfreeCheckoutResult>;
+}
+
 declare global {
   interface Window {
     Razorpay?: new (options: RazorpayCheckoutOptions) => { open: () => void };
+    Cashfree?: (options: { mode: CashfreeCheckoutMode }) => CashfreeCheckoutClient;
   }
 }
 
 let razorpayScriptPromise: Promise<void> | null = null;
+let cashfreeScriptPromise: Promise<void> | null = null;
 
 function loadRazorpayCheckout(): Promise<void> {
   if (window.Razorpay) return Promise.resolve();
@@ -103,6 +129,31 @@ function loadRazorpayCheckout(): Promise<void> {
     throw error;
   });
   return razorpayScriptPromise;
+}
+
+function loadCashfreeCheckout(): Promise<void> {
+  if (window.Cashfree) return Promise.resolve();
+  if (cashfreeScriptPromise) return cashfreeScriptPromise;
+  const loading = new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+    script.async = true;
+    script.onload = () => window.Cashfree ? resolve() : reject(new Error('Cashfree checkout did not initialize.'));
+    script.onerror = () => reject(new Error('Cashfree checkout could not be loaded. Please try again.'));
+    document.head.append(script);
+  });
+  cashfreeScriptPromise = loading.catch((error: unknown) => {
+    cashfreeScriptPromise = null;
+    throw error;
+  });
+  return cashfreeScriptPromise;
+}
+
+interface CashfreeReturnState {
+  orderReference: string;
+  trackingToken: string;
+  packages: { packageId: string; quantity: number }[];
+  status: 'checking' | 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded' | 'unavailable';
 }
 
 const WHATSAPP_NUMBER = '919289810149';
@@ -220,8 +271,14 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
   });
   const [showCart, setShowCart] = useState(false);
   const [checkoutCart, setCheckoutCart] = useState<CartEntry[] | null>(null);
+  const [cashfreeCheckoutCart, setCashfreeCheckoutCart] = useState<CartEntry[] | null>(null);
   const [paymentAvailable, setPaymentAvailable] = useState(false);
   const [paymentAvailabilityChecked, setPaymentAvailabilityChecked] = useState(false);
+  const [cashfreeAvailable, setCashfreeAvailable] = useState(false);
+  const [cashfreeMode, setCashfreeMode] = useState<CashfreeCheckoutMode | null>(null);
+  const [cashfreeAvailabilityChecked, setCashfreeAvailabilityChecked] = useState(false);
+  const [cashfreeReturn, setCashfreeReturn] = useState<CashfreeReturnState | null>(null);
+  const cashfreeReturnStarted = useRef(false);
   const [showCompare, setShowCompare] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [enquiryTarget, setEnquiryTarget] = useState<EnquiryTarget | null>(null);
@@ -248,6 +305,82 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
     });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/catalogue/cashfree/payment-availability', { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(async (response) => {
+        const data: unknown = await response.json().catch(() => ({}));
+        if (active) {
+          const mode = cashfreeAvailabilityMode(data);
+          setCashfreeMode(response.ok ? mode || null : null);
+          setCashfreeAvailable(response.ok && isCashfreeAvailable(data));
+        }
+      })
+      .catch((availabilityError: unknown) => {
+        console.error('[NearGrow Ads] Cashfree Sandbox availability could not be checked.', availabilityError);
+        if (active) setCashfreeAvailable(false);
+      })
+      .finally(() => {
+        if (active) setCashfreeAvailabilityChecked(true);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !cashfreeAvailabilityChecked || !cashfreeMode || cashfreeReturnStarted.current) return;
+    const returnUrl = new URL(window.location.href);
+    const orderReference = returnUrl.searchParams.get('cashfree_order_id') || '';
+    if (!/^NGO-[A-F0-9]{24}$/.test(orderReference)) return;
+    cashfreeReturnStarted.current = true;
+    returnUrl.searchParams.delete('cashfree_order_id');
+    window.history.replaceState(window.history.state, '', `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`);
+    let records: CashfreeReturnRecord[] = [];
+    try {
+      records = readCashfreeReturnRecords(window.sessionStorage, cashfreeMode);
+    } catch {
+      records = [];
+    }
+    const record = records.find((item) => item.orderReference === orderReference);
+    if (!record) {
+      setCashfreeReturn({ orderReference, trackingToken: '', packages: [], status: 'unavailable' });
+      return;
+    }
+    const returnState: CashfreeReturnState = {
+      orderReference,
+      trackingToken: record.clientIdempotencyKey,
+      packages: record.packages,
+      status: 'checking',
+    };
+    setCashfreeReturn(returnState);
+    void fetchCashfreeOrderStatus(orderReference, record.clientIdempotencyKey, globalThis.fetch, cashfreeMode).then((order) => {
+      const status = cashfreeCustomerPaymentStatus(order);
+      setCashfreeReturn({ ...returnState, status });
+      const packageIds = new Set(record.packages.map((item) => item.packageId));
+      if (isVerifiedCashfreeSuccess(order, orderReference, cashfreeMode)) {
+        try {
+          removeCashfreeReturnRecord(window.sessionStorage, orderReference, cashfreeMode);
+        } catch (storageError) {
+          console.error('[NearGrow Ads] Verified Cashfree return record could not be cleared.', {
+            errorName: storageError instanceof Error ? storageError.name : 'UnknownError',
+          });
+        }
+        setCart((current) => current.filter(({ item }) => !packageIds.has(item.id)));
+      } else {
+        setCart((current) => current.length ? current : packages
+          .filter((item) => packageIds.has(item.id))
+          .map((item) => ({ item, quantity: record.packages.find((entry) => entry.packageId === item.id)?.quantity || 1 })));
+      }
+    }).catch((statusError: unknown) => {
+      setCashfreeReturn({ ...returnState, status: 'unavailable' });
+      setCart((current) => current.length ? current : packages
+        .filter((item) => record.packages.some((entry) => entry.packageId === item.id))
+        .map((item) => ({ item, quantity: record.packages.find((entry) => entry.packageId === item.id)?.quantity || 1 })));
+      console.error('[NearGrow Ads] Cashfree return status could not be verified.', {
+        errorName: statusError instanceof Error ? statusError.name : 'UnknownError',
+      });
+    });
+  }, [loading, packages, cashfreeAvailabilityChecked, cashfreeMode]);
 
   useEffect(() => {
     let active = true;
@@ -498,6 +631,39 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
   const singleItemMessage = (item: ServicePackage) =>
     `Hi NearGrow Ads, I would like to enquire about ${item.title}${item.packageCode ? ` (${item.packageCode})` : ''}. Listed price: ${priceLabel(item)}. Please share details.`;
 
+  const refreshCashfreeReturnStatus = async () => {
+    if (!cashfreeReturn?.trackingToken) {
+      setCashfreeReturn((current) => current ? { ...current, status: 'unavailable' } : current);
+      return;
+    }
+    setCashfreeReturn((current) => current ? { ...current, status: 'checking' } : current);
+    try {
+      const order = await fetchCashfreeOrderStatus(
+        cashfreeReturn.orderReference,
+        cashfreeReturn.trackingToken,
+        globalThis.fetch,
+        cashfreeMode || undefined,
+      );
+      setCashfreeReturn((current) => current ? { ...current, status: cashfreeCustomerPaymentStatus(order) } : current);
+      if (isVerifiedCashfreeSuccess(order, cashfreeReturn.orderReference, cashfreeMode || undefined)) {
+        try {
+          removeCashfreeReturnRecord(window.sessionStorage, cashfreeReturn.orderReference, cashfreeMode || undefined);
+        } catch (storageError) {
+          console.error('[NearGrow Ads] Verified Cashfree return record could not be cleared.', {
+            errorName: storageError instanceof Error ? storageError.name : 'UnknownError',
+          });
+        }
+        const purchasedIds = new Set(cashfreeReturn.packages.map((item) => item.packageId));
+        setCart((current) => current.filter(({ item }) => !purchasedIds.has(item.id)));
+      }
+    } catch (statusError) {
+      setCashfreeReturn((current) => current ? { ...current, status: 'unavailable' } : current);
+      console.error('[NearGrow Ads] Cashfree order status refresh failed.', {
+        errorName: statusError instanceof Error ? statusError.name : 'UnknownError',
+      });
+    }
+  };
+
   const detail = () => {
     if (loading) return <PageState title="Loading service details" description="Getting the latest published package information." busy />;
     if (error) return <PageState title="Service details unavailable" description={error} retry={() => window.location.reload()} />;
@@ -520,6 +686,34 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
 
   return (
     <div className="catalogue-page min-h-screen" style={{ backgroundColor: 'var(--brand-bg)', color: 'var(--brand-text)' }}>
+      {cashfreeReturn && <section role="status" aria-live="polite" className="mx-auto mt-4 max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="rounded-2xl border p-4 sm:p-5" style={cardStyle}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold text-[#70BE55]">Cashfree {cashfreeMode === 'production' ? 'Production' : 'Sandbox'} payment status</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--brand-text-muted)]">
+                {cashfreeReturn.status === 'paid'
+                  ? 'Payment is verified by the server.'
+                  : cashfreeReturn.status === 'pending'
+                    ? 'The server has not confirmed payment yet. Your cart is preserved.'
+                    : cashfreeReturn.status === 'failed'
+                      ? 'The server reports that this payment attempt failed. Your cart is preserved.'
+                      : cashfreeReturn.status === 'cancelled'
+                        ? 'The server confirms that this payment attempt was cancelled or dropped. Your cart is preserved.'
+                      : cashfreeReturn.status === 'refunded'
+                        ? 'The server reports that this payment was refunded. Your cart is preserved.'
+                        : cashfreeReturn.status === 'checking'
+                          ? 'Checking the latest server-verified payment status…'
+                          : 'Payment status could not be verified. Your cart is preserved; do not retry with a new checkout key.'}
+                {' '}Order reference: <strong>{cashfreeReturn.orderReference}</strong>
+              </p>
+            </div>
+            {cashfreeReturn.status !== 'paid' && <button type="button" onClick={() => void refreshCashfreeReturnStatus()} disabled={cashfreeReturn.status === 'checking'} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border px-4 text-xs font-bold disabled:opacity-50" style={{ borderColor: 'var(--brand-border)' }}>
+              {cashfreeReturn.status === 'checking' && <LoaderCircle className="h-4 w-4 animate-spin" />} Check status
+            </button>}
+          </div>
+        </div>
+      </section>}
       <section className="relative isolate overflow-hidden border-b px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24" style={{ borderColor: 'var(--brand-border)' }}>
         <div aria-hidden className="pointer-events-none absolute -right-24 -top-32 h-96 w-96 rounded-full bg-[#3EA259]/10 blur-3xl" />
         <HeroOrbitBackground ambient />
@@ -748,11 +942,15 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
 
       {slug && <div className="fixed inset-0 z-[70] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Service details" style={{ backgroundColor: 'var(--brand-bg)' }}>{detail()}</div>}
 
-      {showCart && <CartDialog cart={cart} setCart={setCart} remove={removeFromCart} totalFor={totalFor} note={requestNote} setNote={setRequestNote} message={cartMessage()} paymentAvailable={paymentAvailable} paymentAvailabilityChecked={paymentAvailabilityChecked} onCheckout={() => { setCheckoutCart(cart); setShowCart(false); }} onClose={() => setShowCart(false)} />}
+      {showCart && <CartDialog cart={cart} setCart={setCart} remove={removeFromCart} totalFor={totalFor} note={requestNote} setNote={setRequestNote} message={cartMessage()} paymentAvailable={paymentAvailable} paymentAvailabilityChecked={paymentAvailabilityChecked} cashfreeAvailable={cashfreeAvailable} cashfreeMode={cashfreeMode} cashfreeAvailabilityChecked={cashfreeAvailabilityChecked} onCheckout={() => { setCheckoutCart(cart); setShowCart(false); }} onCashfreeCheckout={() => { setCashfreeCheckoutCart(cart); setShowCart(false); }} onClose={() => setShowCart(false)} />}
       {checkoutCart && <CheckoutDialog entries={checkoutCart} onPaid={() => {
         const purchasedIds = new Set(checkoutCart.map(({ item }) => item.id));
         setCart((current) => current.filter(({ item }) => !purchasedIds.has(item.id)));
       }} onClose={() => setCheckoutCart(null)} />}
+      {cashfreeCheckoutCart && cashfreeMode && <CashfreeCheckoutDialog mode={cashfreeMode} entries={cashfreeCheckoutCart} onPaid={() => {
+        const purchasedIds = new Set(cashfreeCheckoutCart.map(({ item }) => item.id));
+        setCart((current) => current.filter(({ item }) => !purchasedIds.has(item.id)));
+      }} onClose={() => setCashfreeCheckoutCart(null)} />}
       {enquiryTarget && <ServiceEnquiryDialog target={enquiryTarget} whatsappNumber={whatsappNumber} onClose={() => setEnquiryTarget(null)} />}
       {showCompare && <CompareDialog packages={comparePackages} onClose={() => setShowCompare(false)} remove={(id) => setCompare((current) => current.filter((item) => item !== id))} />}
       {compare.length > 0 && <button type="button" onClick={() => setShowCompare(true)} className="fixed bottom-24 right-4 z-[75] inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-xs font-bold shadow-lg sm:right-6" style={{ ...cardStyle, color: 'var(--brand-text)' }}><GitCompareArrows className="h-4 w-4" /> Compare ({compare.length})</button>}
@@ -1046,7 +1244,7 @@ function ServiceEnquiryDialog({ target, whatsappNumber, onClose }: {
   );
 }
 
-function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, paymentAvailable, paymentAvailabilityChecked, onCheckout, onClose }: {
+function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, paymentAvailable, paymentAvailabilityChecked, cashfreeAvailable, cashfreeMode, cashfreeAvailabilityChecked, onCheckout, onCashfreeCheckout, onClose }: {
   cart: CartEntry[];
   setCart: Dispatch<SetStateAction<CartEntry[]>>;
   remove: (id: string) => void;
@@ -1056,7 +1254,11 @@ function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, p
   message: string;
   paymentAvailable: boolean;
   paymentAvailabilityChecked: boolean;
+  cashfreeAvailable: boolean;
+  cashfreeMode: CashfreeCheckoutMode | null;
+  cashfreeAvailabilityChecked: boolean;
   onCheckout: () => void;
+  onCashfreeCheckout: () => void;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -1130,14 +1332,12 @@ function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, p
           <section className="mt-5 rounded-2xl border p-4" style={cardStyle}>
             <h3 className="text-sm font-bold">Secure checkout</h3>
             <p className="mt-2 text-xs leading-5 text-[var(--brand-text-muted)]">Monthly packages are charged for one cycle only; automatic renewal is not enabled. One-time, monthly and per-session items must be checked out separately.</p>
-            {paymentAvailable ? (
-              <>
-                {checkoutHasMixedTypes && <p role="alert" className="mt-3 text-xs text-amber-200">Check out one-time, monthly, or per-session services separately.</p>}
-                <button type="button" onClick={onCheckout} disabled={checkoutHasMixedTypes} className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#3EA259] px-4 text-sm font-bold text-white transition hover:bg-[#216F3D] disabled:cursor-not-allowed disabled:opacity-50">Continue to Secure Test Checkout <ArrowRight className="h-4 w-4" /></button>
-              </>
-            ) : (
-              <p role="status" className="mt-4 rounded-xl border border-amber-400/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">{paymentAvailabilityChecked ? 'Online payment currently unavailable. You can still submit an enquiry or continue on WhatsApp.' : 'Checking secure payment availability…'}</p>
-            )}
+            {checkoutHasMixedTypes && <p role="alert" className="mt-3 text-xs text-amber-200">Check out one-time, monthly, or per-session services separately.</p>}
+            {paymentAvailable && <button type="button" onClick={onCheckout} disabled={checkoutHasMixedTypes} className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border px-4 text-sm font-bold transition hover:border-[#3EA259] hover:text-[#70BE55] disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: 'var(--brand-border)' }}>Continue to Razorpay Test Checkout <ArrowRight className="h-4 w-4" /></button>}
+            {cashfreeAvailable && <button type="button" onClick={onCashfreeCheckout} disabled={checkoutHasMixedTypes} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#3EA259] px-4 text-sm font-bold text-white transition hover:bg-[#216F3D] disabled:cursor-not-allowed disabled:opacity-50">Pay Securely with Cashfree {cashfreeMode === 'production' ? '· Production' : '· Sandbox'} <ArrowRight className="h-4 w-4" /></button>}
+            {!paymentAvailable && !cashfreeAvailable && <p role="status" className="mt-4 rounded-xl border border-amber-400/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">
+              {paymentAvailabilityChecked && cashfreeAvailabilityChecked ? 'Online payment currently unavailable. You can still submit an enquiry or continue on WhatsApp.' : 'Checking secure payment availability…'}
+            </p>}
           </section>
           {requestReference ? (
             <div role="status" className="mt-6 rounded-2xl border border-[#3EA259]/30 bg-[#3EA259]/10 p-5">
@@ -1375,6 +1575,254 @@ function CheckoutDialog({ entries, onPaid, onClose }: {
       </form>}
 
       <p className="mt-auto pt-5 text-center text-[10px] leading-5 text-[var(--brand-text-muted)]">Only Razorpay Test mode is enabled. No live payment, direct UPI, or verified real settlement destination is configured.</p>
+    </section>
+  </div>;
+}
+
+function CashfreeCheckoutDialog({ entries, mode, onPaid, onClose }: {
+  entries: CartEntry[];
+  mode: CashfreeCheckoutMode;
+  onPaid: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerBusinessName, setCustomerBusinessName] = useState('');
+  const [onboardingNotes, setOnboardingNotes] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [order, setOrder] = useState<{
+    orderReference: string;
+    trackingToken: string;
+    paymentSessionId: string;
+    amountPaise: number;
+    currency: 'INR';
+  } | null>(null);
+  const [trackedOrder, setTrackedOrder] = useState<CashfreeTrackedOrder | null>(null);
+
+  useAccessibleDialog(dialogRef, () => {
+    if (!busy && !verifying) onClose();
+  });
+
+  const totalFor = (billingType: ServiceBillingType) => entries
+    .filter(({ item }) => item.billingType === billingType)
+    .reduce((total, { item, quantity }) => total + finalServicePrice(item) * quantity, 0);
+  const hasMixedBilling = new Set(entries.map(({ item }) => item.billingType)).size > 1;
+
+  const refreshOrderStatus = async (currentOrder = order) => {
+    if (!currentOrder) return;
+    setVerifying(true);
+    setError('');
+    try {
+      const tracked = await fetchCashfreeOrderStatus(
+        currentOrder.orderReference, currentOrder.trackingToken, globalThis.fetch, mode,
+      );
+      setTrackedOrder(tracked);
+      if (isVerifiedCashfreeSuccess(tracked, currentOrder.orderReference, mode)) {
+        try {
+          removeCashfreeReturnRecord(window.sessionStorage, currentOrder.orderReference, mode);
+        } catch (storageError) {
+          console.error('[NearGrow Ads] Verified Cashfree checkout record could not be cleared.', {
+            errorName: storageError instanceof Error ? storageError.name : 'UnknownError',
+          });
+        }
+        setNotice(mode === 'production'
+          ? 'Cashfree Production payment is verified by the server.'
+          : 'Cashfree Sandbox payment is verified by the server. No live funds were transferred.');
+        onPaid();
+      } else {
+        setNotice(`The server currently reports payment as ${cashfreeCustomerPaymentStatus(tracked)}. Your cart is preserved.`);
+      }
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : 'Order status could not be loaded.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const openHostedCheckout = async (currentOrder: NonNullable<typeof order>) => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await loadCashfreeCheckout();
+      if (!window.Cashfree) throw new Error('Cashfree checkout is unavailable. The order remains safe to reconcile.');
+      if (mode === 'production' && !window.confirm('Continue to Cashfree Production checkout? A successful payment will transfer real funds.')) return;
+      const checkout = window.Cashfree({ mode });
+      const result = await checkout.checkout({
+        paymentSessionId: currentOrder.paymentSessionId,
+        redirectTarget: '_modal',
+      });
+      if (result?.error) {
+        setNotice('Cashfree checkout reported an issue. Checking the server-verified payment status.');
+      } else {
+        setNotice('Checkout returned. Checking the server-verified payment status.');
+      }
+    } catch (checkoutError) {
+      setError(checkoutError instanceof Error ? checkoutError.message : 'Cashfree checkout did not complete.');
+    }
+    try {
+      await refreshOrderStatus(currentOrder);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startCheckout = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (hasMixedBilling) {
+      setError('Choose one billing arrangement per checkout.');
+      return;
+    }
+    if (!/^[+0-9().\s-]{7,25}$/.test(customerPhone.trim())) {
+      setError('Enter a valid phone or WhatsApp number.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    setTrackedOrder(null);
+    try {
+      const snapshot = {
+        customerName,
+        customerEmail,
+        customerPhone,
+        customerBusinessName,
+        onboardingNotes,
+        packages: entries.map(({ item, quantity }) => ({ packageId: item.id, quantity })),
+      };
+      const attempt = await getOrCreateCashfreeAttempt(snapshot, window.sessionStorage, globalThis.crypto, mode);
+      if (mode === 'production' &&
+        !window.confirm('Continue with a real Cashfree payment in INR? Cashfree will process the payment.')) return;
+      const response = await fetch('/api/catalogue/cashfree/orders', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Idempotency-Key': attempt.clientIdempotencyKey,
+        },
+        body: JSON.stringify({
+          ...snapshot,
+          consent,
+        }),
+      });
+      const body: unknown = await response.json().catch(() => ({}));
+      const result = body as {
+        orderReference?: string;
+        trackingToken?: string;
+        paymentSessionId?: string;
+        amountPaise?: number;
+        currency?: string;
+        mode?: string;
+        realPaymentsEnabled?: boolean;
+        pending?: boolean;
+        message?: string;
+      };
+      if (response.status === 202 && result.pending === true) {
+        throw new Error(result.message || 'Checkout is being reconciled. Retry with the same details to check again.');
+      }
+      if (!response.ok) throw new Error(result.message || `Could not start Cashfree checkout (${response.status}).`);
+      if (typeof result.orderReference !== 'string' || !/^NGO-[A-F0-9]{24}$/.test(result.orderReference) ||
+        result.trackingToken !== attempt.clientIdempotencyKey ||
+        typeof result.paymentSessionId !== 'string' || !result.paymentSessionId.trim() || result.paymentSessionId.length > 4096 ||
+        !Number.isSafeInteger(result.amountPaise) || Number(result.amountPaise) < 100 ||
+        result.currency !== 'INR' || result.mode !== mode ||
+        result.realPaymentsEnabled !== (mode === 'production')) {
+        throw new Error('The server did not return complete, valid Cashfree checkout details for the selected mode.');
+      }
+      const currentOrder = {
+        orderReference: result.orderReference,
+        trackingToken: result.trackingToken,
+        paymentSessionId: result.paymentSessionId,
+        amountPaise: Number(result.amountPaise),
+        currency: 'INR' as const,
+      };
+      writeCashfreeReturnRecord(
+        window.sessionStorage,
+        { ...attempt, orderReference: currentOrder.orderReference },
+        mode,
+      );
+      setOrder(currentOrder);
+      await openHostedCheckout(currentOrder);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Cashfree checkout could not be started.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div className="fixed inset-0 z-[95] flex justify-end bg-black/60" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy && !verifying) onClose(); }}>
+    <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="cashfree-checkout-title" className="flex h-full w-full max-w-xl flex-col overflow-y-auto border-l p-5 outline-none sm:p-7" style={{ backgroundColor: 'var(--brand-bg)', borderColor: 'var(--brand-border)' }}>
+      <header className="flex items-start justify-between gap-4">
+        <div><p className="text-xs font-bold uppercase tracking-wide text-[#70BE55]">{mode === 'production' ? 'Cashfree Production · INR · real payment' : 'Cashfree Sandbox · INR · no live funds'}</p><h2 id="cashfree-checkout-title" className="mt-1 text-2xl font-extrabold">Pay Securely with Cashfree</h2><p className="mt-1 text-sm text-[var(--brand-text-muted)]">Payment details are entered only in Cashfree's hosted checkout. The server verifies payment status.</p></div>
+        <button type="button" onClick={onClose} disabled={busy || verifying} aria-label="Close Cashfree checkout" className="rounded-lg p-2 hover:bg-[#3EA259]/10 disabled:opacity-50"><X className="h-5 w-5" /></button>
+      </header>
+
+      <section className="mt-6 space-y-2 rounded-2xl border p-4" style={cardStyle}>
+        <h3 className="text-sm font-bold">Order summary · INR</h3>
+        {entries.map(({ item, quantity }) => <div key={item.id} className="flex justify-between gap-4 text-xs">
+          <span>{item.title}{quantity > 1 ? ` × ${quantity}` : ''} · {item.billingType === 'monthly' ? 'one monthly cycle only' : item.billingType === 'per_session' ? 'one session' : 'one-time'}</span>
+          <span className="shrink-0">{formatServicePrice(finalServicePrice(item) * quantity)}</span>
+        </div>)}
+        {(['one_time', 'monthly', 'per_session'] as const).map((type) => totalFor(type) > 0 && <p key={type} className="flex justify-between border-t pt-2 text-xs" style={{ borderColor: 'var(--brand-border)' }}>
+          <span>{type === 'monthly' ? 'Single monthly cycle subtotal' : type === 'per_session' ? 'Single-session subtotal' : 'One-time subtotal'}</span><strong>{formatServicePrice(totalFor(type))}</strong>
+        </p>)}
+        {order && <p className="flex justify-between border-t pt-2 text-xs" style={{ borderColor: 'var(--brand-border)' }}><span>Server-calculated total</span><strong>{formatServicePrice(order.amountPaise / 100)}</strong></p>}
+        <p className="pt-1 text-[10px] leading-4 text-[var(--brand-text-muted)]">Listed amounts are estimates. The server recalculates current published prices and INR paise before creating the Cashfree order. Monthly services do not auto-renew.</p>
+      </section>
+
+      {error && <p role="alert" className="mt-4 rounded-xl border border-rose-400/30 bg-rose-950/20 p-3 text-xs text-rose-300">{error}</p>}
+      {notice && <p role="status" aria-live="polite" className="mt-4 rounded-xl border border-[#3EA259]/30 bg-[#3EA259]/10 p-3 text-xs leading-5 text-[#70BE55]">{notice}</p>}
+
+      {order && <section className="mt-4 rounded-xl border p-4 text-xs" style={cardStyle}>
+        <p className="font-bold">Order reference: <span className="select-all">{order.orderReference}</span></p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <button type="button" onClick={() => void openHostedCheckout(order)} disabled={busy || verifying} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#3EA259] px-3 text-xs font-bold text-white disabled:opacity-50">
+            {busy && <LoaderCircle className="h-4 w-4 animate-spin" />} Continue Cashfree Checkout
+          </button>
+          <button type="button" onClick={() => void refreshOrderStatus()} disabled={busy || verifying} className="min-h-10 rounded-xl border px-3 text-xs font-semibold disabled:opacity-50" style={{ borderColor: 'var(--brand-border)' }}>
+            {verifying && <LoaderCircle className="mr-1 inline h-3.5 w-3.5 animate-spin" />}Check server status
+          </button>
+        </div>
+        {trackedOrder && <p className="mt-2">Server-verified payment: <strong>{cashfreeCustomerPaymentStatus(trackedOrder)}</strong>{trackedOrder.fulfillment_status && <> · Fulfilment: <strong>{trackedOrder.fulfillment_status}</strong></>}</p>}
+      </section>}
+
+      {!order && <form onSubmit={(event) => void startCheckout(event)} className="mt-5 space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-semibold">Full name
+            <input required minLength={2} maxLength={120} autoComplete="name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
+          </label>
+          <label className="block text-xs font-semibold">Email
+            <input required type="email" maxLength={255} autoComplete="email" value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
+          </label>
+        </div>
+        <label className="block text-xs font-semibold">Phone / WhatsApp number
+          <input required type="tel" minLength={7} maxLength={25} autoComplete="tel" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
+        </label>
+        <label className="block text-xs font-semibold">Business name (optional)
+          <input maxLength={160} autoComplete="organization" value={customerBusinessName} onChange={(event) => setCustomerBusinessName(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
+        </label>
+        <label className="block text-xs font-semibold">Onboarding information (optional)
+          <textarea maxLength={2000} value={onboardingNotes} onChange={(event) => setOnboardingNotes(event.target.value)} placeholder="Share relevant goals or onboarding details." className="mt-1.5 min-h-24 w-full rounded-xl border bg-transparent p-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
+        </label>
+        <label className="flex items-start gap-2.5 text-xs leading-5 text-[var(--brand-text-muted)]">
+          <input required type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-[#3EA259]" />
+          <span>I agree that NearGrow Ads may use these details to process this {mode === 'production' ? 'Production' : 'Sandbox'} checkout and respond about the service, as described in the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-[#70BE55] underline">Privacy Policy</a>.</span>
+        </label>
+        <button type="submit" disabled={busy || verifying || !consent || hasMixedBilling} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#3EA259] px-4 text-sm font-bold text-white transition hover:bg-[#216F3D] disabled:cursor-wait disabled:opacity-60">
+          {busy || verifying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+          {busy ? 'Starting secure checkout…' : verifying ? 'Checking payment status…' : 'Pay Securely with Cashfree'}
+        </button>
+      </form>}
+
+      <p className="mt-auto pt-5 text-center text-[10px] leading-5 text-[var(--brand-text-muted)]">{mode === 'production' ? 'Production mode · INR only · no automatic renewal or card data handling on this website.' : 'Sandbox mode only. No live settlement, automatic renewal, or card data handling on this website.'}</p>
     </section>
   </div>;
 }

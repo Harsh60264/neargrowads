@@ -484,21 +484,22 @@ export function AdminServiceStore({
 
       {activeTab === 'orders' && <AdminServiceOrders canEdit={canEdit} />}
 
-      {activeTab === 'payments' && isPrimaryOwner && <section className="space-y-4 rounded-2xl border border-[#304135] bg-[#19241D] p-5 sm:p-6">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#8DD39D]">Razorpay integration</p>
-          <h2 className="mt-2 text-lg font-bold text-[#ECF3EE]">Payments &amp; Gateway</h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Only Razorpay Test mode is implemented. Live transactions and direct UPI are intentionally unavailable; Test payments never route real funds.</p>
+      {activeTab === 'payments' && isPrimaryOwner && <section className="space-y-4">
+        <div className="rounded-2xl border border-[#304135] bg-[#19241D] p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#8DD39D]">Gateway configuration</p>
+          <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Payments &amp; Gateway</h2>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Razorpay Test history remains available. Cashfree mode is selected by server-side deployment configuration and can be activated only after its environment-specific checks pass.</p>
         </div>
-        <button type="button" onClick={() => setActiveTab('storeSettings')} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#286D3B] px-4 text-xs font-semibold text-white">Open Store Settings <Settings2 className="h-4 w-4" /></button>
+        <AdminPaymentReceiving />
       </section>}
 
       {activeTab === 'storeSettings' && isPrimaryOwner && <section className="space-y-4">
         <div className="rounded-2xl border border-[#304135] bg-[#19241D] p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#8DD39D]">Store Settings</p>
-          <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Payment Receiving</h2>
+          <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Payment Receiving settings moved</h2>
+          <p className="mt-1 text-xs leading-5 text-[#A9B8AD]">Razorpay configuration, payment contact metadata, and Cashfree mode controls are managed together in Payments &amp; Gateway.</p>
         </div>
-        <AdminPaymentReceiving />
+        <button type="button" onClick={() => setActiveTab('payments')} className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#286D3B] px-4 text-xs font-semibold text-white">Open Payments &amp; Gateway <CreditCard className="h-4 w-4" /></button>
       </section>}
 
       {activeTab === 'categories' && <section className="overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">

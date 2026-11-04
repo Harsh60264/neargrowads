@@ -28,6 +28,21 @@ interface ServiceOrder {
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded';
   fulfillment_status: 'awaiting_payment' | 'queued' | 'in_progress' | 'completed' | 'cancelled';
   provider_snapshot: { merchantName?: string; settlementVerified?: boolean };
+  cashfree_order_id?: string | null;
+  cashfree_payment_attempts?: {
+    providerPaymentId: string;
+    status: string;
+    amountPaise: number;
+    currency: 'INR';
+    lastSeenAt: string;
+  }[];
+  cashfree_webhook_events?: {
+    eventType: string;
+    processingStatus: string;
+    receivedAt: string;
+  }[];
+  cashfree_reconciliation_required?: boolean;
+  cashfree_reconciliation_reasons?: string[];
   paid_at: string | null;
   created_at: string;
 }
@@ -88,7 +103,7 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
 
   return <section className="overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#304135] p-5">
-      <div><h2 className="font-semibold text-[#ECF3EE]">Orders &amp; Fulfilment</h2><p className="mt-1 text-xs text-[#A9B8AD]">Payment status is set only after Razorpay reports a captured, amount-matched payment.</p></div>
+      <div><h2 className="font-semibold text-[#ECF3EE]">Orders &amp; Fulfilment</h2><p className="mt-1 text-xs text-[#A9B8AD]">Payment status is set only after server-side provider verification of the payment, amount, and INR currency.</p></div>
       <button type="button" onClick={() => void loadOrders()} disabled={loading} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs text-[#C8D4CB] disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
     </header>
     {error && <p role="alert" className="m-4 rounded-xl border border-rose-400/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">{error}</p>}
@@ -100,12 +115,13 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-bold text-[#ECF3EE]">{order.order_reference}</p>
-              <p className="mt-1 text-[11px] text-[#91A195]">{orderDate(order.created_at)} · {order.provider} · TEST MODE</p>
+              <p className="mt-1 text-[11px] text-[#91A195]">{orderDate(order.created_at)} · {order.provider === 'cashfree' ? `Cashfree ${order.provider_mode === 'live' ? 'Production' : 'Sandbox'}` : `${order.provider} · Test mode`}</p>
             </div>
             <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase">
               <span className={`rounded-full px-2.5 py-1 ${order.payment_status === 'paid' ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200'}`}>Payment {order.payment_status}</span>
               <span className="rounded-full bg-white/5 px-2.5 py-1 text-[#C8D4CB]">{order.fulfillment_status.replaceAll('_', ' ')}</span>
               <span className="rounded-full bg-sky-400/10 px-2.5 py-1 text-sky-200">Test · no real funds</span>
+              {order.provider === 'cashfree' && order.cashfree_reconciliation_required && <span className="rounded-full bg-rose-400/10 px-2.5 py-1 text-rose-200">Reconciliation needed</span>}
             </div>
           </header>
           <div className="grid gap-4 sm:grid-cols-[1fr_1.3fr_auto]">
@@ -121,9 +137,22 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
                 <span>{item.title}{item.packageCode ? ` (${item.packageCode})` : ''}{item.quantity > 1 ? ` × ${item.quantity}` : ''} · {item.billingArrangement === 'single_cycle' ? 'single monthly cycle' : item.billingArrangement === 'single_session' ? 'single session' : billingTypeLabel[item.billingType].toLowerCase()}</span>
                 <span className="shrink-0">{formatServicePrice(item.lineSubtotalInr)}</span>
               </div>)}
-              <p className="border-t border-[#304135] pt-2 font-bold text-[#ECF3EE]">Test total: {formatServicePrice(order.total_amount_paise / 100)}</p>
-              {order.provider_order_id && <p className="break-all text-[10px] text-[#91A195]">Razorpay order: {order.provider_order_id}</p>}
-              {order.provider_payment_id && <p className="break-all text-[10px] text-[#91A195]">Test payment: {order.provider_payment_id}</p>}
+              <p className="border-t border-[#304135] pt-2 font-bold text-[#ECF3EE]">Order total: {formatServicePrice(order.total_amount_paise / 100)}</p>
+              {order.provider_order_id && <p className="break-all text-[10px] text-[#91A195]">{order.provider === 'cashfree' ? 'Merchant order reference' : 'Razorpay order'}: {order.provider_order_id}</p>}
+              {order.provider === 'cashfree' && order.cashfree_order_id && <p className="break-all text-[10px] text-[#91A195]">Cashfree order reference: {order.cashfree_order_id}</p>}
+              {order.provider_payment_id && <p className="break-all text-[10px] text-[#91A195]">Verified payment reference: {order.provider_payment_id}</p>}
+              {order.provider === 'cashfree' && (order.cashfree_payment_attempts || []).length > 0 && <div className="mt-2 rounded-lg border border-[#304135] p-2.5">
+                <p className="font-semibold text-[#ECF3EE]">Cashfree payment attempts</p>
+                {order.cashfree_payment_attempts?.map((attempt) => <p key={attempt.providerPaymentId} className="mt-1 break-all text-[10px] text-[#A9B8AD]">
+                  {attempt.providerPaymentId} · {attempt.status} · {attempt.currency} {formatServicePrice(attempt.amountPaise / 100)} · {orderDate(attempt.lastSeenAt)}
+                </p>)}
+              </div>}
+              {order.provider === 'cashfree' && order.cashfree_reconciliation_required && <div role="alert" className="mt-2 rounded-lg border border-rose-400/20 bg-rose-950/20 p-2.5 text-[10px] text-rose-200">
+                Reconciliation reason: {(order.cashfree_reconciliation_reasons || []).map((reason) => reason.replaceAll('_', ' ')).join(', ')}
+              </div>}
+              {order.provider === 'cashfree' && (order.cashfree_webhook_events || []).length > 0 && <div className="mt-2 text-[10px] text-[#91A195]">
+                Recent verified webhook handling: {order.cashfree_webhook_events?.slice(0, 3).map((event) => `${event.eventType.replaceAll('_', ' ')} · ${event.processingStatus}`).join(' / ')}
+              </div>}
             </div>
             {canEdit && order.provider_mode === 'live' && order.payment_status === 'paid' && <label className="text-[10px] font-semibold uppercase text-[#91A195]">Fulfilment status
               <select disabled={busyId === order.id} value={order.fulfillment_status} onChange={(event) => void updateFulfillment(order, event.target.value as ServiceOrder['fulfillment_status'])} className="mt-1.5 min-h-10 rounded-lg border border-[#33453A] bg-[#101913] px-3 text-xs normal-case text-[#ECF3EE]">

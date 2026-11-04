@@ -36,6 +36,27 @@ interface PaymentAuditEntry {
   created_at: string;
 }
 
+type CashfreeReadinessStatus =
+  | 'not_configured'
+  | 'sandbox_configured'
+  | 'production_configured'
+  | 'database_migration_missing'
+  | 'ready_for_testing'
+  | 'ready_for_live'
+  | 'enabled';
+
+interface CashfreeReadinessResponse {
+  status: CashfreeReadinessStatus;
+  credentialsConfigured: boolean;
+  environmentEnabled: boolean;
+  providerConfigurationConfirmed: boolean;
+  webhookConfigured: boolean;
+  migrationReady: boolean;
+  enabled: boolean;
+  mode: 'sandbox' | 'production' | 'unconfigured';
+  realPaymentsEnabled: boolean;
+}
+
 const inputClass = 'min-h-11 w-full rounded-xl border border-[#33453A] bg-[#101913] px-3.5 py-2.5 text-sm text-[#EAF1EB] outline-none placeholder:text-[#76867B] focus:border-[#67D8B7] focus:ring-2 focus:ring-[#67D8B7]/15';
 const buttonClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-[#286D3B] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#347E49] disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -62,6 +83,8 @@ export function AdminPaymentReceiving() {
   const [confirmOldPhone, setConfirmOldPhone] = useState('');
   const [confirmNewPhone, setConfirmNewPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [cashfreePassword, setCashfreePassword] = useState('');
+  const [cashfreeReadiness, setCashfreeReadiness] = useState<CashfreeReadinessResponse | null>(null);
   const [settlementPassword, setSettlementPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -83,7 +106,20 @@ export function AdminPaymentReceiving() {
     }
   }, []);
 
-  useEffect(() => { void loadSettings(); }, [loadSettings]);
+  const loadCashfreeReadiness = useCallback(async () => {
+    try {
+      const result = await api<CashfreeReadinessResponse>('/api/admin/payment-settings/cashfree');
+      setCashfreeReadiness(result);
+    } catch (reason) {
+      setCashfreeReadiness(null);
+      setError(reason instanceof Error ? reason.message : 'Cashfree Sandbox readiness could not be loaded.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSettings();
+    void loadCashfreeReadiness();
+  }, [loadCashfreeReadiness, loadSettings]);
 
   const saveContact = async () => {
     setBusy(true);
@@ -149,6 +185,44 @@ export function AdminPaymentReceiving() {
     }
   };
 
+  const setCashfreeGatewayMode = async (enable: boolean) => {
+    const mode = cashfreeReadiness?.mode;
+    if (mode !== 'sandbox' && mode !== 'production') {
+      setError('Cashfree mode is not explicitly configured. Checkout remains disabled.');
+      return;
+    }
+    const confirmation = enable
+      ? mode === 'production'
+        ? 'Enable Cashfree Production checkout? This permits real customer payments after all safeguards pass.'
+        : 'Enable Cashfree Sandbox checkout? This is test-only and does not transfer real funds.'
+      : `Disable Cashfree ${mode === 'production' ? 'Production' : 'Sandbox'} checkout?`;
+    if (!window.confirm(confirmation)) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/api/admin/payment-settings/cashfree', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: cashfreePassword,
+          enable,
+          confirmMode: mode === 'production' ? 'production' : 'test',
+        }),
+      });
+      setCashfreePassword('');
+      setNotice(enable
+        ? mode === 'production' ? 'Cashfree Production checkout enabled.' : 'Cashfree Sandbox checkout enabled. No live funds are transferred.'
+        : `Cashfree ${mode === 'production' ? 'Production' : 'Sandbox'} checkout disabled.`);
+      await Promise.all([loadSettings(), loadCashfreeReadiness()]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Cashfree status could not be changed.');
+      await loadCashfreeReadiness();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const requestSettlementChange = async () => {
     setBusy(true);
     setError('');
@@ -195,29 +269,96 @@ export function AdminPaymentReceiving() {
   }
 
   const settings = overview.settings;
+  const cashfreeStatusLabel: Record<CashfreeReadinessStatus, string> = {
+    not_configured: 'Not configured',
+    sandbox_configured: 'Sandbox configured',
+    production_configured: 'Production configured',
+    database_migration_missing: 'Database migration missing',
+    ready_for_testing: 'Ready for testing',
+    ready_for_live: 'Ready for live activation',
+    enabled: 'Enabled',
+  };
+  const cashfreeMode = cashfreeReadiness?.mode;
+  const cashfreeModeTitle = cashfreeMode === 'production' ? 'Production' : cashfreeMode === 'sandbox' ? 'Sandbox' : 'Unconfigured';
+  const cashfreeCanEnable = cashfreeReadiness?.status === 'ready_for_testing' ||
+    (cashfreeMode === 'production' && cashfreeReadiness?.status === 'ready_for_live');
   return <div className="space-y-5">
     {error && <div role="alert" className="rounded-xl border border-rose-400/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">{error}</div>}
     {notice && <div role="status" className="rounded-xl border border-emerald-400/25 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-200">{notice}</div>}
+
+    <section className="space-y-4 rounded-2xl border border-[#304135] bg-[#19241D] p-5 sm:p-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#8DD39D]">Cashfree Payments</p>
+          <h3 className="mt-1 text-base font-bold text-[#ECF3EE]">Cashfree {cashfreeModeTitle} · INR</h3>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Cashfree credentials are read only from server environment variables; this screen never accepts, stores, or displays them. Production activation enables real payments and requires all independent safeguards.</p>
+        </div>
+        <span className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${
+          cashfreeReadiness?.status === 'enabled'
+            ? 'bg-emerald-400/10 text-emerald-300'
+            : cashfreeReadiness?.status === 'ready_for_testing'
+              ? 'bg-sky-400/10 text-sky-200'
+              : 'bg-amber-400/10 text-amber-200'
+        }`}>
+          {cashfreeReadiness ? cashfreeStatusLabel[cashfreeReadiness.status] : 'Status unavailable'}
+        </span>
+      </header>
+
+      {cashfreeReadiness ? <>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {[
+            [`Server ${cashfreeModeTitle} credentials`, cashfreeReadiness.credentialsConfigured],
+            [`${cashfreeModeTitle} environment opt-in`, cashfreeReadiness.environmentEnabled],
+            ['Provider configuration confirmed', cashfreeReadiness.providerConfigurationConfirmed],
+            ['Webhook endpoint confirmed', cashfreeReadiness.webhookConfigured],
+            ['Cashfree database migration', cashfreeReadiness.migrationReady],
+            ['Primary Owner activation', cashfreeReadiness.enabled],
+          ].map(([label, ready]) => <div key={String(label)} className="rounded-xl border border-[#304135] bg-[#101913] p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#91A195]">{label}</p>
+            <p className={`mt-1 text-xs font-semibold ${ready ? 'text-emerald-300' : 'text-amber-200'}`}>{ready ? 'Confirmed' : 'Not confirmed'}</p>
+          </div>)}
+        </div>
+        <div className="rounded-xl border border-[#304135] bg-[#101913] p-4 text-xs leading-5 text-[#A9B8AD]">
+          <p className="font-semibold text-[#ECF3EE]">{cashfreeModeTitle} activation requirements</p>
+          <p className="mt-1">The Primary Owner must confirm the selected Cashfree environment configuration and its environment-specific webhook registration outside this CMS, then set the corresponding non-secret server-side readiness flags. Readiness checks do not contact Cashfree or verify an account. Missing migration objects fail closed.</p>
+        </div>
+        <label className="block max-w-xl text-xs font-medium text-[#B8C7BC]">Primary Owner password to change Cashfree {cashfreeModeTitle} status
+          <input className={`${inputClass} mt-1.5`} type="password" autoComplete="current-password" value={cashfreePassword} onChange={(event) => setCashfreePassword(event.target.value)} />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void setCashfreeGatewayMode(true)} disabled={busy || !cashfreePassword || !cashfreeCanEnable} className={buttonClass}>Enable Cashfree {cashfreeModeTitle}</button>
+          <button type="button" onClick={() => void setCashfreeGatewayMode(false)} disabled={busy || !cashfreePassword || !cashfreeReadiness.enabled} className="inline-flex min-h-10 items-center rounded-xl border border-[#47594C] px-4 text-xs font-semibold text-[#D7E3D9] disabled:cursor-not-allowed disabled:opacity-50">Disable Cashfree {cashfreeModeTitle}</button>
+          <button type="button" onClick={() => void loadCashfreeReadiness()} disabled={busy} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#47594C] px-4 text-xs font-semibold text-[#D7E3D9] disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" /> Refresh Cashfree readiness</button>
+        </div>
+      </> : <div role="alert" className="rounded-xl border border-amber-300/20 bg-amber-950/20 p-4 text-xs text-amber-100">
+        {loading ? 'Checking Cashfree readiness…' : 'Cashfree readiness could not be verified. Checkout remains disabled.'}
+        <button type="button" onClick={() => void loadCashfreeReadiness()} className="ml-2 underline">Retry</button>
+        <label className="mt-4 block max-w-xl text-xs font-medium text-[#B8C7BC]">Primary Owner password to disable Cashfree
+          <input className={`${inputClass} mt-1.5`} type="password" autoComplete="current-password" value={cashfreePassword} onChange={(event) => setCashfreePassword(event.target.value)} />
+        </label>
+        <button type="button" onClick={() => void setCashfreeGatewayMode(false)} disabled={busy || !cashfreePassword} className="mt-3 inline-flex min-h-10 items-center rounded-xl border border-[#47594C] px-4 text-xs font-semibold text-[#D7E3D9] disabled:cursor-not-allowed disabled:opacity-50">Attempt to disable Cashfree</button>
+      </div>}
+    </section>
 
     <section className="space-y-5 rounded-2xl border border-[#304135] bg-[#19241D] p-5 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#8DD39D]"><ShieldCheck className="h-4 w-4" /> Primary Owner controls</p>
           <h2 className="mt-2 text-lg font-bold text-[#ECF3EE]">Payment Receiving</h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Razorpay settlement destinations are controlled and verified by Razorpay. This CMS only supports Razorpay Test checkout; it cannot redirect real funds or change settlement bank details.</p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Razorpay historical configuration and Test behavior remain unchanged. Razorpay settlement destinations are controlled and verified by Razorpay; Cashfree is configured separately as Sandbox-only.</p>
         </div>
-        <button type="button" onClick={() => void loadSettings()} disabled={loading} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs text-[#C8D4CB] disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
+        <button type="button" onClick={() => { void loadSettings(); void loadCashfreeReadiness(); }} disabled={loading} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs text-[#C8D4CB] disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {[
-          ['Active Payment Gateway', settings.testGatewayEnabled ? 'Razorpay · Test' : 'None · payments unavailable'],
+          ['Active Payment Gateway', [settings.testGatewayEnabled ? 'Razorpay · Test' : '', cashfreeReadiness?.enabled ? `Cashfree · ${cashfreeModeTitle}` : ''].filter(Boolean).join(' + ') || 'None · payments unavailable'],
           ['Receiving Merchant Name', settings.businessName || 'Not configured · display metadata only'],
           ['Razorpay Test Key ID (masked)', settings.testKeyIdMasked || 'Not configured'],
           ['Payment Contact Number', settings.paymentContactPhone || 'Not configured'],
           ['Supported UPI ID', 'Unavailable · no verified direct UPI flow'],
           ['Verified Settlement Destination', 'Not verified in CMS · provider-managed'],
-          ['Mode', 'Test only · no real funds'],
+          ['Mode', cashfreeMode === 'production' && cashfreeReadiness?.enabled ? 'Production · real payments enabled' : 'Test only · no real funds'],
           ['Last Configuration Update', dateLabel(settings.updatedAt)],
           ['Last Updated By', overview.lastUpdatedBy || 'Not recorded'],
           ['Verification Status', settings.testCredentialsVerified ? `Test API accepted · ${dateLabel(settings.testCredentialsVerifiedAt)}` : 'Not verified'],
@@ -231,7 +372,7 @@ export function AdminPaymentReceiving() {
         <p className="font-semibold">What these settings do — and do not do</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Business display name and phone are contact metadata only; changing them never changes money routing.</li>
-          <li>Only verified Razorpay Test credentials can be enabled here. Live payments are not implemented.</li>
+          <li>Razorpay Test and Cashfree Sandbox are separate, non-live gateways. Cashfree activation requires server-only configuration and verified readiness.</li>
           <li>Settlement bank account changes must be completed and verified in the official Razorpay Dashboard.</li>
           <li>Direct UPI payments, payment screenshots, and customer-return callbacks are not accepted as payment proof.</li>
         </ul>

@@ -104,7 +104,9 @@ test('the 16 Admin foreign keys are explicitly inventoried and sessions remain o
   assert.equal(foreignKeyEntries.length, 16);
   assert.match(common, /'public\.admin_sessions\|user_id\|public\.admin_users\|id'/);
   assert.match(common, /Phase -eq 'Preflight' -or \$parts\[0\] -eq 'public\.admin_sessions'/);
-  assert.match(common, /expected exactly 16 known Admin references/);
+  assert.match(common, /expected exactly \$\(\$expected\.Count\) known Admin references/);
+  assert.match(common, /if \(\$Phase -eq 'PostMigration'[\s\S]*?cashfree_test_verified_by/);
+  assert.match(common, /public\.service_store_payment_settings\|cashfree_test_verified_by\|public\.admin_identity_history\|id/);
 });
 
 test('Production post-check covers Auth triggers, trigger-function privileges, RPC grants and RLS', () => {
@@ -146,6 +148,6 @@ test('schema-evidence checks Migration 36 definitions and preserves exact histor
   assert.match(postMigration, /pg_get_constraintdef\(constraint_row\.oid\)/);
   assert.match(postMigration, /identity_history_backfill/);
   assert.match(postMigration, /'auth', 'users', 'auth_users_guard_reserved_email'/);
-  assert.match(common, /all 16 expected Admin foreign keys/);
+  assert.match(common, /all \$\(\$expected\.Count\) expected Admin references/);
   assert.match(common, /\$parts\[8\] -ne 'true'/);
 });
