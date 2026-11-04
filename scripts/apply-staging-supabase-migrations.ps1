@@ -21,6 +21,8 @@ $stagingProjectRef = 'kdaixomygsuxadofoieb'
 $productionProjectRef = 'axbjzmdokfoftzfgwiql'
 $projectRefPattern = '^[a-z0-9]{20}$'
 $manualSqlEditorMigrationName = '20261031010000_complete_admin_temporary_password_setup.sql'
+$adminPermanentDeletionMigrationName = '20261102100000_secure_archived_admin_permanent_deletion.sql'
+$cashfreeMigrationName = '20261103100000_add_cashfree_service_payment_persistence.sql'
 $rejectedRetryMigrationName = '20261030230000_retry_temporary_admin_password_expiry.sql'
 $migrationNames = @(
   '20261021000000_grant_leads_storage_permissions.sql',
@@ -80,8 +82,11 @@ if ($migrationNames -contains $manualSqlEditorMigrationName -or
   throw 'The manually applied verification-only migration and rejected retry migration must never be queued.'
 }
 $allMigrationFiles = @(Get-ChildItem -LiteralPath $migrationDirectory -Filter '*.sql' | Sort-Object Name)
-if ($allMigrationFiles.Count -ne 35 -or $allMigrationFiles[-1].Name -cne $manualSqlEditorMigrationName) {
-  throw "Expected 35 repository migration files, with $manualSqlEditorMigrationName as the verification-only final migration."
+if ($allMigrationFiles.Count -ne 37 -or
+  $allMigrationFiles[-3].Name -cne $manualSqlEditorMigrationName -or
+  $allMigrationFiles[-2].Name -cne $adminPermanentDeletionMigrationName -or
+  $allMigrationFiles[-1].Name -cne $cashfreeMigrationName) {
+  throw "Expected 37 repository migration files, with migrations 35, 36 and 37 in their reviewed order."
 }
 if ($allMigrationFiles.Name -contains $rejectedRetryMigrationName) {
   throw "The rejected migration must not be present in the repository inventory: $rejectedRetryMigrationName"
@@ -92,7 +97,9 @@ if ($DryRun) {
   Write-Output "Staging project ref: $ProjectRef"
   Write-Output 'Planned runner-managed migrations (4-34):'
   $migrationNames | ForEach-Object { Write-Output "  $_" }
-  Write-Output "Verification-only; already applied manually in SQL Editor and never queued: $manualSqlEditorMigrationName"
+  Write-Output "Out-of-band migration 35; never queued: $manualSqlEditorMigrationName"
+  Write-Output "Migration 36; never bulk-queued: $adminPermanentDeletionMigrationName"
+  Write-Output "Migration 37; requires dedicated Staging preflight and verifier: $cashfreeMigrationName"
   return
 }
 

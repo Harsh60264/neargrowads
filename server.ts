@@ -1,6 +1,22 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createServer as createNetServer } from 'node:net';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  createCashfreeAdminReadinessHandler,
+  createCashfreeAvailabilityHandler,
+  createCashfreeActivationHandler,
+  createCashfreeOrderHandler,
+  createCashfreeWebhookHandler,
+} from './server/cashfreePaymentRoutes.ts';
+import { enrichCashfreeAdminOrders, readCashfreeGatewayReadiness } from './server/cashfreeAdmin.ts';
+import { resolveCashfreeEnvironment, type CashfreePaymentMode } from './server/cashfreePayments.ts';
+import {
+  buildServiceOrderLines,
+  InvalidServiceEnquiryError,
+  validateServiceOrder,
+  type ServiceOrderInput,
+} from './server/serviceOrders.ts';
+import { canAccessServiceStoreAction, serviceStoreAdminAction } from './server/serviceStoreAuthorization.ts';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { once } from 'node:events';
 import os from 'node:os';
@@ -1450,13 +1466,6 @@ function fromSupabaseServiceEnquiry(row: Record<string, unknown>): ServiceEnquir
   };
 }
 
-class InvalidServiceEnquiryError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InvalidServiceEnquiryError';
-  }
-}
-
 async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ requestReference: string; status: string; createdAt: string }> {
   const published = await readServicePackages(true);
   const selectedPackages: ServiceEnquiryRequest['selectedPackages'] = [];
@@ -1522,28 +1531,6 @@ interface ServiceStorePaymentSettings {
   updatedAt: string | null;
 }
 
-interface ServiceOrderLine {
-  packageId: string;
-  packageCode: string;
-  title: string;
-  billingType: ServiceBillingType;
-  billingArrangement: 'one_time' | 'single_cycle' | 'single_session';
-  quantity: number;
-  originalPriceInr: number;
-  unitPriceInr: number;
-  lineSubtotalInr: number;
-}
-
-interface ServiceOrderInput {
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  customerBusinessName: string;
-  onboardingNotes: string;
-  consent: true;
-  packages: { packageId: string; quantity: number }[];
-}
-
 const isUuid = (value: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
@@ -1553,6 +1540,40 @@ function getRazorpayTestConfig(): { keyId: string; keySecret: string; webhookSec
   const webhookSecret = process.env.RAZORPAY_TEST_WEBHOOK_SECRET || '';
   if (!/^rzp_test_[A-Za-z0-9]+$/.test(keyId) || keySecret.length < 8 || webhookSecret.length < 8) return undefined;
   return { keyId, keySecret, webhookSecret };
+}
+
+function getCashfreeConfig(expectedMode?: CashfreePaymentMode) {
+  const environment = resolveCashfreeEnvironment(process.env);
+  if (!environment || (expectedMode && environment.mode !== expectedMode) ||
+    !environment.clientId || !environment.clientSecret) return undefined;
+  return {
+    mode: environment.mode,
+    apiBaseUrl: environment.apiBaseUrl,
+    clientId: environment.clientId,
+    clientSecret: environment.clientSecret,
+  };
+}
+
+function cashfreeGatewayReadiness() {
+  const environment = resolveCashfreeEnvironment(process.env);
+  if (!environment) {
+    return Promise.resolve({
+      status: 'not_configured' as const,
+      mode: 'unconfigured' as const,
+      credentialsConfigured: false,
+      environmentEnabled: false,
+      providerConfigurationConfirmed: false,
+      webhookConfigured: false,
+      migrationReady: false,
+      enabled: false,
+    });
+  }
+  return readCashfreeGatewayReadiness({
+    credentialsConfigured: Boolean(environment.clientId && environment.clientSecret),
+    environmentEnabled: environment.enabled,
+    providerConfigurationConfirmed: environment.providerConfigured,
+    webhookConfigured: environment.webhookConfigured,
+  }, supabaseAdminRequest, environment.mode);
 }
 
 function maskPaymentIdentifier(value: string): string {
@@ -1571,34 +1592,6 @@ function serviceOrderRateLimit(req: Request, res: Response): boolean {
   attempts.push(now);
   serviceOrderAttempts.set(clientIp, attempts);
   return true;
-}
-
-function validateServiceOrder(value: unknown): ServiceOrderInput | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const input = value as Record<string, unknown>;
-  const customerName = typeof input.customerName === 'string' ? input.customerName.trim() : '';
-  const customerEmail = typeof input.customerEmail === 'string' ? input.customerEmail.trim().toLowerCase() : '';
-  const customerPhone = typeof input.customerPhone === 'string' ? input.customerPhone.trim() : '';
-  const customerBusinessName = typeof input.customerBusinessName === 'string' ? input.customerBusinessName.trim() : '';
-  const onboardingNotes = typeof input.onboardingNotes === 'string' ? input.onboardingNotes.trim() : '';
-  if (customerName.length < 2 || customerName.length > 120 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(customerEmail) || customerEmail.length > 255 ||
-    !/^[+0-9().\s-]{7,25}$/.test(customerPhone) || customerBusinessName.length > 160 ||
-    onboardingNotes.length > 2000 || input.consent !== true ||
-    !Array.isArray(input.packages) || input.packages.length < 1 || input.packages.length > 12) return undefined;
-
-  const packages: ServiceOrderInput['packages'] = [];
-  const seenIds = new Set<string>();
-  for (const entry of input.packages) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
-    const item = entry as Record<string, unknown>;
-    if (typeof item.packageId !== 'string' || !isUuid(item.packageId) ||
-      !Number.isInteger(item.quantity) || (item.quantity as number) < 1 || (item.quantity as number) > 50 ||
-      seenIds.has(item.packageId)) return undefined;
-    seenIds.add(item.packageId);
-    packages.push({ packageId: item.packageId, quantity: item.quantity as number });
-  }
-  return { customerName, customerEmail, customerPhone, customerBusinessName, onboardingNotes, consent: true, packages };
 }
 
 async function readServiceStorePaymentSettings(): Promise<ServiceStorePaymentSettings> {
@@ -1650,38 +1643,6 @@ async function readPaymentAuditHistory(): Promise<Record<string, unknown>[]> {
   return await servicePackageResponse<Record<string, unknown>[]>(
     await supabaseAdminRequest('rest/v1/service_store_payment_audit?select=id,actor_id,action,field_name,old_value_masked,new_value_masked,verification_result,activation_status,created_at&order=created_at.desc&limit=100'),
   );
-}
-
-function buildServiceOrderLines(input: ServiceOrderInput, packages: ServicePackage[]): ServiceOrderLine[] {
-  const lines: ServiceOrderLine[] = [];
-  let billingArrangement: ServiceOrderLine['billingArrangement'] | undefined;
-  for (const requested of input.packages) {
-    const servicePackage = packages.find((item) => item.id === requested.packageId);
-    if (!servicePackage) throw new InvalidServiceEnquiryError('A selected service package is no longer available.');
-    if (!servicePackage.quantitySupported && requested.quantity !== 1) {
-      throw new InvalidServiceEnquiryError('This service package does not support a quantity greater than one.');
-    }
-    const arrangement: ServiceOrderLine['billingArrangement'] = servicePackage.billingType === 'monthly'
-      ? 'single_cycle'
-      : servicePackage.billingType === 'per_session' ? 'single_session' : 'one_time';
-    if (billingArrangement && billingArrangement !== arrangement) {
-      throw new InvalidServiceEnquiryError('Purchase monthly, one-time, and per-session services in separate checkouts.');
-    }
-    billingArrangement = arrangement;
-    const unitPriceInr = servicePackage.discountedPriceInr ?? servicePackage.priceInr;
-    lines.push({
-      packageId: servicePackage.id,
-      packageCode: servicePackage.packageCode,
-      title: servicePackage.title,
-      billingType: servicePackage.billingType,
-      billingArrangement: arrangement,
-      quantity: requested.quantity,
-      originalPriceInr: servicePackage.priceInr,
-      unitPriceInr,
-      lineSubtotalInr: Math.round(unitPriceInr * requested.quantity * 100) / 100,
-    });
-  }
-  return lines;
 }
 
 function razorpayAuthorization(config: { keyId: string; keySecret: string }): string {
@@ -1806,7 +1767,7 @@ async function createServiceOrder(input: ServiceOrderInput): Promise<{
 async function readServiceOrderByTracking(reference: string, token: string): Promise<Record<string, unknown> | undefined> {
   const tokenHash = createHash('sha256').update(token).digest('hex');
   const params = new URLSearchParams({
-    select: 'order_reference,customer_name,line_items,total_amount_paise,currency,provider,provider_mode,payment_status,fulfillment_status,created_at,paid_at',
+    select: 'id,order_reference,customer_name,line_items,total_amount_paise,currency,provider,provider_mode,payment_status,fulfillment_status,created_at,paid_at',
     order_reference: `eq.${reference}`,
     tracking_token_hash: `eq.${tokenHash}`,
     limit: '1',
@@ -1814,7 +1775,27 @@ async function readServiceOrderByTracking(reference: string, token: string): Pro
   const rows = await servicePackageResponse<Record<string, unknown>[]>(
     await supabaseAdminRequest(`rest/v1/service_orders?${params}`),
   );
-  return rows[0];
+  const row = rows[0];
+  if (!row) return undefined;
+  const { id, ...order } = row;
+  if (order.provider !== 'cashfree' || order.payment_status !== 'pending') return order;
+  if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('Cashfree order tracking record is invalid.');
+  }
+  const attemptParams = new URLSearchParams({
+    select: 'payment_status,last_seen_at',
+    service_order_id: `eq.${id}`,
+    order: 'last_seen_at.desc,id.desc',
+    limit: '1',
+  });
+  const attempts = await servicePackageResponse<Record<string, unknown>[]>(
+    await supabaseAdminRequest(`rest/v1/cashfree_payment_attempts?${attemptParams}`),
+  );
+  const attemptStatus = attempts[0]?.payment_status;
+  return {
+    ...order,
+    cashfree_attempt_status: typeof attemptStatus === 'string' ? attemptStatus : null,
+  };
 }
 
 function leadStorageMode(): 'memory' | 'supabase' {
@@ -3710,6 +3691,9 @@ function requireMascotPermission(res: Response, action: 'view' | 'edit' | 'publi
 
 function hasPermission(identity: AdminIdentity, section: AdminSection, action: AdminAction): boolean {
   if (identity.role === 'owner') return true;
+  if (section === 'serviceStore') {
+    return canAccessServiceStoreAction(identity.role, identity.permissions, action);
+  }
   if (action !== 'view' && identity.permissions[section]?.view !== true) return false;
   return identity.permissions[section]?.[action] === true;
 }
@@ -3720,6 +3704,8 @@ function hasSecurityMonitoringAccess(identity: AdminIdentity, action: 'view' | '
 
 function requiredAdminPermission(req: Request): { section: AdminSection; action: AdminAction } | undefined {
   const pathName = req.path;
+  const serviceStoreAction = serviceStoreAdminAction(pathName, req.method);
+  if (serviceStoreAction) return { section: 'serviceStore', action: serviceStoreAction };
   if (pathName === '/uploads/sign' || pathName === '/uploads/complete') {
     const upload = createAdminUploadSpec(req.body);
     return upload ? { section: upload.section, action: 'edit' } : undefined;
@@ -3747,11 +3733,6 @@ function requiredAdminPermission(req: Request): { section: AdminSection; action:
   if (/^\/leads\/[^/]+\/status$/.test(pathName) && req.method === 'PATCH') return { section: 'leads', action: 'edit' };
   if (/^\/leads\/[^/]+\/notification\/retry$/.test(pathName) && req.method === 'POST') return { section: 'leads', action: 'edit' };
   if ((pathName === '/service-packages' || pathName === '/service-enquiries') && req.method === 'GET') return { section: 'serviceStore', action: 'view' };
-  if (pathName === '/orders' && req.method === 'GET') return { section: 'serviceStore', action: 'view' };
-  if (/^\/orders\/[^/]+\/fulfillment$/.test(pathName) && req.method === 'PATCH') return { section: 'serviceStore', action: 'edit' };
-  if (/^\/payment-settings(?:\/(?:history|verify|gateway|settlement-change))?$/.test(pathName)) {
-    return { section: 'serviceStore', action: req.method === 'GET' ? 'view' : 'edit' };
-  }
   if (pathName === '/service-packages' && req.method === 'POST') return { section: 'serviceStore', action: 'create' };
   if (pathName === '/service-categories') {
     return { section: 'serviceStore', action: req.method === 'GET' ? 'view' : req.method === 'POST' ? 'create' : 'edit' };
@@ -4861,6 +4842,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     limit: '3mb',
     verify: (req, _res, buffer) => {
       if (req.url?.split('?')[0] === '/api/payments/razorpay/test-webhook') {
+        (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      }
+      if (req.url?.split('?')[0] === '/api/payments/cashfree/test-webhook' ||
+        req.url?.split('?')[0] === '/api/payments/cashfree/production-webhook') {
         (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
       }
     },
@@ -9210,6 +9195,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  app.get('/api/catalogue/cashfree/payment-availability', createCashfreeAvailabilityHandler({
+    getReadiness: cashfreeGatewayReadiness,
+    getMode: () => resolveCashfreeEnvironment(process.env)?.mode || 'unconfigured',
+  }));
+
   app.get('/api/catalogue/:slug', async (req: Request, res: Response): Promise<void> => {
     try {
       res.setHeader('Cache-Control', 'no-store');
@@ -9259,6 +9249,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(503).json({ message: 'Checkout could not be started. No payment was taken.' });
     }
   });
+
+  app.post('/api/catalogue/cashfree/orders', createCashfreeOrderHandler({
+    getConfig: () => getCashfreeConfig(),
+    getReadiness: cashfreeGatewayReadiness,
+    getReturnUrl: (orderReference) => {
+      const returnUrl = new URL('/catalogue', canonicalSiteOrigin());
+      returnUrl.searchParams.set('cashfree_order_id', orderReference);
+      return returnUrl.toString();
+    },
+    readPublishedPackages: () => readServicePackages(true),
+    databaseRequest: supabaseAdminRequest,
+    allowOrder: (req, res) => serviceOrderRateLimit(req as Request, res as Response),
+  }));
 
   app.post('/api/catalogue/orders/:reference/track', async (req: Request, res: Response): Promise<void> => {
     const reference = req.params.reference;
@@ -9374,6 +9377,17 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(503).json({ message: 'Webhook processing failed.' });
     }
   });
+
+  app.post('/api/payments/cashfree/test-webhook', createCashfreeWebhookHandler({
+    mode: 'sandbox',
+    getConfig: () => getCashfreeConfig('sandbox'),
+    databaseRequest: supabaseAdminRequest,
+  }));
+  app.post('/api/payments/cashfree/production-webhook', createCashfreeWebhookHandler({
+    mode: 'production',
+    getConfig: () => getCashfreeConfig('production'),
+    databaseRequest: supabaseAdminRequest,
+  }));
 
   app.get('/api/admin/payment-settings', async (req: Request, res: Response): Promise<void> => {
     if (!requireOwner(req, res)) return;
@@ -9555,6 +9569,45 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  app.get('/api/admin/payment-settings/cashfree', createCashfreeAdminReadinessHandler({
+    requireOwner: (req, res) => requireOwner(req as Request, res as Response),
+    getReadiness: cashfreeGatewayReadiness,
+    getMode: () => resolveCashfreeEnvironment(process.env)?.mode || 'unconfigured',
+  }));
+
+  app.post('/api/admin/payment-settings/cashfree', createCashfreeActivationHandler({
+    mode: resolveCashfreeEnvironment(process.env)?.mode,
+    requireOwner: (req, res) => requireOwner(req as Request, res as Response),
+    isSameOrigin: (req) => isSameOriginRequest(req as Request),
+    currentAdmin: (_req, res) => currentAdmin(res as Response),
+    reauthenticate: async (req, res, identity, password, message) =>
+      Boolean(await reauthenticateAdminRequest(
+        req as Request, res as Response, identity as AdminIdentity, password, message,
+      )),
+    getReadiness: cashfreeGatewayReadiness,
+    setGateway: async (actorId, enable, mode) => {
+      const rpcName = mode === 'production'
+        ? 'set_cashfree_production_gateway'
+        : 'set_cashfree_test_gateway';
+      const response = await supabaseAdminRequest(`rest/v1/rpc/${rpcName}`, {
+        method: 'POST',
+        body: JSON.stringify({ p_actor_id: actorId, p_enable: enable }),
+      });
+      if (!response.ok) throw new ServicePackageStorageError(response.status, 'cashfree_gateway_update_failed');
+      return await response.json() as boolean;
+    },
+    recordChange: (actorId, enable) => recordSecurityEventSafely({
+      eventType: 'payment.configuration.changed',
+      severity: 'high',
+      actorId,
+      route: 'payment-settings',
+      details: {
+        operation: enable ? 'cashfree_enabled' : 'cashfree_disabled',
+        mode: resolveCashfreeEnvironment(process.env)?.mode || 'unconfigured',
+      },
+    }),
+  }));
+
   app.post('/api/admin/payment-settings/settlement-change', async (req: Request, res: Response): Promise<void> => {
     if (!requireOwner(req, res)) return;
     if (!isSameOriginRequest(req)) {
@@ -9595,8 +9648,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const rows = await servicePackageResponse<Record<string, unknown>[]>(
         await supabaseAdminRequest('rest/v1/service_orders?select=id,order_reference,customer_name,customer_email,customer_phone,customer_business_name,customer_onboarding_notes,line_items,total_amount_paise,currency,provider,provider_mode,provider_order_id,provider_payment_id,payment_status,fulfillment_status,provider_snapshot,paid_at,created_at,updated_at&order=created_at.desc&limit=100'),
       );
+      const orders = await enrichCashfreeAdminOrders(rows, (path) => supabaseAdminRequest(path));
       res.setHeader('Cache-Control', 'no-store');
-      res.json({ orders: rows });
+      res.json({ orders });
     } catch (error) {
       console.error('[NearGrow Ads] Admin service orders read failed.', {
         errorName: error instanceof Error ? error.name : 'UnknownError',

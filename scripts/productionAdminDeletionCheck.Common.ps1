@@ -320,17 +320,23 @@ function Test-ProductionAdminDeletionForeignKeys {
     }
     "$($parts[0])|$($parts[1])|$targetTable|$($parts[3])"
   }
+  if ($Phase -eq 'PostMigration' -and
+    @($actualForeignKeys | Where-Object {
+      $_ -like 'public.service_store_payment_settings|cashfree_test_verified_by|*'
+    }).Count -gt 0) {
+    $expected += 'public.service_store_payment_settings|cashfree_test_verified_by|public.admin_identity_history|id'
+  }
 
   $actualPairs = @($actualForeignKeys | Sort-Object)
   $expectedPairs = @($expected | Sort-Object)
-  $passed = $actualForeignKeys.Count -eq 16 -and (Compare-Object $actualPairs $expectedPairs).Count -eq 0
+  $passed = $actualForeignKeys.Count -eq $expected.Count -and (Compare-Object $actualPairs $expectedPairs).Count -eq 0
   foreach ($foreignKey in $actualForeignKeys | Sort-Object) {
     Write-Host "INFO | admin_foreign_key | $foreignKey"
   }
   if ($passed) {
-    Write-Host "PASS | admin_foreign_keys | all 16 expected Admin foreign keys have the expected target for $Phase."
+    Write-Host "PASS | admin_foreign_keys | all $($expected.Count) expected Admin references have the expected target for $Phase."
   } else {
-    Write-Host "FAIL | admin_foreign_keys | expected exactly 16 known Admin references and the phase-appropriate targets; found $($actualForeignKeys.Count)."
+    Write-Host "FAIL | admin_foreign_keys | expected exactly $($expected.Count) known Admin references and the phase-appropriate targets; found $($actualForeignKeys.Count)."
   }
   return $passed
 }
