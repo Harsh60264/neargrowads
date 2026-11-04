@@ -14,6 +14,7 @@ import {
   parseCashfreeWebhook,
   verifyCashfreePayment,
   verifyCashfreeWebhookSignature,
+  type CashfreeEnvironmentDiagnostics,
   type CashfreePaymentMode,
 } from './cashfreePayments.ts';
 import {
@@ -95,6 +96,7 @@ export interface CashfreeAdminReadinessDependencies {
   requireOwner(req: CashfreeHttpRequest, res: CashfreeHttpResponse): boolean;
   getReadiness(): Promise<CashfreeGatewayReadiness>;
   getMode?(): CashfreePaymentMode | 'unconfigured';
+  getEnvironmentDiagnostics?(): CashfreeEnvironmentDiagnostics;
 }
 
 async function jsonResponse<T>(response: globalThis.Response): Promise<T> {
@@ -574,6 +576,7 @@ export function createCashfreeAdminReadinessHandler(deps: CashfreeAdminReadiness
         provider: 'cashfree',
         mode: readiness.mode || 'sandbox',
         realPaymentsEnabled: production && isCashfreeProductionCheckoutReady(readiness),
+        environmentDiagnostics: deps.getEnvironmentDiagnostics?.(),
       });
     } catch (error) {
       console.error('[NearGrow Ads] Admin Cashfree readiness check failed.', {
@@ -590,6 +593,7 @@ export function createCashfreeAdminReadinessHandler(deps: CashfreeAdminReadiness
         provider: 'cashfree',
         mode: deps.getMode?.() || 'sandbox',
         realPaymentsEnabled: false,
+        environmentDiagnostics: deps.getEnvironmentDiagnostics?.(),
       });
     }
   };

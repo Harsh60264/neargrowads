@@ -16,21 +16,41 @@ export interface CashfreeEnvironmentConfig {
   webhookConfigured: boolean;
 }
 
+export interface CashfreeEnvironmentDiagnostics {
+  reason:
+    | 'none'
+    | 'production_mode_required'
+    | 'invalid_mode'
+    | 'deployment_mode_mismatch'
+    | 'mixed_environment_configuration'
+    | 'invalid_client_id'
+    | 'invalid_client_secret';
+  requestedMode: CashfreePaymentMode | 'missing' | 'invalid';
+  mode: CashfreePaymentMode | 'unconfigured';
+  productionDeployment: boolean;
+  credentialsConfigured: boolean;
+  clientIdConfigured: boolean;
+  clientIdValid: boolean;
+  clientSecretConfigured: boolean;
+  clientSecretValid: boolean;
+  environmentEnabled: boolean;
+  providerConfigurationConfirmed: boolean;
+  webhookConfigured: boolean;
+  sandboxCredentialsPresent: boolean;
+  sandboxFlagsEnabled: boolean;
+}
+
 function isConfigured(value: string | undefined): boolean {
   return Boolean(value?.trim());
 }
 
-export function resolveCashfreeEnvironment(
+export function inspectCashfreeEnvironment(
   environment: NodeJS.ProcessEnv,
-): CashfreeEnvironmentConfig | undefined {
+): CashfreeEnvironmentDiagnostics {
   const rawMode = environment.CASHFREE_MODE;
   const mode = rawMode === undefined || rawMode === ''
     ? environment.VERCEL_ENV === 'production' ? undefined : 'sandbox'
     : rawMode;
-  if (mode !== 'sandbox' && mode !== 'production') return undefined;
-  if (environment.VERCEL_ENV === 'production' && mode !== 'production') return undefined;
-  if (mode === 'production' && environment.VERCEL_ENV !== 'production') return undefined;
-
   const sandboxCredentialsPresent =
     isConfigured(environment.CASHFREE_SANDBOX_CLIENT_ID) ||
     isConfigured(environment.CASHFREE_SANDBOX_CLIENT_SECRET);
@@ -43,21 +63,72 @@ export function resolveCashfreeEnvironment(
   const productionAttested = environment.CASHFREE_PRODUCTION_ENABLED === 'true' ||
     environment.CASHFREE_PRODUCTION_PROVIDER_CONFIGURED === 'true' ||
     environment.CASHFREE_PRODUCTION_WEBHOOK_CONFIGURED === 'true';
-  if ((mode === 'production' && (sandboxCredentialsPresent || sandboxAttested)) ||
-    (mode === 'sandbox' && (productionCredentialsPresent || productionAttested))) return undefined;
-
-  const production = mode === 'production';
+  const resolvedMode = mode === 'sandbox' || mode === 'production' ? mode : 'unconfigured';
+  const production = resolvedMode === 'production' ||
+    (resolvedMode === 'unconfigured' && environment.VERCEL_ENV === 'production');
   const clientId = (production
     ? environment.CASHFREE_PRODUCTION_CLIENT_ID
     : environment.CASHFREE_SANDBOX_CLIENT_ID)?.trim();
   const clientSecret = production
     ? environment.CASHFREE_PRODUCTION_CLIENT_SECRET
     : environment.CASHFREE_SANDBOX_CLIENT_SECRET;
-  if ((clientId && (clientId.length > 255 || /\s/.test(clientId))) ||
-    (clientSecret && clientSecret.length < 8)) return undefined;
+  const clientIdConfigured = isConfigured(clientId);
+  const clientSecretConfigured = Boolean(clientSecret);
+  const clientIdValid = !clientId || (clientId.length <= 255 && !/\s/.test(clientId));
+  const clientSecretValid = !clientSecret || clientSecret.length >= 8;
+  const requestedMode = mode === 'sandbox' || mode === 'production'
+    ? mode
+    : mode === undefined ? 'missing' : 'invalid';
+  const credentialsConfigured = clientIdConfigured && clientSecretConfigured;
+
+  let reason: CashfreeEnvironmentDiagnostics['reason'] = 'none';
+  if (mode === undefined) reason = 'production_mode_required';
+  else if (mode !== 'sandbox' && mode !== 'production') reason = 'invalid_mode';
+  else if ((environment.VERCEL_ENV === 'production' && mode !== 'production') ||
+    (mode === 'production' && environment.VERCEL_ENV !== 'production')) {
+    reason = 'deployment_mode_mismatch';
+  } else if ((mode === 'production' && (sandboxCredentialsPresent || sandboxAttested)) ||
+    (mode === 'sandbox' && (productionCredentialsPresent || productionAttested))) {
+    reason = 'mixed_environment_configuration';
+  } else if (!clientIdValid) reason = 'invalid_client_id';
+  else if (!clientSecretValid) reason = 'invalid_client_secret';
 
   return {
-    mode,
+    reason,
+    requestedMode,
+    mode: resolvedMode,
+    productionDeployment: environment.VERCEL_ENV === 'production',
+    credentialsConfigured,
+    clientIdConfigured,
+    clientIdValid,
+    clientSecretConfigured,
+    clientSecretValid,
+    environmentEnabled: environment[production ? 'CASHFREE_PRODUCTION_ENABLED' : 'CASHFREE_SANDBOX_ENABLED'] === 'true',
+    providerConfigurationConfirmed: environment[production
+      ? 'CASHFREE_PRODUCTION_PROVIDER_CONFIGURED'
+      : 'CASHFREE_SANDBOX_PROVIDER_CONFIGURED'] === 'true',
+    webhookConfigured: environment[production
+      ? 'CASHFREE_PRODUCTION_WEBHOOK_CONFIGURED'
+      : 'CASHFREE_SANDBOX_WEBHOOK_CONFIGURED'] === 'true',
+    sandboxCredentialsPresent,
+    sandboxFlagsEnabled: sandboxAttested,
+  };
+}
+
+export function resolveCashfreeEnvironment(
+  environment: NodeJS.ProcessEnv,
+): CashfreeEnvironmentConfig | undefined {
+  const diagnostics = inspectCashfreeEnvironment(environment);
+  if (diagnostics.reason !== 'none' || diagnostics.mode === 'unconfigured') return undefined;
+  const production = diagnostics.mode === 'production';
+  const clientId = (production
+    ? environment.CASHFREE_PRODUCTION_CLIENT_ID
+    : environment.CASHFREE_SANDBOX_CLIENT_ID)?.trim();
+  const clientSecret = production
+    ? environment.CASHFREE_PRODUCTION_CLIENT_SECRET
+    : environment.CASHFREE_SANDBOX_CLIENT_SECRET;
+  return {
+    mode: diagnostics.mode,
     apiBaseUrl: production ? CASHFREE_PRODUCTION_API_BASE_URL : CASHFREE_SANDBOX_API_BASE_URL,
     ...(clientId ? { clientId } : {}),
     ...(clientSecret ? { clientSecret } : {}),

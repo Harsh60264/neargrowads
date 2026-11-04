@@ -1512,10 +1512,29 @@ test('Cashfree admin readiness is Primary Owner-only and never returns secrets',
       getReadiness: async () => ({
         ...readiness,
       }),
+      getEnvironmentDiagnostics: () => ({
+        reason: 'mixed_environment_configuration',
+        requestedMode: 'production',
+        mode: 'production',
+        productionDeployment: true,
+        credentialsConfigured: true,
+        clientIdConfigured: true,
+        clientIdValid: true,
+        clientSecretConfigured: true,
+        clientSecretValid: true,
+        environmentEnabled: false,
+        providerConfigurationConfirmed: true,
+        webhookConfigured: true,
+        sandboxCredentialsPresent: true,
+        sandboxFlagsEnabled: false,
+      }),
     });
 
     const result = await invoke(handler, request());
     assert.equal(result.statusCode, 200);
+    const readinessBody = result.body as Record<string, unknown>;
+    const environmentDiagnostics = readinessBody.environmentDiagnostics as Record<string, unknown>;
+    assert.equal(environmentDiagnostics.reason, 'mixed_environment_configuration');
     assert.doesNotMatch(JSON.stringify(result.body), new RegExp(secretCanary));
     const failedResult = await invoke(createCashfreeAdminReadinessHandler({
       requireOwner: () => true,
