@@ -35,6 +35,34 @@ export interface CashfreeTrackedOrder {
 
 export type CashfreeCheckoutMode = 'sandbox' | 'production';
 
+export interface CatalogueCheckoutOption {
+  provider: 'razorpay' | 'cashfree' | undefined;
+  available: boolean;
+  label: string;
+}
+
+export function catalogueCheckoutOption(options: {
+  razorpayAvailable: boolean;
+  cashfreeAvailable: boolean;
+  cashfreeMode: CashfreeCheckoutMode | null;
+  availabilityChecked: boolean;
+}): CatalogueCheckoutOption {
+  if (options.razorpayAvailable) {
+    return { provider: 'razorpay', available: true, label: 'Buy Now · Razorpay Test Checkout' };
+  }
+  if (options.cashfreeAvailable && options.cashfreeMode) {
+    const mode = options.cashfreeMode === 'production' ? 'Production' : 'Sandbox';
+    return { provider: 'cashfree', available: true, label: `Buy Now · Cashfree ${mode} Checkout` };
+  }
+  return {
+    provider: undefined,
+    available: false,
+    label: options.availabilityChecked
+      ? 'Online payment currently unavailable'
+      : 'Checking secure payment availability…',
+  };
+}
+
 export type CashfreeCustomerPaymentStatus = 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded';
 
 export const CASHFREE_RETURN_STORAGE_KEY = 'neargrow-cashfree-checkout-attempts';

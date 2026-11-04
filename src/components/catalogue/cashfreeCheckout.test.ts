@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   CASHFREE_RETURN_STORAGE_KEY,
   CASHFREE_PRODUCTION_RETURN_STORAGE_KEY,
+  catalogueCheckoutOption,
   cashfreeAvailabilityMode,
   cashfreeCustomerPaymentStatus,
   fetchCashfreeOrderStatus,
@@ -73,6 +74,54 @@ test('Cashfree checkout stays disabled unless sandbox and migration readiness ar
   assert.equal(cashfreeAvailabilityMode({ ...live, available: false, realPaymentsEnabled: false }), 'production');
   assert.equal(cashfreeAvailabilityMode({ ...live, available: false }), undefined);
   assert.equal(isCashfreeAvailable({ ...live, realPaymentsEnabled: false }), false);
+});
+
+test('catalogue Buy Now follows whichever payment gateway is publicly available', () => {
+  assert.deepEqual(catalogueCheckoutOption({
+    razorpayAvailable: false,
+    cashfreeAvailable: true,
+    cashfreeMode: 'production',
+    availabilityChecked: true,
+  }), {
+    provider: 'cashfree',
+    available: true,
+    label: 'Buy Now · Cashfree Production Checkout',
+  });
+
+  assert.deepEqual(catalogueCheckoutOption({
+    razorpayAvailable: false,
+    cashfreeAvailable: true,
+    cashfreeMode: 'sandbox',
+    availabilityChecked: true,
+  }), {
+    provider: 'cashfree',
+    available: true,
+    label: 'Buy Now · Cashfree Sandbox Checkout',
+  });
+
+  assert.equal(catalogueCheckoutOption({
+    razorpayAvailable: true,
+    cashfreeAvailable: true,
+    cashfreeMode: 'production',
+    availabilityChecked: true,
+  }).provider, 'razorpay');
+
+  assert.deepEqual(catalogueCheckoutOption({
+    razorpayAvailable: false,
+    cashfreeAvailable: false,
+    cashfreeMode: null,
+    availabilityChecked: false,
+  }), {
+    provider: undefined,
+    available: false,
+    label: 'Checking secure payment availability…',
+  });
+  assert.equal(catalogueCheckoutOption({
+    razorpayAvailable: false,
+    cashfreeAvailable: false,
+    cashfreeMode: null,
+    availabilityChecked: true,
+  }).label, 'Online payment currently unavailable');
 });
 
 test('Sandbox and Production recovery keys are isolated and cannot reuse the other mode session', async () => {
