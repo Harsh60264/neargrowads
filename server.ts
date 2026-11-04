@@ -9,7 +9,11 @@ import {
   createCashfreeWebhookHandler,
 } from './server/cashfreePaymentRoutes.ts';
 import { enrichCashfreeAdminOrders, readCashfreeGatewayReadiness } from './server/cashfreeAdmin.ts';
-import { resolveCashfreeEnvironment, type CashfreePaymentMode } from './server/cashfreePayments.ts';
+import {
+  inspectCashfreeEnvironment,
+  resolveCashfreeEnvironment,
+  type CashfreePaymentMode,
+} from './server/cashfreePayments.ts';
 import {
   buildServiceOrderLines,
   InvalidServiceEnquiryError,
@@ -9573,6 +9577,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     requireOwner: (req, res) => requireOwner(req as Request, res as Response),
     getReadiness: cashfreeGatewayReadiness,
     getMode: () => resolveCashfreeEnvironment(process.env)?.mode || 'unconfigured',
+    getEnvironmentDiagnostics: () => inspectCashfreeEnvironment(process.env),
   }));
 
   app.post('/api/admin/payment-settings/cashfree', createCashfreeActivationHandler({

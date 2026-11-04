@@ -9,6 +9,7 @@ import {
   parseCashfreeWebhook,
   verifyCashfreePayment,
   verifyCashfreeWebhookSignature,
+  inspectCashfreeEnvironment,
   resolveCashfreeEnvironment,
 } from './cashfreePayments.ts';
 
@@ -148,6 +149,54 @@ test('Cashfree mode resolution selects separate APIs and fails closed on mixed o
   assert.equal(resolveCashfreeEnvironment({
     VERCEL_ENV: 'production',
   }), undefined);
+});
+
+test('Cashfree runtime diagnostics identify rejection causes using booleans only', () => {
+  const production = {
+    VERCEL_ENV: 'production',
+    CASHFREE_MODE: 'production',
+    CASHFREE_PRODUCTION_CLIENT_ID: 'production-id',
+    CASHFREE_PRODUCTION_CLIENT_SECRET: 'production-secret',
+    CASHFREE_PRODUCTION_ENABLED: 'false',
+    CASHFREE_PRODUCTION_PROVIDER_CONFIGURED: 'true',
+    CASHFREE_PRODUCTION_WEBHOOK_CONFIGURED: 'true',
+  };
+  const accepted = inspectCashfreeEnvironment(production);
+  assert.equal(accepted.reason, 'none');
+  assert.equal(accepted.mode, 'production');
+  assert.equal(accepted.credentialsConfigured, true);
+  assert.equal(accepted.environmentEnabled, false);
+  assert.equal(accepted.providerConfigurationConfirmed, true);
+  assert.equal(accepted.webhookConfigured, true);
+  assert.equal(resolveCashfreeEnvironment(production)?.enabled, false);
+
+  const mixed = inspectCashfreeEnvironment({
+    ...production,
+    CASHFREE_SANDBOX_CLIENT_SECRET: 'sandbox-secret-canary',
+  });
+  assert.equal(mixed.reason, 'mixed_environment_configuration');
+  assert.equal(mixed.mode, 'production');
+  assert.equal(mixed.sandboxCredentialsPresent, true);
+
+  assert.equal(inspectCashfreeEnvironment({
+    VERCEL_ENV: 'preview',
+    CASHFREE_MODE: 'production',
+    CASHFREE_PRODUCTION_CLIENT_SECRET: 'production-secret',
+  }).reason, 'deployment_mode_mismatch');
+  assert.equal(inspectCashfreeEnvironment({
+    VERCEL_ENV: 'production',
+  }).reason, 'production_mode_required');
+  assert.equal(inspectCashfreeEnvironment({
+    VERCEL_ENV: 'production',
+    CASHFREE_MODE: 'production',
+    CASHFREE_PRODUCTION_CLIENT_ID: 'bad client id',
+  }).reason, 'invalid_client_id');
+  assert.equal(inspectCashfreeEnvironment({
+    VERCEL_ENV: 'production',
+    CASHFREE_MODE: 'production',
+    CASHFREE_PRODUCTION_CLIENT_SECRET: 'short',
+  }).reason, 'invalid_client_secret');
+  assert.doesNotMatch(JSON.stringify(mixed), /sandbox-secret-canary|production-secret|production-id/);
 });
 
 test('environment-scoped webhook fingerprints do not deduplicate across modes', () => {

@@ -55,6 +55,29 @@ interface CashfreeReadinessResponse {
   enabled: boolean;
   mode: 'sandbox' | 'production' | 'unconfigured';
   realPaymentsEnabled: boolean;
+  environmentDiagnostics?: {
+    reason:
+      | 'none'
+      | 'production_mode_required'
+      | 'invalid_mode'
+      | 'deployment_mode_mismatch'
+      | 'mixed_environment_configuration'
+      | 'invalid_client_id'
+      | 'invalid_client_secret';
+    requestedMode: 'sandbox' | 'production' | 'missing' | 'invalid';
+    mode: 'sandbox' | 'production' | 'unconfigured';
+    productionDeployment: boolean;
+    credentialsConfigured: boolean;
+    clientIdConfigured: boolean;
+    clientIdValid: boolean;
+    clientSecretConfigured: boolean;
+    clientSecretValid: boolean;
+    environmentEnabled: boolean;
+    providerConfigurationConfirmed: boolean;
+    webhookConfigured: boolean;
+    sandboxCredentialsPresent: boolean;
+    sandboxFlagsEnabled: boolean;
+  };
 }
 
 const inputClass = 'min-h-11 w-full rounded-xl border border-[#33453A] bg-[#101913] px-3.5 py-2.5 text-sm text-[#EAF1EB] outline-none placeholder:text-[#76867B] focus:border-[#67D8B7] focus:ring-2 focus:ring-[#67D8B7]/15';
@@ -112,7 +135,7 @@ export function AdminPaymentReceiving() {
       setCashfreeReadiness(result);
     } catch (reason) {
       setCashfreeReadiness(null);
-      setError(reason instanceof Error ? reason.message : 'Cashfree Sandbox readiness could not be loaded.');
+      setError(reason instanceof Error ? reason.message : 'Cashfree readiness could not be loaded.');
     }
   }, []);
 
@@ -278,8 +301,38 @@ export function AdminPaymentReceiving() {
     ready_for_live: 'Ready for live activation',
     enabled: 'Enabled',
   };
+  const cashfreeEnvironmentReasonLabel: Record<NonNullable<CashfreeReadinessResponse['environmentDiagnostics']>['reason'], string> = {
+    none: 'Environment mode configuration was accepted.',
+    production_mode_required: 'CASHFREE_MODE must be explicitly set to production for a Production deployment.',
+    invalid_mode: 'CASHFREE_MODE is not a supported mode.',
+    deployment_mode_mismatch: 'Cashfree mode does not match the Vercel deployment environment.',
+    mixed_environment_configuration: 'Conflicting Sandbox configuration is present for the selected mode.',
+    invalid_client_id: 'The selected client ID is present but fails format validation.',
+    invalid_client_secret: 'The selected client secret is present but fails minimum-length validation.',
+  };
   const cashfreeMode = cashfreeReadiness?.mode;
   const cashfreeModeTitle = cashfreeMode === 'production' ? 'Production' : cashfreeMode === 'sandbox' ? 'Sandbox' : 'Unconfigured';
+  const cashfreeDiagnostics = cashfreeReadiness?.environmentDiagnostics;
+  const cashfreeChecksModeTitle = cashfreeModeTitle !== 'Unconfigured'
+    ? cashfreeModeTitle
+    : cashfreeDiagnostics?.requestedMode === 'production'
+      ? 'Production'
+      : cashfreeDiagnostics?.requestedMode === 'sandbox' ? 'Sandbox' : 'Unresolved';
+  const cashfreeModeResolved = cashfreeMode !== 'unconfigured';
+  const cashfreeCredentialCheck = cashfreeModeResolved
+    ? cashfreeReadiness?.credentialsConfigured
+    : Boolean(cashfreeDiagnostics?.credentialsConfigured && cashfreeDiagnostics.clientIdValid &&
+      cashfreeDiagnostics.clientSecretValid);
+  const cashfreeEnvironmentCheck = cashfreeModeResolved
+    ? cashfreeReadiness?.environmentEnabled
+    : cashfreeDiagnostics?.environmentEnabled;
+  const cashfreeProviderCheck = cashfreeModeResolved
+    ? cashfreeReadiness?.providerConfigurationConfirmed
+    : cashfreeDiagnostics?.providerConfigurationConfirmed;
+  const cashfreeWebhookCheck = cashfreeModeResolved
+    ? cashfreeReadiness?.webhookConfigured
+    : cashfreeDiagnostics?.webhookConfigured;
+  const cashfreeMigrationCheck = cashfreeModeResolved ? cashfreeReadiness?.migrationReady : undefined;
   const cashfreeCanEnable = cashfreeReadiness?.status === 'ready_for_testing' ||
     (cashfreeMode === 'production' && cashfreeReadiness?.status === 'ready_for_live');
   return <div className="space-y-5">
@@ -305,17 +358,23 @@ export function AdminPaymentReceiving() {
       </header>
 
       {cashfreeReadiness ? <>
+        {cashfreeReadiness.environmentDiagnostics &&
+          cashfreeReadiness.environmentDiagnostics.reason !== 'none' && <div role="status" className="rounded-xl border border-amber-300/20 bg-amber-950/20 p-4 text-xs leading-5 text-amber-100">
+            <p className="font-semibold">Runtime configuration diagnostic: {cashfreeEnvironmentReasonLabel[cashfreeReadiness.environmentDiagnostics.reason]}</p>
+            <p className="mt-1">Boolean-only details: Production deployment {cashfreeReadiness.environmentDiagnostics.productionDeployment ? 'yes' : 'no'}; requested mode {cashfreeReadiness.environmentDiagnostics.requestedMode}; credentials configured {cashfreeReadiness.environmentDiagnostics.credentialsConfigured ? 'yes' : 'no'}; client ID valid {cashfreeReadiness.environmentDiagnostics.clientIdValid ? 'yes' : 'no'}; client secret configured and valid {cashfreeReadiness.environmentDiagnostics.clientSecretConfigured && cashfreeReadiness.environmentDiagnostics.clientSecretValid ? 'yes' : 'no'}; environment opt-in {cashfreeReadiness.environmentDiagnostics.environmentEnabled ? 'yes' : 'no'}; provider confirmation {cashfreeReadiness.environmentDiagnostics.providerConfigurationConfirmed ? 'yes' : 'no'}; webhook confirmation {cashfreeReadiness.environmentDiagnostics.webhookConfigured ? 'yes' : 'no'}; Sandbox credentials present {cashfreeReadiness.environmentDiagnostics.sandboxCredentialsPresent ? 'yes' : 'no'}; Sandbox flags enabled {cashfreeReadiness.environmentDiagnostics.sandboxFlagsEnabled ? 'yes' : 'no'}.</p>
+            <p className="mt-1">Migration readiness is not queried until the runtime mode resolves. Secret values are never returned.</p>
+          </div>}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {[
-            [`Server ${cashfreeModeTitle} credentials`, cashfreeReadiness.credentialsConfigured],
-            [`${cashfreeModeTitle} environment opt-in`, cashfreeReadiness.environmentEnabled],
-            ['Provider configuration confirmed', cashfreeReadiness.providerConfigurationConfirmed],
-            ['Webhook endpoint confirmed', cashfreeReadiness.webhookConfigured],
-            ['Cashfree database migration', cashfreeReadiness.migrationReady],
+            [`Server ${cashfreeChecksModeTitle} credentials`, cashfreeCredentialCheck],
+            [`${cashfreeChecksModeTitle} environment opt-in`, cashfreeEnvironmentCheck],
+            ['Provider configuration confirmed', cashfreeProviderCheck],
+            ['Webhook endpoint confirmed', cashfreeWebhookCheck],
+            ['Cashfree database migration', cashfreeMigrationCheck],
             ['Primary Owner activation', cashfreeReadiness.enabled],
           ].map(([label, ready]) => <div key={String(label)} className="rounded-xl border border-[#304135] bg-[#101913] p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-[#91A195]">{label}</p>
-            <p className={`mt-1 text-xs font-semibold ${ready ? 'text-emerald-300' : 'text-amber-200'}`}>{ready ? 'Confirmed' : 'Not confirmed'}</p>
+            <p className={`mt-1 text-xs font-semibold ${ready === undefined ? 'text-[#91A195]' : ready ? 'text-emerald-300' : 'text-amber-200'}`}>{ready === undefined ? 'Not checked' : ready ? 'Confirmed' : 'Not confirmed'}</p>
           </div>)}
         </div>
         <div className="rounded-xl border border-[#304135] bg-[#101913] p-4 text-xs leading-5 text-[#A9B8AD]">
@@ -345,7 +404,7 @@ export function AdminPaymentReceiving() {
         <div>
           <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#8DD39D]"><ShieldCheck className="h-4 w-4" /> Primary Owner controls</p>
           <h2 className="mt-2 text-lg font-bold text-[#ECF3EE]">Payment Receiving</h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Razorpay historical configuration and Test behavior remain unchanged. Razorpay settlement destinations are controlled and verified by Razorpay; Cashfree is configured separately as Sandbox-only.</p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Razorpay retains its existing Test-only behavior and provider-managed settlements. Cashfree is a separate INR gateway; Production mode requires its own environment readiness and Primary Owner activation.</p>
         </div>
         <button type="button" onClick={() => { void loadSettings(); void loadCashfreeReadiness(); }} disabled={loading} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs text-[#C8D4CB] disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
       </header>
@@ -358,7 +417,11 @@ export function AdminPaymentReceiving() {
           ['Payment Contact Number', settings.paymentContactPhone || 'Not configured'],
           ['Supported UPI ID', 'Unavailable · no verified direct UPI flow'],
           ['Verified Settlement Destination', 'Not verified in CMS · provider-managed'],
-          ['Mode', cashfreeMode === 'production' && cashfreeReadiness?.enabled ? 'Production · real payments enabled' : 'Test only · no real funds'],
+          ['Cashfree Mode', cashfreeMode === 'production'
+            ? cashfreeReadiness?.enabled ? 'Production · real payments enabled' : 'Production selected · checkout disabled'
+            : cashfreeMode === 'sandbox'
+              ? cashfreeReadiness?.enabled ? 'Sandbox · checkout enabled (test only)' : 'Sandbox selected · checkout disabled'
+              : 'Cashfree mode unavailable'],
           ['Last Configuration Update', dateLabel(settings.updatedAt)],
           ['Last Updated By', overview.lastUpdatedBy || 'Not recorded'],
           ['Verification Status', settings.testCredentialsVerified ? `Test API accepted · ${dateLabel(settings.testCredentialsVerifiedAt)}` : 'Not verified'],
@@ -372,7 +435,7 @@ export function AdminPaymentReceiving() {
         <p className="font-semibold">What these settings do — and do not do</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Business display name and phone are contact metadata only; changing them never changes money routing.</li>
-          <li>Razorpay Test and Cashfree Sandbox are separate, non-live gateways. Cashfree activation requires server-only configuration and verified readiness.</li>
+          <li>Razorpay Test and Cashfree are independent gateways. Cashfree Production can accept real INR payments only after server readiness passes and the Primary Owner explicitly activates it.</li>
           <li>Settlement bank account changes must be completed and verified in the official Razorpay Dashboard.</li>
           <li>Direct UPI payments, payment screenshots, and customer-return callbacks are not accepted as payment proof.</li>
         </ul>
