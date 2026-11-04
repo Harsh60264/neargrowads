@@ -39,6 +39,7 @@ import { publicText } from '../../data/publicCopy';
 import {
   cashfreeCustomerPaymentStatus,
   cashfreeAvailabilityMode,
+  catalogueCheckoutOption,
   fetchCashfreeOrderStatus,
   getOrCreateCashfreeAttempt,
   isCashfreeAvailable,
@@ -285,6 +286,12 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
   const [requestNote, setRequestNote] = useState('');
   const [toast, setToast] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const directCheckout = catalogueCheckoutOption({
+    razorpayAvailable: paymentAvailable,
+    cashfreeAvailable,
+    cashfreeMode,
+    availabilityChecked: paymentAvailabilityChecked && cashfreeAvailabilityChecked,
+  });
 
   useEffect(() => {
     let active = true;
@@ -551,6 +558,14 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
     setToast(`${item.title} added to your enquiry cart.`);
   };
 
+  const startPackageCheckout = (item: ServicePackage) => {
+    if (directCheckout.provider === 'razorpay') {
+      setCheckoutCart([{ item, quantity: 1 }]);
+    } else if (directCheckout.provider === 'cashfree' && cashfreeMode) {
+      setCashfreeCheckoutCart([{ item, quantity: 1 }]);
+    }
+  };
+
   const removeFromCart = (id: string) => setCart((current) => current.filter((entry) => entry.item.id !== id));
 
   const toggleCompare = (item: ServicePackage) => {
@@ -668,7 +683,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
     if (loading) return <PageState title="Loading service details" description="Getting the latest published package information." busy />;
     if (error) return <PageState title="Service details unavailable" description={error} retry={() => window.location.reload()} />;
     if (!selectedPackage) return <PageState title="Package not found" description="This package may have been unpublished or removed." action={() => onNavigate('/catalogue')} actionLabel="Back to Catalogue" />;
-    return <ServiceDetail item={selectedPackage} onBack={() => onNavigate('/catalogue')} onAdd={() => addToCart(selectedPackage)} onBuy={() => setCheckoutCart([{ item: selectedPackage, quantity: 1 }])} paymentAvailable={paymentAvailable} onEnquire={() => setEnquiryTarget({ packageItem: selectedPackage, serviceInterest: selectedPackage.category })} onCompare={() => toggleCompare(selectedPackage)} compared={compare.includes(selectedPackage.id)} whatsappNumber={whatsappNumber} />;
+    return <ServiceDetail item={selectedPackage} onBack={() => onNavigate('/catalogue')} onAdd={() => addToCart(selectedPackage)} onBuy={() => startPackageCheckout(selectedPackage)} checkoutAvailable={directCheckout.available} checkoutLabel={directCheckout.label} checkoutProvider={directCheckout.provider} checkoutMode={cashfreeMode} onEnquire={() => setEnquiryTarget({ packageItem: selectedPackage, serviceInterest: selectedPackage.category })} onCompare={() => toggleCompare(selectedPackage)} compared={compare.includes(selectedPackage.id)} whatsappNumber={whatsappNumber} />;
   };
 
   const activeChips = [
@@ -867,8 +882,9 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
                   compared={compare.includes(item.id)}
                   onOpen={() => onNavigate(`/catalogue/${item.slug}`)}
                   onAdd={() => addToCart(item)}
-                  onBuy={() => setCheckoutCart([{ item, quantity: 1 }])}
-                  paymentAvailable={paymentAvailable}
+                  onBuy={() => startPackageCheckout(item)}
+                  checkoutAvailable={directCheckout.available}
+                  checkoutLabel={directCheckout.label}
                   onEnquire={() => setEnquiryTarget({ packageItem: item, serviceInterest: item.category })}
                   onCompare={() => toggleCompare(item)}
                   onFavorite={() => toggleFavorite(item)}
@@ -971,14 +987,15 @@ function PageState({ title, description, retry, action, actionLabel, busy = fals
   );
 }
 
-function PackageCard({ item, favorite, compared, onOpen, onAdd, onBuy, paymentAvailable, onEnquire, onCompare, onFavorite, whatsappNumber }: {
+function PackageCard({ item, favorite, compared, onOpen, onAdd, onBuy, checkoutAvailable, checkoutLabel, onEnquire, onCompare, onFavorite, whatsappNumber }: {
   item: ServicePackage;
   favorite: boolean;
   compared: boolean;
   onOpen: () => void;
   onAdd: () => void;
   onBuy: () => void;
-  paymentAvailable: boolean;
+  checkoutAvailable: boolean;
+  checkoutLabel: string;
   onEnquire: () => void;
   onCompare: () => void;
   onFavorite: () => void;
@@ -1007,8 +1024,8 @@ function PackageCard({ item, favorite, compared, onOpen, onAdd, onBuy, paymentAv
         <div className="mt-auto grid grid-cols-2 gap-2 pt-5">
           <button type="button" onClick={onOpen} className="min-h-10 rounded-xl border px-3 text-xs font-bold transition hover:border-[#3EA259] hover:text-[#70BE55]" style={{ borderColor: 'var(--brand-border)' }}>View Details</button>
           <button type="button" onClick={onAdd} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-[#3EA259] px-3 text-xs font-bold text-white transition hover:bg-[#216F3D]"><ShoppingBag className="h-3.5 w-3.5" /> Add to Cart</button>
-          <button type="button" onClick={onBuy} disabled={!paymentAvailable} title={paymentAvailable ? 'Start a secure Razorpay Test checkout' : 'Online payment currently unavailable'} className="col-span-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#3EA259]/40 px-3 text-xs font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 disabled:cursor-not-allowed disabled:opacity-50">
-            {paymentAvailable ? 'Buy Now · Secure Test Checkout' : 'Online payment currently unavailable'}
+          <button type="button" onClick={onBuy} disabled={!checkoutAvailable} title={checkoutLabel} className="col-span-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#3EA259]/40 px-3 text-xs font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 disabled:cursor-not-allowed disabled:opacity-50">
+            {checkoutLabel}
           </button>
           <button type="button" onClick={onEnquire} className="col-span-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[#3EA259]/40 px-3 text-xs font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#70BE55]"><MessageCircle className="h-3.5 w-3.5" /> Enquire About This Package</button>
           <button type="button" onClick={onCompare} aria-pressed={compared} className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold ${compared ? 'bg-[#3EA259]/10 text-[#70BE55]' : 'text-[var(--brand-text-muted)] hover:text-[#70BE55]'}`}><GitCompareArrows className="h-3.5 w-3.5" /> {compared ? 'Added to Compare' : 'Compare'}</button>
@@ -1030,7 +1047,7 @@ function FeaturedCard({ item, onOpen }: { item: ServicePackage; onOpen: () => vo
   );
 }
 
-function ServiceDetail({ item, onBack, onAdd, onBuy, paymentAvailable, onEnquire, onCompare, compared, whatsappNumber }: { item: ServicePackage; onBack: () => void; onAdd: () => void; onBuy: () => void; paymentAvailable: boolean; onEnquire: () => void; onCompare: () => void; compared: boolean; whatsappNumber: string }) {
+function ServiceDetail({ item, onBack, onAdd, onBuy, checkoutAvailable, checkoutLabel, checkoutProvider, checkoutMode, onEnquire, onCompare, compared, whatsappNumber }: { item: ServicePackage; onBack: () => void; onAdd: () => void; onBuy: () => void; checkoutAvailable: boolean; checkoutLabel: string; checkoutProvider: 'razorpay' | 'cashfree' | undefined; checkoutMode: CashfreeCheckoutMode | null; onEnquire: () => void; onCompare: () => void; compared: boolean; whatsappNumber: string }) {
   const discounted = hasServiceDiscount(item);
   const finalPrice = finalServicePrice(item);
   const billingLabel = item.billingType === 'monthly' ? 'MONTHLY' : item.billingType === 'one_time' ? 'ONE-TIME' : 'PER SESSION';
@@ -1094,13 +1111,13 @@ function ServiceDetail({ item, onBack, onAdd, onBuy, paymentAvailable, onEnquire
               </div>
               <p className="mt-4 border-t pt-4 text-xs leading-5 text-[var(--brand-text-muted)]" style={{ borderColor: 'var(--brand-border)' }}>Package price as listed. Confirm scope and any applicable taxes with the team before engagement.</p>
               <button type="button" onClick={onAdd} className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#3EA259] px-4 text-sm font-bold text-white transition hover:bg-[#216F3D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#70BE55]"><ShoppingCart className="h-4 w-4" /> Add to Enquiry Cart</button>
-              <button type="button" onClick={onBuy} disabled={!paymentAvailable} className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#3EA259]/40 px-4 text-sm font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 disabled:cursor-not-allowed disabled:opacity-50">{paymentAvailable ? 'Buy Now · Secure Test Checkout' : 'Online payment currently unavailable'}</button>
+              <button type="button" onClick={onBuy} disabled={!checkoutAvailable} className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#3EA259]/40 px-4 text-sm font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 disabled:cursor-not-allowed disabled:opacity-50">{checkoutLabel}</button>
               <button type="button" onClick={onEnquire} className="mt-2 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#3EA259]/40 px-4 text-sm font-bold text-[#70BE55] transition hover:bg-[#3EA259]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#70BE55]"><MessageCircle className="h-4 w-4" /> Enquire About This Package</button>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button type="button" onClick={onCompare} aria-pressed={compared} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-2 text-xs font-semibold transition hover:border-[#3EA259] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#70BE55]" style={{ borderColor: 'var(--brand-border)' }}><GitCompareArrows className="h-4 w-4" /> {compared ? 'Remove Compare' : 'Compare'}</button>
                 <WhatsAppLink number={whatsappNumber} message={`Hi NearGrow Ads, I would like to ask about ${item.title}${item.packageCode ? ` (${item.packageCode})` : ''}. Listed price: ${priceLabel(item)}.`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-2 text-xs font-semibold transition hover:border-[#3EA259] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#70BE55]" ><MessageCircle className="h-4 w-4" /> Ask on WhatsApp</WhatsAppLink>
               </div>
-              <p className="mt-5 text-center text-[11px] leading-5 text-[var(--brand-text-muted)]">Razorpay Test checkouts are simulated and do not transfer real funds.</p>
+              <p className="mt-5 text-center text-[11px] leading-5 text-[var(--brand-text-muted)]">{checkoutProvider === 'cashfree' ? checkoutMode === 'production' ? 'Cashfree Production checkout transfers real funds; payment is verified by the server.' : 'Cashfree Sandbox checkout is test-only and does not transfer real funds.' : checkoutProvider === 'razorpay' ? 'Razorpay Test checkouts are simulated and do not transfer real funds.' : 'No online checkout is currently available.'}</p>
             </section>
           </aside>
         </div>
