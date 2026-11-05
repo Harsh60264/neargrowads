@@ -31,10 +31,16 @@ import { captureFirstTouchCampaign } from './data/leadTracking';
 import { PublicActivityTracker } from './components/PublicActivityTracker';
 import { ArrowLeft } from 'lucide-react';
 import { readAdminAuthRoute } from './components/admin/adminAuthCallback';
+import {
+  DEFAULT_PUBLIC_WEBSITE_THEMES,
+  parsePublicWebsiteThemes,
+  publicWebsiteThemeCssVariables,
+  type PublicWebsiteThemeMode,
+} from './data/publicWebsiteTheme';
 
 const FIRST_VISIT_TRANSITION_MS = 900;
 const INTERNAL_TRANSITION_MS = 650;
-type PublicTheme = 'light' | 'dark';
+type PublicTheme = PublicWebsiteThemeMode;
 
 function getSessionTheme(): PublicTheme {
   try {
@@ -163,10 +169,11 @@ export default function App() {
     const receivePreviewContent = (event: MessageEvent<unknown>) => {
       if (event.origin !== window.location.origin || event.source !== window.parent) return;
       if (!event.data || typeof event.data !== 'object') return;
-      const message = event.data as { type?: unknown; content?: unknown };
+      const message = event.data as { type?: unknown; content?: unknown; theme?: unknown };
       if (message.type !== 'ng-cms-preview-content' || !message.content ||
         typeof message.content !== 'object') return;
       setSiteContent(message.content as SiteContent);
+      if (message.theme === 'light' || message.theme === 'dark') setTheme(message.theme);
       setSiteContentLoaded(true);
     };
     window.addEventListener('message', receivePreviewContent);
@@ -304,12 +311,16 @@ export default function App() {
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
+    const themes = parsePublicWebsiteThemes(siteContent.websiteThemes) ?? DEFAULT_PUBLIC_WEBSITE_THEMES;
+    Object.entries(publicWebsiteThemeCssVariables(themes[theme])).forEach(([name, value]) => {
+      document.documentElement.style.setProperty(name, value);
+    });
     try {
       window.sessionStorage.setItem('neargrow-theme', theme);
     } catch {
       // The selected theme remains active for this session if storage is unavailable.
     }
-  }, [theme]);
+  }, [siteContent.websiteThemes, theme]);
 
   useEffect(() => {
     document.documentElement.dataset.home = currentPath === '/' ? 'true' : 'false';
@@ -552,7 +563,7 @@ export default function App() {
     <>
       <PublicActivityTracker pathname={currentPath} enabled={!isCmsPreview} />
       <div
-        className="min-h-screen flex flex-col bg-white text-[#171A17]"
+        className={`min-h-screen flex flex-col ${isAdminRoute ? 'bg-white text-[#171A17]' : 'public-website bg-[var(--brand-bg)] text-[var(--brand-text)]'}`}
         data-public-theme={isAdminRoute ? undefined : theme}
         inert={transitionActive}
         aria-hidden={transitionActive}

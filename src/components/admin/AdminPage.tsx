@@ -880,7 +880,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
     : section === 'blog'
       ? <AdminBlogManager mode={blogMode || 'list'} onBack={() => navigate('/admin')} onNavigate={navigate} canCreate={hasAction('blogs', 'create')} canEdit={hasAction('blogs', 'edit')} canDelete={hasAction('blogs', 'delete')} canPublish={hasAction('blogs', 'publish')} canViewCategories={hasView('categories')} />
       : section === 'content'
-        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} />
+        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
         : section === 'mascot'
           ? hasView('mascot')
             ? <AdminMascotSettings canEdit={hasAction('mascot', 'edit')} canPublish={hasAction('mascot', 'publish')} />
