@@ -12,8 +12,11 @@ import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSafePublicDestination } from '../../data/publicLinks';
 import {
+  ADMIN_CMS_THEME_REGISTRY,
+  DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
-  DEFAULT_PUBLIC_WEBSITE_THEMES,
+  getAdminCmsThemeDefinition,
+  getAdminCmsThemePalette,
   getPublicWebsiteThemeDefinition,
   getPublicWebsiteThemePalette,
   PUBLIC_WEBSITE_THEME_REGISTRY,
@@ -348,21 +351,30 @@ export function AdminContentManager({
     return () => window.removeEventListener('message', handlePreviewReady);
   }, [content, previewThemeMode, showThemeStudio]);
 
-  const updateWebsiteThemeAssignment = (mode: PublicWebsiteThemeMode, themeId: string) => {
+  const updateThemeAssignment = (
+    scope: 'website' | 'cms',
+    mode: PublicWebsiteThemeMode,
+    themeId: string,
+  ) => {
     setContent((current) => ({
       ...current,
-      websiteThemeAssignments: {
-        ...current.websiteThemeAssignments,
-        [mode]: themeId,
-      },
+      websiteThemeAssignments: scope === 'website'
+        ? { ...current.websiteThemeAssignments, [mode]: themeId }
+        : current.websiteThemeAssignments,
+      cmsThemeAssignments: scope === 'cms'
+        ? { ...current.cmsThemeAssignments, [mode]: themeId }
+        : current.cmsThemeAssignments,
     }));
     setNotice('');
   };
 
-  const publishedThemeAssignments: PublicWebsiteThemeAssignments =
+  const publishedWebsiteThemeAssignments: PublicWebsiteThemeAssignments =
     publishedContent.websiteThemeAssignments ?? DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
-  const themeAssignmentsChanged = JSON.stringify(content.websiteThemeAssignments) !==
-    JSON.stringify(publishedThemeAssignments);
+  const publishedCmsThemeAssignments: PublicWebsiteThemeAssignments =
+    publishedContent.cmsThemeAssignments ?? DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS;
+  const themeAssignmentsChanged =
+    JSON.stringify(content.websiteThemeAssignments) !== JSON.stringify(publishedWebsiteThemeAssignments) ||
+    JSON.stringify(content.cmsThemeAssignments) !== JSON.stringify(publishedCmsThemeAssignments);
 
   const updateField = (section: keyof SiteContent, key: string, value: string) => {
     setContent((current) => ({
@@ -729,9 +741,94 @@ export function AdminContentManager({
     }
   };
 
-  const previewWidth = previewDevice === 'desktop' ? 1280 : previewDevice === 'tablet' ? 768 : 390;
+    const previewWidth = previewDevice === 'desktop' ? 1280 : previewDevice === 'tablet' ? 768 : 390;
 
-  return (
+    const renderThemeGroup = (
+      scope: 'website' | 'cms',
+      title: string,
+      description: string,
+      assignments: PublicWebsiteThemeAssignments,
+      publishedAssignments: PublicWebsiteThemeAssignments,
+      registry: typeof PUBLIC_WEBSITE_THEME_REGISTRY,
+      getDefinition: (id: string) => ReturnType<typeof getPublicWebsiteThemeDefinition>,
+      getPalette: (id: string, mode: PublicWebsiteThemeMode) => ReturnType<typeof getPublicWebsiteThemePalette>,
+    ) => (
+      <section className="space-y-3 rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
+        <header>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-[#A9B8AD]">{description}</p>
+        </header>
+        <div className="grid gap-3 md:grid-cols-2">
+          {(['light', 'dark'] as const).map((mode) => {
+            const selectedId = assignments[mode];
+            const selected = getDefinition(selectedId);
+            const published = getDefinition(publishedAssignments[mode]);
+            const palette = getPalette(selectedId, mode);
+            const modeLabel = mode === 'light' ? 'Light Mode' : 'Dark Mode';
+            return (
+              <article key={`${scope}-${mode}`} className="rounded-xl border border-[#304135] bg-[#131D16] p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-[#ECF3EE]">{modeLabel}</h4>
+                    <p className="mt-1 text-[11px] text-[#A9B8AD]">{selected?.name ?? modeLabel}</p>
+                    {selectedId !== publishedAssignments[mode] && (
+                      <p className="mt-1 text-[10px] text-[#819087]">Published: {published?.name ?? 'Original appearance'}</p>
+                    )}
+                  </div>
+                  {scope === 'website' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewThemeMode(mode);
+                        setPreviewPath('/');
+                        setShowPreview(true);
+                      }}
+                      disabled={loading || loadFailed}
+                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-[#47594C] px-2.5 text-[11px] font-semibold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> Preview site
+                    </button>
+                  )}
+                </div>
+                <div
+                  className="mt-3 rounded-lg border p-3"
+                  style={{ backgroundColor: palette.background, borderColor: palette.border, color: palette.text }}
+                  aria-label={`${modeLabel} appearance preview`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold">NearGrow <span style={{ color: palette.primary }}>Ads</span></span>
+                    <span className="text-[9px]" style={{ color: palette.textMuted }}>Services&nbsp; Work&nbsp; Contact</span>
+                  </div>
+                  <p className="mt-3 text-sm font-extrabold leading-tight">A clear look for every screen.</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="rounded px-2 py-1 text-[9px] font-bold text-white" style={{ backgroundColor: palette.primary }}>Action</span>
+                    <span className="h-3 w-8 rounded-sm" style={{ backgroundColor: palette.backgroundSoft }} />
+                    <span className="h-3 w-8 rounded-sm" style={{ backgroundColor: palette.surface }} />
+                  </div>
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#B8C7BC]">Theme preset</span>
+                  <select
+                    aria-label={`${title} ${modeLabel} theme`}
+                    value={selectedId}
+                    disabled={!canEdit || !isPrimaryOwner || saving}
+                    onChange={(event) => updateThemeAssignment(scope, mode, event.currentTarget.value)}
+                    className="h-9 w-full rounded-lg border border-[#47594C] bg-[#131D16] px-2.5 text-xs text-[#ECF3EE] disabled:opacity-50"
+                  >
+                    {registry.map((theme) => (
+                      <option key={theme.id} value={theme.id}>{theme.name}</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[10px] leading-4 text-[#819087]">{selected?.description}</span>
+                </label>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+
+    return (
     <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme="dark">
       <div className={embedded ? '' : 'mx-auto max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9'}>
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -846,7 +943,7 @@ export function AdminContentManager({
               ))}
               {isPrimaryOwner && (
                 <button type="button" onClick={() => setShowThemeStudio(true)} aria-pressed={showThemeStudio} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${showThemeStudio ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
-                  Theme Studio
+                  Theme Manager
                 </button>
               )}
             </nav>
@@ -868,80 +965,31 @@ export function AdminContentManager({
             {showThemeStudio ? (
               <section className="space-y-4">
                 <header className="rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">Primary Owner · Public website</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">Primary Owner</p>
                   <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Theme Manager</h2>
-                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Choose a saved appearance for each website mode. Preview selections before publishing; the public toggle continues to switch between these two slots.</p>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Assign published themes independently for the public website and Admin CMS. Mode toggles use their own assignments.</p>
                 </header>
                 {!canEdit && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100">Your role can preview themes but cannot edit them.</p>}
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {(['light', 'dark'] as const).map((mode) => {
-                    const selectedId = content.websiteThemeAssignments[mode];
-                    const selectedDefinition = getPublicWebsiteThemeDefinition(selectedId);
-                    const selectedName = selectedDefinition?.name ?? `Current ${mode === 'light' ? 'light' : 'dark'} appearance`;
-                    const palette = getPublicWebsiteThemePalette(
-                      selectedId,
-                      mode,
-                      content.websiteThemes?.[mode] ?? DEFAULT_PUBLIC_WEBSITE_THEMES[mode],
-                    );
-                    const publishedId = publishedThemeAssignments[mode];
-                    const publishedName = getPublicWebsiteThemeDefinition(publishedId)?.name ??
-                      `Current ${mode === 'light' ? 'light' : 'dark'} appearance`;
-                    return (
-                      <article key={mode} className="overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
-                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#304135] p-4">
-                          <div>
-                            <h3 className="text-sm font-bold text-[#ECF3EE]">{mode === 'light' ? 'Light Mode' : 'Dark Mode'}</h3>
-                            <p className="mt-1 text-xs text-[#A9B8AD]">Assigned theme: <span className="font-semibold text-[#ECF3EE]">{selectedName}</span></p>
-                            {selectedId !== publishedId && <p className="mt-1 text-[11px] text-[#819087]">Published: {publishedName}</p>}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPreviewThemeMode(mode);
-                              setPreviewPath('/');
-                              setShowPreview(true);
-                            }}
-                            disabled={loading || loadFailed}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#47594C] px-3 text-xs font-semibold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
-                          >
-                            <Eye className="h-3.5 w-3.5" /> Preview
-                          </button>
-                        </div>
-                        <div className="p-3 sm:p-4">
-                          <div className="rounded-xl border p-4" style={{ backgroundColor: palette.background, borderColor: palette.border, color: palette.text }}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-extrabold">NearGrow <span style={{ color: palette.primary }}>Ads</span></span>
-                              <span className="text-[10px]" style={{ color: palette.textMuted }}>Services&nbsp;&nbsp; Work&nbsp;&nbsp; Contact</span>
-                            </div>
-                            <p className="mt-5 text-[10px] font-bold uppercase tracking-[.14em]" style={{ color: palette.accent }}>Website appearance preview</p>
-                            <p className="mt-2 text-xl font-extrabold leading-tight">A clear look for every screen.</p>
-                            <p className="mt-2 max-w-sm text-xs leading-5" style={{ color: palette.textMuted }}>Your selected appearance, previewed before it goes live.</p>
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <span className="rounded-lg px-3 py-2 text-[10px] font-bold text-white" style={{ backgroundColor: palette.primary }}>Primary action</span>
-                              <span className="rounded-lg border px-3 py-2 text-[10px] font-bold" style={{ borderColor: palette.border, color: palette.text }}>Secondary action</span>
-                            </div>
-                          </div>
-                          <label className="mt-3 block">
-                            <span className="mb-1.5 block text-xs font-semibold text-[#B8C7BC]">Theme for {mode === 'light' ? 'Light Mode' : 'Dark Mode'}</span>
-                            <select
-                              aria-label={`Theme for ${mode === 'light' ? 'Light Mode' : 'Dark Mode'}`}
-                              value={selectedId}
-                              disabled={!canEdit || !isPrimaryOwner || saving}
-                              onChange={(event) => updateWebsiteThemeAssignment(mode, event.currentTarget.value)}
-                              className="h-10 w-full rounded-lg border border-[#47594C] bg-[#131D16] px-3 text-xs text-[#ECF3EE] disabled:opacity-50"
-                            >
-                              <option value={`legacy-${mode}`}>Current saved {mode} appearance</option>
-                              {PUBLIC_WEBSITE_THEME_REGISTRY.map((theme) => (
-                                <option key={theme.id} value={theme.id}>{theme.name} · {theme.mode === 'light' ? 'Light' : 'Dark'}</option>
-                              ))}
-                            </select>
-                            <span className="mt-1.5 block text-[11px] text-[#819087]">{selectedDefinition?.description ?? 'Keeps the currently saved custom appearance.'}</span>
-                          </label>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
+                {renderThemeGroup(
+                  'website',
+                  'Public Website',
+                  'The public Light/Dark toggle uses these published assignments.',
+                  content.websiteThemeAssignments,
+                  publishedWebsiteThemeAssignments,
+                  PUBLIC_WEBSITE_THEME_REGISTRY,
+                  getPublicWebsiteThemeDefinition,
+                  getPublicWebsiteThemePalette,
+                )}
+                {renderThemeGroup(
+                  'cms',
+                  'Admin CMS',
+                  'The CMS appearance toggle uses these assignments independently of the public website.',
+                  content.cmsThemeAssignments,
+                  publishedCmsThemeAssignments,
+                  ADMIN_CMS_THEME_REGISTRY,
+                  getAdminCmsThemeDefinition,
+                  getAdminCmsThemePalette,
+                )}
                 <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#304135] bg-[#19241D] p-3">
                   <button
                     type="button"
@@ -949,9 +997,10 @@ export function AdminContentManager({
                     onClick={() => {
                       setContent((current) => ({
                         ...current,
-                        websiteThemeAssignments: { ...publishedThemeAssignments },
+                        websiteThemeAssignments: { ...publishedWebsiteThemeAssignments },
+                        cmsThemeAssignments: { ...publishedCmsThemeAssignments },
                       }));
-                      setNotice('Theme assignments reset to the currently published selections.');
+                      setNotice('Website and CMS assignments reset to the published selections.');
                     }}
                     className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
                   >

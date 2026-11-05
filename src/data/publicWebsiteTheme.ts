@@ -28,98 +28,104 @@ export interface PublicWebsiteThemeDefinition {
   palette: PublicWebsiteThemePalette;
 }
 
-export const DEFAULT_PUBLIC_WEBSITE_THEMES: PublicWebsiteThemes = {
+const originalWebsiteThemes: PublicWebsiteThemes = {
   light: {
-    background: '#F7F9FE',
-    backgroundSoft: '#EFF3FC',
+    background: '#F8F7F2',
+    backgroundSoft: '#E7EFE5',
     surface: '#FFFFFF',
     surfaceRaised: '#FFFFFF',
-    text: '#101D38',
-    textMuted: '#53627C',
-    primary: '#2457D6',
-    primaryHover: '#1946B8',
-    primarySoft: '#E8EEFF',
-    accent: '#168CE8',
-    border: '#DCE4F2',
+    text: '#18251E',
+    textMuted: '#59665E',
+    primary: '#23734B',
+    primaryHover: '#0D3021',
+    primarySoft: '#E7EFE5',
+    accent: '#F5A623',
+    border: '#DCE3DA',
   },
   dark: {
-    background: '#070F24',
-    backgroundSoft: '#0D1934',
-    surface: '#111F3D',
-    surfaceRaised: '#17284B',
-    text: '#F3F6FF',
-    textMuted: '#B4C0DB',
-    primary: '#315ECD',
-    primaryHover: '#78A0FF',
-    primarySoft: '#172B59',
-    accent: '#35C4F4',
-    border: '#293B62',
+    background: '#070B13',
+    backgroundSoft: '#0D1320',
+    surface: '#111725',
+    surfaceRaised: '#111725',
+    text: '#F5F6FA',
+    textMuted: '#A6AEC0',
+    primary: '#70BE55',
+    primaryHover: '#57A949',
+    primarySoft: '#19291F',
+    accent: '#F3B94F',
+    border: '#232B3A',
   },
 };
 
+export const DEFAULT_PUBLIC_WEBSITE_THEMES: PublicWebsiteThemes = originalWebsiteThemes;
+
 export const DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS: PublicWebsiteThemeAssignments = {
-  light: 'royal-light',
-  dark: 'midnight-dark',
+  light: 'original-website-light',
+  dark: 'original-website-dark',
 };
 
 export const PUBLIC_WEBSITE_THEME_REGISTRY: readonly PublicWebsiteThemeDefinition[] = [
   {
-    id: 'royal-light',
-    name: 'Royal Blue',
-    description: 'Clean white surfaces with royal blue accents.',
+    id: 'original-website-light',
+    name: 'Original Website Light',
+    description: 'The original NearGrow light appearance from Git history.',
     mode: 'light',
-    palette: DEFAULT_PUBLIC_WEBSITE_THEMES.light,
+    palette: originalWebsiteThemes.light,
   },
   {
-    id: 'cloud-light',
-    name: 'Cloud',
-    description: 'Soft neutral surfaces with crisp navy text.',
-    mode: 'light',
-    palette: {
-      background: '#F6F8FB',
-      backgroundSoft: '#EBF0F6',
-      surface: '#FFFFFF',
-      surfaceRaised: '#FFFFFF',
-      text: '#172235',
-      textMuted: '#536174',
-      primary: '#315B91',
-      primaryHover: '#24466F',
-      primarySoft: '#E5EDF7',
-      accent: '#4982B8',
-      border: '#D8E0EA',
-    },
-  },
-  {
-    id: 'midnight-dark',
-    name: 'Midnight Electric',
-    description: 'Midnight navy with electric blue and clear light text.',
+    id: 'original-website-dark',
+    name: 'Original Website Dark',
+    description: 'The original NearGrow dark appearance from Git history.',
     mode: 'dark',
-    palette: DEFAULT_PUBLIC_WEBSITE_THEMES.dark,
+    palette: originalWebsiteThemes.dark,
   },
-  {
-    id: 'ocean-dark',
-    name: 'Deep Ocean',
-    description: 'Deep blue surfaces with bright ocean-cyan accents.',
-    mode: 'dark',
-    palette: {
-      background: '#07151F',
-      backgroundSoft: '#0B202D',
-      surface: '#102A3A',
-      surfaceRaised: '#18394B',
-      text: '#F2FAFF',
-      textMuted: '#B6CFDC',
-      primary: '#168DB8',
-      primaryHover: '#35B4DE',
-      primarySoft: '#12394B',
-      accent: '#53D5E8',
-      border: '#294958',
-    },
-  },
-] as const;
+];
 
-const publicWebsiteThemesById = new Map(
-  PUBLIC_WEBSITE_THEME_REGISTRY.map((theme) => [theme.id, theme]),
-);
+export const DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS: PublicWebsiteThemeAssignments = {
+  light: 'original-cms-light',
+  dark: 'original-cms-dark',
+};
+
+export const ADMIN_CMS_THEME_REGISTRY: readonly PublicWebsiteThemeDefinition[] = [
+  {
+    id: 'original-cms-light',
+    name: 'Original CMS Light',
+    description: 'The original CMS light appearance from Git history.',
+    mode: 'light',
+    palette: originalWebsiteThemes.light,
+  },
+  {
+    id: 'original-cms-dark',
+    name: 'Original CMS Dark',
+    description: 'The original CMS dark appearance from Git history.',
+    mode: 'dark',
+    palette: {
+      ...originalWebsiteThemes.dark,
+      background: '#0D1814',
+      backgroundSoft: '#17251D',
+      surface: '#17251D',
+      surfaceRaised: '#1C2B22',
+      text: '#EEF5EF',
+      textMuted: '#A1B0A5',
+      primary: '#70BE55',
+      primaryHover: '#57A949',
+      primarySoft: '#20382A',
+      border: '#2B3E33',
+    },
+  },
+];
+
+const publicThemesById = new Map(PUBLIC_WEBSITE_THEME_REGISTRY.map((theme) => [theme.id, theme]));
+const adminThemesById = new Map(ADMIN_CMS_THEME_REGISTRY.map((theme) => [theme.id, theme]));
+
+const legacyPublicAssignments: Record<string, string> = {
+  'royal-light': 'original-website-light',
+  'cloud-light': 'original-website-light',
+  'legacy-light': 'original-website-light',
+  'midnight-dark': 'original-website-dark',
+  'ocean-dark': 'original-website-dark',
+  'legacy-dark': 'original-website-dark',
+};
 
 export const PUBLIC_WEBSITE_THEME_TOKENS = [
   { key: 'background', label: 'Page background' },
@@ -134,20 +140,6 @@ export const PUBLIC_WEBSITE_THEME_TOKENS = [
   { key: 'accent', label: 'Accent' },
   { key: 'border', label: 'Borders' },
 ] as const satisfies readonly { key: keyof PublicWebsiteThemePalette; label: string }[];
-
-const cssVariableByToken: Record<keyof PublicWebsiteThemePalette, string> = {
-  background: '--website-background',
-  backgroundSoft: '--website-background-soft',
-  surface: '--website-surface',
-  surfaceRaised: '--website-surface-raised',
-  text: '--website-text',
-  textMuted: '--website-text-muted',
-  primary: '--website-primary',
-  primaryHover: '--website-primary-hover',
-  primarySoft: '--website-primary-soft',
-  accent: '--website-accent',
-  border: '--website-border',
-};
 
 export function parsePublicWebsiteThemes(value: unknown): PublicWebsiteThemes | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -179,36 +171,72 @@ export function parsePublicWebsiteThemes(value: unknown): PublicWebsiteThemes | 
   return result;
 }
 
-export function parsePublicWebsiteThemeAssignments(value: unknown): PublicWebsiteThemeAssignments | undefined {
+function parseThemeAssignments(
+  value: unknown,
+  registry: Map<string, PublicWebsiteThemeDefinition>,
+  aliases: Record<string, string> = {},
+): PublicWebsiteThemeAssignments | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const input = value as Partial<Record<PublicWebsiteThemeMode, unknown>>;
   const assignments = {} as PublicWebsiteThemeAssignments;
   for (const mode of ['light', 'dark'] as const) {
-    const id = input[mode];
-    if (typeof id !== 'string' ||
-      (id !== `legacy-${mode}` && !publicWebsiteThemesById.has(id))) return undefined;
+    const rawId = input[mode];
+    if (typeof rawId !== 'string') return undefined;
+    const id = aliases[rawId] ?? rawId;
+    if (!registry.has(id)) return undefined;
     assignments[mode] = id;
   }
   return assignments;
 }
 
+export function parsePublicWebsiteThemeAssignments(value: unknown): PublicWebsiteThemeAssignments | undefined {
+  return parseThemeAssignments(
+    value,
+    publicThemesById,
+    legacyPublicAssignments,
+  );
+}
+
+export function parseAdminCmsThemeAssignments(value: unknown): PublicWebsiteThemeAssignments | undefined {
+  return parseThemeAssignments(value, adminThemesById);
+}
+
 export function getPublicWebsiteThemeDefinition(id: string): PublicWebsiteThemeDefinition | undefined {
-  return publicWebsiteThemesById.get(id);
+  return publicThemesById.get(legacyPublicAssignments[id] ?? id);
+}
+
+export function getAdminCmsThemeDefinition(id: string): PublicWebsiteThemeDefinition | undefined {
+  return adminThemesById.get(id);
 }
 
 export function getPublicWebsiteThemePalette(
   id: string,
   mode: PublicWebsiteThemeMode,
-  legacyPalette: PublicWebsiteThemePalette,
 ): PublicWebsiteThemePalette {
-  if (id === `legacy-${mode}`) return legacyPalette;
-  return publicWebsiteThemesById.get(id)?.palette ?? DEFAULT_PUBLIC_WEBSITE_THEMES[mode];
+  return getPublicWebsiteThemeDefinition(id)?.palette ?? DEFAULT_PUBLIC_WEBSITE_THEMES[mode];
+}
+
+export function getAdminCmsThemePalette(
+  id: string,
+  mode: PublicWebsiteThemeMode,
+): PublicWebsiteThemePalette {
+  return getAdminCmsThemeDefinition(id)?.palette ??
+    ADMIN_CMS_THEME_REGISTRY.find((theme) => theme.mode === mode)!.palette;
 }
 
 export function publicWebsiteThemeCssVariables(
   palette: PublicWebsiteThemePalette,
 ): Record<string, string> {
-  return Object.fromEntries(
-    PUBLIC_WEBSITE_THEME_TOKENS.map(({ key }) => [cssVariableByToken[key], palette[key]]),
-  );
+  return {
+    '--brand-bg': palette.background,
+    '--brand-bg-soft': palette.backgroundSoft,
+    '--brand-surface': palette.surface,
+    '--brand-text': palette.text,
+    '--brand-text-muted': palette.textMuted,
+    '--brand-green': palette.primary,
+    '--brand-green-hover': palette.primaryHover,
+    '--brand-green-light': palette.primarySoft,
+    '--brand-orange': palette.accent,
+    '--brand-border': palette.border,
+  };
 }

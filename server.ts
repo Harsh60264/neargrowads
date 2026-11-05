@@ -14,7 +14,9 @@ import { BLOG_CATEGORIES as defaultBlogCategories } from './src/data/blogCategor
 import { SERVICES as staticServices } from './src/data/servicesData';
 import { DEFAULT_SITE_CONTENT as frontendDefaultSiteContent, type MascotSettings } from './src/data/siteContent';
 import {
+  DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
+  parseAdminCmsThemeAssignments,
   parsePublicWebsiteThemeAssignments,
   parsePublicWebsiteThemes,
 } from './src/data/publicWebsiteTheme';
@@ -2201,6 +2203,7 @@ let memoryTeam: TeamMember[] = [];
 const defaultSiteContent = {
   websiteThemes: frontendDefaultSiteContent.websiteThemes,
   websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
+  cmsThemeAssignments: frontendDefaultSiteContent.cmsThemeAssignments,
   copy: frontendDefaultSiteContent.copy,
   faqs: frontendDefaultSiteContent.faqs,
   media: frontendDefaultSiteContent.media,
@@ -2282,12 +2285,13 @@ const defaultSiteContent = {
 type SiteContent = typeof defaultSiteContent;
 const fallbackSiteContent: SiteContent = defaultSiteContent;
 
-function sameWebsiteThemeConfiguration(
-  left: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments'>,
-  right: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments'>,
+function sameThemeConfiguration(
+  left: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments' | 'cmsThemeAssignments'>,
+  right: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments' | 'cmsThemeAssignments'>,
 ): boolean {
   return JSON.stringify(left.websiteThemes) === JSON.stringify(right.websiteThemes) &&
-    JSON.stringify(left.websiteThemeAssignments) === JSON.stringify(right.websiteThemeAssignments);
+    JSON.stringify(left.websiteThemeAssignments) === JSON.stringify(right.websiteThemeAssignments) &&
+    JSON.stringify(left.cmsThemeAssignments) === JSON.stringify(right.cmsThemeAssignments);
 }
 
 async function readLegacySiteContent(): Promise<SiteContent> {
@@ -2320,6 +2324,7 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
   const content = {
     websiteThemes: frontendDefaultSiteContent.websiteThemes,
     websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
+    cmsThemeAssignments: frontendDefaultSiteContent.cmsThemeAssignments,
     seo: defaultSiteContent.seo,
     copy: DEFAULT_PUBLIC_COPY,
     media: DEFAULT_PUBLIC_MEDIA,
@@ -2339,6 +2344,11 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
     : parsePublicWebsiteThemeAssignments(input.websiteThemeAssignments);
   if (!websiteThemeAssignments) return undefined;
   content.websiteThemeAssignments = websiteThemeAssignments;
+  const cmsThemeAssignments = input.cmsThemeAssignments === undefined
+    ? DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS
+    : parseAdminCmsThemeAssignments(input.cmsThemeAssignments);
+  if (!cmsThemeAssignments) return undefined;
+  content.cmsThemeAssignments = cmsThemeAssignments;
   const rawMascotSettings = input.mascotSettings === undefined
     ? DEFAULT_MASCOT_SETTINGS
     : input.mascotSettings;
@@ -8521,8 +8531,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       if (!identity.isPrimaryOwner) {
         const current = await readAdminSiteContent();
-        if (!sameWebsiteThemeConfiguration(content, current.draft)) {
-          res.status(403).json({ message: 'Only the Primary Owner can change public website theme settings.' });
+        if (!sameThemeConfiguration(content, current.draft)) {
+          res.status(403).json({ message: 'Only the Primary Owner can change website or CMS theme settings.' });
           return;
         }
       }
@@ -8565,8 +8575,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       if (!identity.isPrimaryOwner) {
         const state = await readAdminSiteContent();
-        if (!sameWebsiteThemeConfiguration(state.draft, state.published)) {
-          res.status(403).json({ message: 'Only the Primary Owner can publish public website theme settings.' });
+        if (!sameThemeConfiguration(state.draft, state.published)) {
+          res.status(403).json({ message: 'Only the Primary Owner can publish website or CMS theme settings.' });
           return;
         }
       }
@@ -8616,8 +8626,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           res.status(404).json({ message: 'That saved version no longer exists.' });
           return;
         }
-        if (!sameWebsiteThemeConfiguration(revision, state.draft)) {
-          res.status(403).json({ message: 'Only the Primary Owner can restore public website theme assignments.' });
+        if (!sameThemeConfiguration(revision, state.draft)) {
+          res.status(403).json({ message: 'Only the Primary Owner can restore website or CMS theme assignments.' });
           return;
         }
       }
@@ -8649,8 +8659,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       if (!identity.isPrimaryOwner) {
         const state = await readAdminSiteContent();
-        if (!sameWebsiteThemeConfiguration(state.draft, state.published)) {
-          res.status(403).json({ message: 'Only the Primary Owner can discard pending public website theme settings.' });
+        if (!sameThemeConfiguration(state.draft, state.published)) {
+          res.status(403).json({ message: 'Only the Primary Owner can discard pending website or CMS theme settings.' });
           return;
         }
       }
