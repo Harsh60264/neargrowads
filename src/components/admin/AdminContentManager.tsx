@@ -11,6 +11,7 @@ import {
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSafePublicDestination } from '../../data/publicLinks';
+import { ContentTabVisibility } from './ContentTabVisibility';
 import {
   ADMIN_CMS_THEME_REGISTRY,
   DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
@@ -171,7 +172,7 @@ const pageTabs: { id: ManagedPage; label: string }[] = [
   { id: 'contact', label: 'Contact' },
 ];
 
-function isManagedPage(page: CopyPage): page is ManagedPage {
+function isManagedPage(page: CopyPage | 'themes'): page is ManagedPage {
   return pageTabs.some((tab) => tab.id === page);
 }
 
@@ -268,8 +269,8 @@ export function AdminContentManager({
   const [content, setContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [savedDraft, setSavedDraft] = useState<SiteContent | null>(null);
   const [publishedContent, setPublishedContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
-  const [activePage, setActivePage] = useState<CopyPage>('home');
-  const [showThemeStudio, setShowThemeStudio] = useState(false);
+  const [activePage, setActivePage] = useState<CopyPage | 'themes'>('home');
+  const isThemesTab = activePage === 'themes';
   const [previewThemeMode, setPreviewThemeMode] = useState<PublicWebsiteThemeMode>('light');
   const [globeAppearanceMode, setGlobeAppearanceMode] = useState<'light' | 'dark'>('dark');
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
@@ -327,11 +328,11 @@ export function AdminContentManager({
       {
         type: 'ng-cms-preview-content',
         content,
-        ...(showThemeStudio ? { theme: previewThemeMode } : {}),
+        ...(isThemesTab ? { theme: previewThemeMode } : {}),
       },
       window.location.origin,
     );
-  }, [content, previewFrameLoaded, previewThemeMode, showPreview, showThemeStudio]);
+  }, [content, previewFrameLoaded, previewThemeMode, showPreview, isThemesTab]);
 
   useEffect(() => {
     const handlePreviewReady = (event: MessageEvent<unknown>) => {
@@ -342,14 +343,14 @@ export function AdminContentManager({
         {
           type: 'ng-cms-preview-content',
           content,
-          ...(showThemeStudio ? { theme: previewThemeMode } : {}),
+          ...(isThemesTab ? { theme: previewThemeMode } : {}),
         },
         window.location.origin,
       );
     };
     window.addEventListener('message', handlePreviewReady);
     return () => window.removeEventListener('message', handlePreviewReady);
-  }, [content, previewThemeMode, showThemeStudio]);
+  }, [content, previewThemeMode, isThemesTab]);
 
   const updateThemeAssignment = (
     scope: 'website' | 'cms',
@@ -840,6 +841,7 @@ export function AdminContentManager({
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#ECF3EE]">Page Content Manager</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#A9B8AD]">Manage page copy, calls to action, and search/social metadata for your main website pages.</p>
           </div>
+          <ContentTabVisibility visible={!isThemesTab}>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setShowPreview((current) => !current)} disabled={loading || loadFailed} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
               {showPreview ? <X className="h-4 w-4" /> : <Eye className="h-4 w-4" />} {showPreview ? 'Close preview' : 'Live preview'}
@@ -857,10 +859,12 @@ export function AdminContentManager({
               {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish
             </button>}
           </div>
+          </ContentTabVisibility>
         </header>
 
         {error && <p role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</p>}
         {notice && <p role="status" className="mb-5 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200"><Check className="mr-2 inline h-4 w-4" />{notice}</p>}
+        <ContentTabVisibility visible={!isThemesTab}>
         {!loading && !loadFailed && (
           <div role="status" className={`mb-5 rounded-xl border px-4 py-3 text-xs ${dirty ? 'border-amber-300/25 bg-amber-400/10 text-amber-100' : 'border-[#304135] bg-[#131D16] text-[#A9B8AD]'}`}>
             <span className="font-bold">{dirty ? 'Unsaved edits' : JSON.stringify(savedDraft) !== JSON.stringify(publishedContent) ? 'Draft saved · unpublished' : 'No unsaved changes'}</span>
@@ -869,6 +873,7 @@ export function AdminContentManager({
             <span> · Published version {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'not set'}</span>
           </div>
         )}
+        </ContentTabVisibility>
 
         {showPreview && !loading && !loadFailed && (
           <section className="mb-5 overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
@@ -908,6 +913,7 @@ export function AdminContentManager({
           </section>
         )}
 
+        <ContentTabVisibility visible={!isThemesTab}>
         {showHistory && (
           <section className="mb-5 rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -929,26 +935,30 @@ export function AdminContentManager({
             )}
           </section>
         )}
+        </ContentTabVisibility>
 
         {loading ? (
           <div className="grid min-h-56 place-items-center text-sm text-[#A9B8AD]"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> Loading page content…</div>
         ) : (
           <div className="space-y-5">
-            <p className="text-xs text-[#A9B8AD]">Last published: {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'Built-in website content'} · Changes are drafts until published.</p>
+            <ContentTabVisibility visible={!isThemesTab}>
+              <p className="text-xs text-[#A9B8AD]">Last published: {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'Built-in website content'} · Changes are drafts until published.</p>
+            </ContentTabVisibility>
             <nav aria-label="Choose page to edit" className="flex flex-wrap gap-2 rounded-2xl border border-[#304135] bg-[#19241D] p-2">
               {copyPageTabs.map((tab) => (
-                <button key={tab.id} type="button" onClick={() => { setShowThemeStudio(false); setActivePage(tab.id); }} aria-pressed={!showThemeStudio && activePage === tab.id} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${!showThemeStudio && activePage === tab.id ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
+                <button key={tab.id} type="button" onClick={() => setActivePage(tab.id)} aria-pressed={activePage === tab.id} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activePage === tab.id ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
                   {tab.label}
                 </button>
               ))}
               {isPrimaryOwner && (
-                <button type="button" onClick={() => setShowThemeStudio(true)} aria-pressed={showThemeStudio} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${showThemeStudio ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
-                  Theme Manager
+                <button type="button" onClick={() => setActivePage('themes')} aria-pressed={isThemesTab} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${isThemesTab ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
+                  Themes
                 </button>
               )}
             </nav>
 
-            {dedicatedModuleLinks[activePage] && (
+            <ContentTabVisibility visible={!isThemesTab}>
+            {activePage !== 'themes' && dedicatedModuleLinks[activePage] && (
               <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#304135] bg-[#19241D] p-4">
                 <div>
                   <h2 className="text-sm font-bold text-[#ECF3EE]">Dedicated content module</h2>
@@ -961,8 +971,9 @@ export function AdminContentManager({
                 </div>
               </section>
             )}
+            </ContentTabVisibility>
 
-            {showThemeStudio ? (
+            {isThemesTab ? (
               <section className="space-y-4">
                 <header className="rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
                   <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">Primary Owner</p>
@@ -1670,6 +1681,7 @@ export function AdminContentManager({
               </section>
             ))}
 
+            <ContentTabVisibility visible={!isThemesTab}>
             {activePage === 'home' && (
               <section className="rounded-3xl border border-[#304135] bg-[#19241D] p-5 shadow-sm sm:p-7">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-[#304135] pb-4">
@@ -1766,6 +1778,7 @@ export function AdminContentManager({
               </div>
             </section>}
             <p className="text-[10px] text-[#718077]">SEO tags are updated in the browser when visitors navigate to each page. Search and social crawlers can require a new crawl to reflect published metadata.</p>
+            </ContentTabVisibility>
           </div>
         )}
       </div>
