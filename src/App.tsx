@@ -32,11 +32,14 @@ import { PublicActivityTracker } from './components/PublicActivityTracker';
 import { ArrowLeft } from 'lucide-react';
 import { readAdminAuthRoute } from './components/admin/adminAuthCallback';
 import {
+  DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEMES,
+  getAdminCmsThemeDefinition,
+  getPublicWebsiteThemeDefinition,
   getPublicWebsiteThemePalette,
+  parseAdminCmsThemeAssignments,
   parsePublicWebsiteThemeAssignments,
-  parsePublicWebsiteThemes,
   publicWebsiteThemeCssVariables,
   type PublicWebsiteThemeMode,
 } from './data/publicWebsiteTheme';
@@ -45,9 +48,13 @@ const FIRST_VISIT_TRANSITION_MS = 900;
 const INTERNAL_TRANSITION_MS = 650;
 type PublicTheme = PublicWebsiteThemeMode;
 
-function getSessionTheme(): PublicTheme {
+function getSessionTheme(key = 'neargrow-theme'): PublicTheme {
   try {
-    return window.sessionStorage.getItem('neargrow-theme') === 'dark' ? 'dark' : 'light';
+    const storedTheme = window.sessionStorage.getItem(key);
+    if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme;
+    return key === 'neargrow-admin-theme' && window.sessionStorage.getItem('neargrow-theme') === 'dark'
+      ? 'dark'
+      : 'light';
   } catch {
     return 'light';
   }
@@ -103,6 +110,7 @@ export default function App() {
   const [siteContent, setSiteContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [siteContentLoaded, setSiteContentLoaded] = useState(false);
   const [theme, setTheme] = useState<PublicTheme>(getSessionTheme);
+  const [adminTheme, setAdminTheme] = useState<PublicTheme>(() => getSessionTheme('neargrow-admin-theme'));
   const [chatOpen, setChatOpen] = useState(false);
 
   useLayoutEffect(() => {
@@ -313,24 +321,42 @@ export default function App() {
   }, [blogPosts, currentPath, isCmsPreview, siteContent.media, siteContent.seo, theme]);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    const themes = parsePublicWebsiteThemes(siteContent.websiteThemes) ?? DEFAULT_PUBLIC_WEBSITE_THEMES;
+    const root = document.documentElement;
+    if (currentPath.startsWith('/admin')) {
+      const assignments = parseAdminCmsThemeAssignments(siteContent.cmsThemeAssignments) ??
+        DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS;
+      const definition = getAdminCmsThemeDefinition(assignments[adminTheme]);
+      root.dataset.theme = definition?.mode ?? adminTheme;
+      Object.keys(publicWebsiteThemeCssVariables(DEFAULT_PUBLIC_WEBSITE_THEMES.light))
+        .forEach((name) => root.style.removeProperty(name));
+      try {
+        window.sessionStorage.setItem('neargrow-admin-theme', adminTheme);
+      } catch {
+        // The selected theme remains active for this session if storage is unavailable.
+      }
+      return;
+    }
+
     const assignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
       DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
-    const palette = getPublicWebsiteThemePalette(
-      assignments[theme],
-      theme,
-      themes[theme],
-    );
+    const definition = getPublicWebsiteThemeDefinition(assignments[theme]);
+    root.dataset.theme = definition?.mode ?? theme;
+    const palette = getPublicWebsiteThemePalette(assignments[theme], theme);
     Object.entries(publicWebsiteThemeCssVariables(palette)).forEach(([name, value]) => {
-      document.documentElement.style.setProperty(name, value);
+      root.style.setProperty(name, value);
     });
     try {
       window.sessionStorage.setItem('neargrow-theme', theme);
     } catch {
       // The selected theme remains active for this session if storage is unavailable.
     }
-  }, [siteContent.websiteThemeAssignments, siteContent.websiteThemes, theme]);
+  }, [
+    adminTheme,
+    currentPath,
+    siteContent.cmsThemeAssignments,
+    siteContent.websiteThemeAssignments,
+    theme,
+  ]);
 
   useEffect(() => {
     document.documentElement.dataset.home = currentPath === '/' ? 'true' : 'false';
@@ -433,8 +459,8 @@ export default function App() {
   }, [navigate]);
 
   const adminThemeControls = {
-    theme,
-    onToggleTheme: () => setTheme((current) => current === 'dark' ? 'light' : 'dark'),
+    theme: adminTheme,
+    onToggleTheme: () => setAdminTheme((current) => current === 'dark' ? 'light' : 'dark'),
   };
 
   // Route matching logic
@@ -568,13 +594,16 @@ export default function App() {
   };
 
   const isAdminRoute = currentPath.startsWith('/admin');
+  const publicAssignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
+    DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
+  const publicThemeMode = getPublicWebsiteThemeDefinition(publicAssignments[theme])?.mode ?? theme;
 
   return (
     <>
       <PublicActivityTracker pathname={currentPath} enabled={!isCmsPreview} />
       <div
         className={`min-h-screen flex flex-col ${isAdminRoute ? 'bg-white text-[#171A17]' : 'public-website bg-[var(--brand-bg)] text-[var(--brand-text)]'}`}
-        data-public-theme={isAdminRoute ? undefined : theme}
+        data-public-theme={isAdminRoute ? undefined : publicThemeMode}
         inert={transitionActive}
         aria-hidden={transitionActive}
       >
