@@ -28,7 +28,7 @@ export function getVercelInitializationDiagnostic(error: unknown): {
 export function restoreOriginalApiUrl(req: Pick<Request, 'url'>): boolean {
   const rewrittenUrl = new URL(req.url, 'http://vercel.internal');
   const originalApiPath = rewrittenUrl.searchParams.get(ORIGINAL_API_PATH_PARAMETER);
-  if (!originalApiPath || !originalApiPath.startsWith('/api/') ||
+  if (!originalApiPath || (originalApiPath !== '/sitemap.xml' && !originalApiPath.startsWith('/api/')) ||
     originalApiPath.includes('?') || originalApiPath.includes('#')) return false;
 
   const queryStart = req.url.indexOf('?');

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://neargrowads.com/sitemap.xml
+Sitemap: https://www.neargrowads.com/sitemap.xml
