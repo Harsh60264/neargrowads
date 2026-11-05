@@ -12,8 +12,12 @@ import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSafePublicDestination } from '../../data/publicLinks';
 import {
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEMES,
-  PUBLIC_WEBSITE_THEME_TOKENS,
+  getPublicWebsiteThemeDefinition,
+  getPublicWebsiteThemePalette,
+  PUBLIC_WEBSITE_THEME_REGISTRY,
+  type PublicWebsiteThemeAssignments,
   type PublicWebsiteThemeMode,
 } from '../../data/publicWebsiteTheme';
 import { uploadAdminMedia } from './uploadAdminMedia';
@@ -263,7 +267,7 @@ export function AdminContentManager({
   const [publishedContent, setPublishedContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [activePage, setActivePage] = useState<CopyPage>('home');
   const [showThemeStudio, setShowThemeStudio] = useState(false);
-  const [themeStudioMode, setThemeStudioMode] = useState<PublicWebsiteThemeMode>('light');
+  const [previewThemeMode, setPreviewThemeMode] = useState<PublicWebsiteThemeMode>('light');
   const [globeAppearanceMode, setGlobeAppearanceMode] = useState<'light' | 'dark'>('dark');
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
@@ -320,11 +324,11 @@ export function AdminContentManager({
       {
         type: 'ng-cms-preview-content',
         content,
-        ...(showThemeStudio ? { theme: themeStudioMode } : {}),
+        ...(showThemeStudio ? { theme: previewThemeMode } : {}),
       },
       window.location.origin,
     );
-  }, [content, previewFrameLoaded, showPreview, showThemeStudio, themeStudioMode]);
+  }, [content, previewFrameLoaded, previewThemeMode, showPreview, showThemeStudio]);
 
   useEffect(() => {
     const handlePreviewReady = (event: MessageEvent<unknown>) => {
@@ -335,25 +339,30 @@ export function AdminContentManager({
         {
           type: 'ng-cms-preview-content',
           content,
-          ...(showThemeStudio ? { theme: themeStudioMode } : {}),
+          ...(showThemeStudio ? { theme: previewThemeMode } : {}),
         },
         window.location.origin,
       );
     };
     window.addEventListener('message', handlePreviewReady);
     return () => window.removeEventListener('message', handlePreviewReady);
-  }, [content, showThemeStudio, themeStudioMode]);
+  }, [content, previewThemeMode, showThemeStudio]);
 
-  const updateWebsiteTheme = (mode: PublicWebsiteThemeMode, key: keyof typeof content.websiteThemes.light, value: string) => {
+  const updateWebsiteThemeAssignment = (mode: PublicWebsiteThemeMode, themeId: string) => {
     setContent((current) => ({
       ...current,
-      websiteThemes: {
-        ...current.websiteThemes,
-        [mode]: { ...current.websiteThemes[mode], [key]: value },
+      websiteThemeAssignments: {
+        ...current.websiteThemeAssignments,
+        [mode]: themeId,
       },
     }));
     setNotice('');
   };
+
+  const publishedThemeAssignments: PublicWebsiteThemeAssignments =
+    publishedContent.websiteThemeAssignments ?? DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
+  const themeAssignmentsChanged = JSON.stringify(content.websiteThemeAssignments) !==
+    JSON.stringify(publishedThemeAssignments);
 
   const updateField = (section: keyof SiteContent, key: string, value: string) => {
     setContent((current) => ({
@@ -574,12 +583,12 @@ export function AdminContentManager({
     }
   };
 
-  const saveDraft = async () => {
+  const saveDraft = async (): Promise<boolean> => {
     if (content.faqs.length > 20 || content.faqs.some((faq) =>
       !faq.question.trim() || faq.question.length > 500 || !faq.answer.trim() || faq.answer.length > 3000,
     )) {
       setError('Each FAQ needs a question (up to 500 characters) and answer (up to 3,000 characters). A maximum of 20 FAQs is allowed.');
-      return;
+      return false;
     }
     setSaving(true);
     setError('');
@@ -601,17 +610,19 @@ export function AdminContentManager({
       setSavedDraft(data.content);
       setDraftUpdatedAt(data.draftUpdatedAt || null);
       setNotice('Draft saved. Public pages remain unchanged until you publish.');
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save page content.');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const publish = async () => {
-    if (dirty) {
+  const publish = async (afterSavingDraft = false): Promise<boolean> => {
+    if (dirty && !afterSavingDraft) {
       setError('Save your current edits as a draft before publishing.');
-      return;
+      return false;
     }
     setSaving(true);
     setError('');
@@ -631,11 +642,18 @@ export function AdminContentManager({
       setPublishedAt(data.publishedAt || new Date().toISOString());
       onSaved(data.content);
       setNotice('Page content published and now live on the website.');
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Page content could not be published.');
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const publishThemeAssignments = async () => {
+    if (dirty && !(await saveDraft())) return;
+    await publish(dirty);
   };
 
   const loadHistory = async () => {
@@ -848,95 +866,107 @@ export function AdminContentManager({
             )}
 
             {showThemeStudio ? (
-              <section className="space-y-5">
-                <div className="rounded-3xl border border-[#304135] bg-[#19241D] p-5 shadow-sm sm:p-7">
-                  <div className="mb-5 flex flex-wrap items-start justify-between gap-4 border-b border-[#304135] pb-4">
-                    <div>
-                      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#72D28B]">Primary Owner · Public website</p>
-                      <h2 className="mt-1 text-xl font-bold text-[#ECF3EE]">Theme Studio</h2>
-                      <p className="mt-2 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Design the visitor-facing Light and Dark palettes independently. Preview changes against the real public pages; saved drafts stay private until published. The admin interface keeps its existing appearance.</p>
-                    </div>
-                    <button type="button" onClick={() => { setPreviewPath('/'); setShowPreview(true); setPreviewFrameLoaded(false); }} disabled={loading || loadFailed} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
-                      <Eye className="h-4 w-4" /> Preview website
-                    </button>
-                  </div>
-                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
-                    <div className="space-y-5">
-                      <div className="flex flex-wrap gap-2" role="group" aria-label="Website theme to edit">
-                        {(['light', 'dark'] as const).map((mode) => (
-                          <button key={mode} type="button" onClick={() => setThemeStudioMode(mode)} aria-pressed={themeStudioMode === mode} className={`rounded-xl border px-4 py-2.5 text-xs font-bold capitalize ${themeStudioMode === mode ? 'border-[#72D28B] bg-[#286D3B] text-white' : 'border-[#47594C] text-[#A9B8AD] hover:bg-white/5'}`}>
-                            {mode} website
+              <section className="space-y-4">
+                <header className="rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">Primary Owner · Public website</p>
+                  <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Theme Manager</h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Choose a saved appearance for each website mode. Preview selections before publishing; the public toggle continues to switch between these two slots.</p>
+                </header>
+                {!canEdit && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100">Your role can preview themes but cannot edit them.</p>}
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {(['light', 'dark'] as const).map((mode) => {
+                    const selectedId = content.websiteThemeAssignments[mode];
+                    const selectedDefinition = getPublicWebsiteThemeDefinition(selectedId);
+                    const selectedName = selectedDefinition?.name ?? `Current ${mode === 'light' ? 'light' : 'dark'} appearance`;
+                    const palette = getPublicWebsiteThemePalette(
+                      selectedId,
+                      mode,
+                      content.websiteThemes?.[mode] ?? DEFAULT_PUBLIC_WEBSITE_THEMES[mode],
+                    );
+                    const publishedId = publishedThemeAssignments[mode];
+                    const publishedName = getPublicWebsiteThemeDefinition(publishedId)?.name ??
+                      `Current ${mode === 'light' ? 'light' : 'dark'} appearance`;
+                    return (
+                      <article key={mode} className="overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#304135] p-4">
+                          <div>
+                            <h3 className="text-sm font-bold text-[#ECF3EE]">{mode === 'light' ? 'Light Mode' : 'Dark Mode'}</h3>
+                            <p className="mt-1 text-xs text-[#A9B8AD]">Assigned theme: <span className="font-semibold text-[#ECF3EE]">{selectedName}</span></p>
+                            {selectedId !== publishedId && <p className="mt-1 text-[11px] text-[#819087]">Published: {publishedName}</p>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewThemeMode(mode);
+                              setPreviewPath('/');
+                              setShowPreview(true);
+                            }}
+                            disabled={loading || loadFailed}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#47594C] px-3 text-xs font-semibold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                          >
+                            <Eye className="h-3.5 w-3.5" /> Preview
                           </button>
-                        ))}
-                      </div>
-                      {!canEdit && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100">Your role can preview themes but cannot edit them.</p>}
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {PUBLIC_WEBSITE_THEME_TOKENS.map(({ key, label }) => (
-                          <label key={key} className="flex items-center justify-between gap-3 rounded-xl border border-[#304135] bg-[#131D16] p-3">
-                            <span className="text-xs font-semibold text-[#D7E3D9]">{label}</span>
-                            <span className="flex items-center gap-2">
-                              <input
-                                aria-label={`${themeStudioMode} ${label}`}
-                                type="color"
-                                value={content.websiteThemes[themeStudioMode][key]}
-                                disabled={!canEdit || !isPrimaryOwner || saving}
-                                onChange={(event) => updateWebsiteTheme(themeStudioMode, key, event.currentTarget.value)}
-                                className="h-8 w-10 cursor-pointer rounded border-0 bg-transparent p-0 disabled:cursor-not-allowed"
-                              />
-                              <span className="w-[4.5rem] font-mono text-[10px] uppercase text-[#A9B8AD]">{content.websiteThemes[themeStudioMode][key]}</span>
-                            </span>
+                        </div>
+                        <div className="p-3 sm:p-4">
+                          <div className="rounded-xl border p-4" style={{ backgroundColor: palette.background, borderColor: palette.border, color: palette.text }}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-extrabold">NearGrow <span style={{ color: palette.primary }}>Ads</span></span>
+                              <span className="text-[10px]" style={{ color: palette.textMuted }}>Services&nbsp;&nbsp; Work&nbsp;&nbsp; Contact</span>
+                            </div>
+                            <p className="mt-5 text-[10px] font-bold uppercase tracking-[.14em]" style={{ color: palette.accent }}>Website appearance preview</p>
+                            <p className="mt-2 text-xl font-extrabold leading-tight">A clear look for every screen.</p>
+                            <p className="mt-2 max-w-sm text-xs leading-5" style={{ color: palette.textMuted }}>Your selected appearance, previewed before it goes live.</p>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <span className="rounded-lg px-3 py-2 text-[10px] font-bold text-white" style={{ backgroundColor: palette.primary }}>Primary action</span>
+                              <span className="rounded-lg border px-3 py-2 text-[10px] font-bold" style={{ borderColor: palette.border, color: palette.text }}>Secondary action</span>
+                            </div>
+                          </div>
+                          <label className="mt-3 block">
+                            <span className="mb-1.5 block text-xs font-semibold text-[#B8C7BC]">Theme for {mode === 'light' ? 'Light Mode' : 'Dark Mode'}</span>
+                            <select
+                              aria-label={`Theme for ${mode === 'light' ? 'Light Mode' : 'Dark Mode'}`}
+                              value={selectedId}
+                              disabled={!canEdit || !isPrimaryOwner || saving}
+                              onChange={(event) => updateWebsiteThemeAssignment(mode, event.currentTarget.value)}
+                              className="h-10 w-full rounded-lg border border-[#47594C] bg-[#131D16] px-3 text-xs text-[#ECF3EE] disabled:opacity-50"
+                            >
+                              <option value={`legacy-${mode}`}>Current saved {mode} appearance</option>
+                              {PUBLIC_WEBSITE_THEME_REGISTRY.map((theme) => (
+                                <option key={theme.id} value={theme.id}>{theme.name} · {theme.mode === 'light' ? 'Light' : 'Dark'}</option>
+                              ))}
+                            </select>
+                            <span className="mt-1.5 block text-[11px] text-[#819087]">{selectedDefinition?.description ?? 'Keeps the currently saved custom appearance.'}</span>
                           </label>
-                        ))}
-                      </div>
-                      <div className="flex flex-wrap gap-2 border-t border-[#304135] pt-4">
-                        <button type="button" disabled={!canEdit || !isPrimaryOwner || saving} onClick={() => {
-                          setContent((current) => ({
-                            ...current,
-                            websiteThemes: {
-                              ...current.websiteThemes,
-                              [themeStudioMode]: { ...DEFAULT_PUBLIC_WEBSITE_THEMES[themeStudioMode] },
-                            },
-                          }));
-                          setNotice('');
-                        }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
-                          <RotateCcw className="h-4 w-4" /> Reset {themeStudioMode} theme
-                        </button>
-                        <button type="button" disabled={!canEdit || !isPrimaryOwner || saving} onClick={() => {
-                          setContent((current) => ({ ...current, websiteThemes: DEFAULT_PUBLIC_WEBSITE_THEMES }));
-                          setNotice('');
-                        }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
-                          <RotateCcw className="h-4 w-4" /> Reset both themes
-                        </button>
-                        <button type="button" disabled={!canEdit || !isPrimaryOwner || saving || loading || loadFailed} onClick={() => void saveDraft()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
-                          <Save className="h-4 w-4" /> Save theme draft
-                        </button>
-                        <button type="button" disabled={!canPublish || !isPrimaryOwner || saving || loading || loadFailed || dirty || !draftUpdatedAt} title={dirty ? 'Save your edits as a draft before publishing.' : undefined} onClick={() => void publish()} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#286D3B] px-3 text-xs font-bold text-white hover:bg-[#205C31] disabled:opacity-50">
-                          <Send className="h-4 w-4" /> Publish website theme
-                        </button>
-                      </div>
-                      <p className="text-[11px] leading-5 text-[#819087]">Save theme edits as a draft first. Publishing uses the existing website-content publishing workflow and applies all saved Page Content Manager changes.</p>
-                    </div>
-                    <div className="rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: content.websiteThemes[themeStudioMode].background, borderColor: content.websiteThemes[themeStudioMode].border }}>
-                      <div className="rounded-xl border p-4 shadow-lg sm:p-5" style={{ backgroundColor: content.websiteThemes[themeStudioMode].surface, borderColor: content.websiteThemes[themeStudioMode].border, color: content.websiteThemes[themeStudioMode].text, boxShadow: `0 18px 42px ${themeStudioMode === 'dark' ? 'rgba(0,0,0,.3)' : 'rgba(16,29,56,.1)'}` }}>
-                        <div className="mb-7 flex items-center justify-between gap-3">
-                          <span className="text-xs font-extrabold tracking-tight">NearGrow <span style={{ color: content.websiteThemes[themeStudioMode].primary }}>Ads</span></span>
-                          <span className="text-[10px] font-semibold" style={{ color: content.websiteThemes[themeStudioMode].textMuted }}>Services&nbsp;&nbsp; Work&nbsp;&nbsp; Contact</span>
                         </div>
-                        <p className="text-[10px] font-bold uppercase tracking-[.16em]" style={{ color: content.websiteThemes[themeStudioMode].accent }}>Digital growth, built around you</p>
-                        <h3 className="mt-3 max-w-sm text-2xl font-extrabold leading-tight sm:text-3xl">Make your next stage of growth <span style={{ color: content.websiteThemes[themeStudioMode].primary }}>remarkable.</span></h3>
-                        <p className="mt-3 max-w-sm text-xs leading-5" style={{ color: content.websiteThemes[themeStudioMode].textMuted }}>A premium, high-contrast palette for a clear and confident visitor experience.</p>
-                        <div className="mt-5 flex flex-wrap gap-2">
-                          <span className="rounded-lg px-3 py-2 text-[10px] font-bold text-white" style={{ backgroundColor: content.websiteThemes[themeStudioMode].primary }}>Start a conversation</span>
-                          <span className="rounded-lg border px-3 py-2 text-[10px] font-bold" style={{ borderColor: content.websiteThemes[themeStudioMode].border, color: content.websiteThemes[themeStudioMode].text }}>Explore services</span>
-                        </div>
-                      </div>
-                      <div className="mt-3 grid grid-cols-3 gap-2">
-                        {(['surfaceRaised', 'primarySoft', 'accent'] as const).map((token) => (
-                          <div key={token} className="h-10 rounded-lg border" style={{ backgroundColor: content.websiteThemes[themeStudioMode][token], borderColor: content.websiteThemes[themeStudioMode].border }} aria-label={`${token} color preview`} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#304135] bg-[#19241D] p-3">
+                  <button
+                    type="button"
+                    disabled={!canEdit || !isPrimaryOwner || saving || loading || loadFailed || !themeAssignmentsChanged}
+                    onClick={() => {
+                      setContent((current) => ({
+                        ...current,
+                        websiteThemeAssignments: { ...publishedThemeAssignments },
+                      }));
+                      setNotice('Theme assignments reset to the currently published selections.');
+                    }}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-4 w-4" /> Reset to Published
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canEdit || !canPublish || !isPrimaryOwner || saving || loading || loadFailed || !themeAssignmentsChanged}
+                    onClick={() => void publishThemeAssignments()}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#286D3B] px-4 text-xs font-bold text-white hover:bg-[#205C31] disabled:opacity-50"
+                  >
+                    {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Save &amp; Publish
+                  </button>
+                  <p className="basis-full text-[11px] leading-5 text-[#819087]">Selections stay in this draft until published. Save &amp; Publish uses the existing Page Content Manager workflow; any other edits in its current draft are included.</p>
                 </div>
               </section>
             ) : activePage === 'siteLinks' ? (
