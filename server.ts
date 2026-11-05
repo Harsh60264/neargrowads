@@ -77,12 +77,13 @@ import {
   isPermanentDeletionConfirmationValid,
 } from './server/adminPermanentDeletion';
 import { teamContentRevision, teamRevisionConflictStatus } from './server/teamRevision';
-import { isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
+import { CANONICAL_PRODUCTION_ORIGIN, isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
 import {
   resolveAdminOwnerConfiguration,
   validateSupabaseProjectConfiguration,
 } from './server/adminOwnerConfig';
 import { isSameOriginHost } from './server/adminAuthOrigin';
+import { createPublicSitemapHandler } from './server/publicSitemap';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -356,6 +357,7 @@ interface WebsiteServiceContent {
 interface ManagedWebsiteService extends WebsiteServiceContent {
   id: string;
   status: 'draft' | 'published' | 'archived';
+  publishedAt?: string;
   publishedContent?: WebsiteServiceContent;
   hasUnpublishedChanges: boolean;
 }
@@ -692,6 +694,7 @@ function websiteServiceFromRow(row: Record<string, unknown>): ManagedWebsiteServ
     id: String(row.id),
     ...draftContent,
     status: row.status === 'published' || row.status === 'archived' ? row.status : 'draft',
+    ...(typeof row.published_at === 'string' ? { publishedAt: row.published_at } : {}),
     ...(publishedContent ? { publishedContent } : {}),
     hasUnpublishedChanges: Boolean(publishedContent && JSON.stringify(draftContent) !== JSON.stringify(publishedContent)),
   };
@@ -4704,16 +4707,6 @@ function adminAuthRedirectOrigin(req: Request): string {
   if (configured) return resolveSiteOrigin(configured, isProductionDeployment());
   if (isProductionDeployment()) return resolveSiteOrigin(undefined, true);
   return `${req.protocol}://${req.get('host')}`;
-}
-
-function escapeXml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&apos;',
-  })[character] || character);
 }
 
 function escapeHtmlAttribute(value: string): string {
@@ -11125,6 +11118,35 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   const isProduction = process.env.NODE_ENV === 'production';
 
+  if (serverless || isProduction) {
+    app.get('/sitemap.xml', createPublicSitemapHandler(async () => {
+      const [siteContent, services, posts, packages] = await Promise.all([
+        readSiteContentRecord(),
+        readWebsiteServices(false),
+        readBlogPosts(),
+        readServicePackages(true),
+      ]);
+      return {
+        siteContentPublishedAt: siteContent?.published_at,
+        services: services.map((service) => ({
+          slug: service.publishedContent?.slug ?? service.slug,
+          status: service.status,
+          lastModified: service.publishedAt,
+        })),
+        articles: posts.map((post) => ({
+          slug: post.slug,
+          status: post.status,
+          lastModified: post.updatedAt,
+        })),
+        packages: packages.map((item) => ({
+          slug: item.slug,
+          status: item.status,
+          lastModified: item.updatedAt,
+        })),
+      };
+    }, CANONICAL_PRODUCTION_ORIGIN));
+  }
+
   if (!serverless && !isProduction) {
     // Development mode: Vite middleware
     const { createServer: createViteServer } = await import('vite');
@@ -11152,34 +11174,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         `Sitemap: ${origin}/sitemap.xml`,
         '',
       ].join('\n'));
-    });
-    app.get('/sitemap.xml', async (_req: Request, res: Response): Promise<void> => {
-      try {
-        const origin = canonicalSiteOrigin();
-        const [services, posts, packages] = await Promise.all([
-          readWebsiteServices(false),
-          readBlogPosts(),
-          readServicePackages(true),
-        ]);
-        const urls = [
-          '/', '/services', '/catalogue', '/work', '/about', '/blog', '/contact',
-          '/privacy-policy', '/terms-and-conditions',
-          ...services.filter((item) => item.status === 'published').map((item) => `/services/${item.slug}`),
-          ...posts.filter((item) => item.status === 'published').map((item) => `/blog/${item.slug}`),
-          ...packages.filter((item) => item.status === 'published').map((item) => `/catalogue/${item.slug}`),
-        ];
-        const uniqueUrls = [...new Set(urls)];
-        const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${uniqueUrls
-          .map((pathname) => `  <url><loc>${escapeXml(`${origin}${pathname}`)}</loc></url>`)
-          .join('\n')}\n</urlset>`;
-        res.setHeader('Cache-Control', 'public, max-age=300');
-        res.type('application/xml').send(xml);
-      } catch (error) {
-        console.error('[NearGrow Ads] Published-content sitemap could not be generated.', {
-          errorName: error instanceof Error ? error.name : 'UnknownError',
-        });
-        res.status(503).type('text/plain').send('The sitemap is temporarily unavailable.');
-      }
     });
     app.use(express.static(distPath, { index: false }));
     app.get('*', async (req: Request, res: Response): Promise<void> => {

@@ -37,6 +37,15 @@ test('restores nested API path and preserves the original query string', () => {
   assert.equal(req.url, '/api/admin/session?filter=published&tag=one&tag=two');
 });
 
+test('restores the explicit sitemap rewrite path', () => {
+  const req = {
+    url: '/api/handler?__vercel_original_api_path=%2Fsitemap.xml',
+  };
+
+  assert.equal(restoreOriginalApiUrl(req), true);
+  assert.equal(req.url, '/sitemap.xml');
+});
+
 test('does not dispatch requests without an internal API path marker', () => {
   const req = { url: '/api/handler?filter=published' };
 

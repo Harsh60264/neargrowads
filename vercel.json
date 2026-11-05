@@ -33,6 +33,10 @@
   ],
   "rewrites": [
     {
+      "source": "/sitemap.xml",
+      "destination": "/api/handler?__vercel_original_api_path=/sitemap.xml"
+    },
+    {
       "source": "/api/:path*",
       "destination": "/api/handler?__vercel_original_api_path=/api/:path*"
     },
