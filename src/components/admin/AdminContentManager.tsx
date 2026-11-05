@@ -11,6 +11,19 @@ import {
 import { ImageThemeTabs } from './ImageThemeTabs';
 import type { PublicImageTheme } from '../../data/themeImages';
 import { isSafePublicDestination } from '../../data/publicLinks';
+import { ContentTabVisibility } from './ContentTabVisibility';
+import {
+  ADMIN_CMS_THEME_REGISTRY,
+  DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
+  getAdminCmsThemeDefinition,
+  getAdminCmsThemePalette,
+  getPublicWebsiteThemeDefinition,
+  getPublicWebsiteThemePalette,
+  PUBLIC_WEBSITE_THEME_REGISTRY,
+  type PublicWebsiteThemeAssignments,
+  type PublicWebsiteThemeMode,
+} from '../../data/publicWebsiteTheme';
 import { uploadAdminMedia } from './uploadAdminMedia';
 import storefrontImage from '../../assets/images/local_business_storefront_1792080226091.jpg';
 import workspaceImage from '../../assets/images/hero_agency_workspace_1792080209028.jpg';
@@ -22,6 +35,7 @@ interface Props {
   embedded?: boolean;
   canEdit?: boolean;
   canPublish?: boolean;
+  isPrimaryOwner?: boolean;
 }
 
 const groups = [
@@ -158,7 +172,7 @@ const pageTabs: { id: ManagedPage; label: string }[] = [
   { id: 'contact', label: 'Contact' },
 ];
 
-function isManagedPage(page: CopyPage): page is ManagedPage {
+function isManagedPage(page: CopyPage | 'themes'): page is ManagedPage {
   return pageTabs.some((tab) => tab.id === page);
 }
 
@@ -244,11 +258,20 @@ async function readResponse(response: Response): Promise<ContentResponse> {
   }
 }
 
-export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit = true, canPublish = canEdit }: Props) {
+export function AdminContentManager({
+  onBack,
+  onSaved,
+  embedded = false,
+  canEdit = true,
+  canPublish = canEdit,
+  isPrimaryOwner = false,
+}: Props) {
   const [content, setContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [savedDraft, setSavedDraft] = useState<SiteContent | null>(null);
   const [publishedContent, setPublishedContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
-  const [activePage, setActivePage] = useState<CopyPage>('home');
+  const [activePage, setActivePage] = useState<CopyPage | 'themes'>('home');
+  const isThemesTab = activePage === 'themes';
+  const [previewThemeMode, setPreviewThemeMode] = useState<PublicWebsiteThemeMode>('light');
   const [globeAppearanceMode, setGlobeAppearanceMode] = useState<'light' | 'dark'>('dark');
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
   const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
@@ -302,10 +325,14 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
   useEffect(() => {
     if (!showPreview || !previewFrameLoaded) return;
     previewFrame.current?.contentWindow?.postMessage(
-      { type: 'ng-cms-preview-content', content },
+      {
+        type: 'ng-cms-preview-content',
+        content,
+        ...(isThemesTab ? { theme: previewThemeMode } : {}),
+      },
       window.location.origin,
     );
-  }, [content, previewFrameLoaded, showPreview]);
+  }, [content, previewFrameLoaded, previewThemeMode, showPreview, isThemesTab]);
 
   useEffect(() => {
     const handlePreviewReady = (event: MessageEvent<unknown>) => {
@@ -313,13 +340,42 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
       if (!event.data || typeof event.data !== 'object' ||
         (event.data as { type?: unknown }).type !== 'ng-cms-preview-ready') return;
       previewFrame.current?.contentWindow?.postMessage(
-        { type: 'ng-cms-preview-content', content },
+        {
+          type: 'ng-cms-preview-content',
+          content,
+          ...(isThemesTab ? { theme: previewThemeMode } : {}),
+        },
         window.location.origin,
       );
     };
     window.addEventListener('message', handlePreviewReady);
     return () => window.removeEventListener('message', handlePreviewReady);
-  }, [content]);
+  }, [content, previewThemeMode, isThemesTab]);
+
+  const updateThemeAssignment = (
+    scope: 'website' | 'cms',
+    mode: PublicWebsiteThemeMode,
+    themeId: string,
+  ) => {
+    setContent((current) => ({
+      ...current,
+      websiteThemeAssignments: scope === 'website'
+        ? { ...current.websiteThemeAssignments, [mode]: themeId }
+        : current.websiteThemeAssignments,
+      cmsThemeAssignments: scope === 'cms'
+        ? { ...current.cmsThemeAssignments, [mode]: themeId }
+        : current.cmsThemeAssignments,
+    }));
+    setNotice('');
+  };
+
+  const publishedWebsiteThemeAssignments: PublicWebsiteThemeAssignments =
+    publishedContent.websiteThemeAssignments ?? DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
+  const publishedCmsThemeAssignments: PublicWebsiteThemeAssignments =
+    publishedContent.cmsThemeAssignments ?? DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS;
+  const themeAssignmentsChanged =
+    JSON.stringify(content.websiteThemeAssignments) !== JSON.stringify(publishedWebsiteThemeAssignments) ||
+    JSON.stringify(content.cmsThemeAssignments) !== JSON.stringify(publishedCmsThemeAssignments);
 
   const updateField = (section: keyof SiteContent, key: string, value: string) => {
     setContent((current) => ({
@@ -540,12 +596,12 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
     }
   };
 
-  const saveDraft = async () => {
+  const saveDraft = async (): Promise<boolean> => {
     if (content.faqs.length > 20 || content.faqs.some((faq) =>
       !faq.question.trim() || faq.question.length > 500 || !faq.answer.trim() || faq.answer.length > 3000,
     )) {
       setError('Each FAQ needs a question (up to 500 characters) and answer (up to 3,000 characters). A maximum of 20 FAQs is allowed.');
-      return;
+      return false;
     }
     setSaving(true);
     setError('');
@@ -567,17 +623,19 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
       setSavedDraft(data.content);
       setDraftUpdatedAt(data.draftUpdatedAt || null);
       setNotice('Draft saved. Public pages remain unchanged until you publish.');
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save page content.');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const publish = async () => {
-    if (dirty) {
+  const publish = async (afterSavingDraft = false): Promise<boolean> => {
+    if (dirty && !afterSavingDraft) {
       setError('Save your current edits as a draft before publishing.');
-      return;
+      return false;
     }
     setSaving(true);
     setError('');
@@ -597,11 +655,18 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
       setPublishedAt(data.publishedAt || new Date().toISOString());
       onSaved(data.content);
       setNotice('Page content published and now live on the website.');
+      return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Page content could not be published.');
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const publishThemeAssignments = async () => {
+    if (dirty && !(await saveDraft())) return;
+    await publish(dirty);
   };
 
   const loadHistory = async () => {
@@ -677,9 +742,94 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
     }
   };
 
-  const previewWidth = previewDevice === 'desktop' ? 1280 : previewDevice === 'tablet' ? 768 : 390;
+    const previewWidth = previewDevice === 'desktop' ? 1280 : previewDevice === 'tablet' ? 768 : 390;
 
-  return (
+    const renderThemeGroup = (
+      scope: 'website' | 'cms',
+      title: string,
+      description: string,
+      assignments: PublicWebsiteThemeAssignments,
+      publishedAssignments: PublicWebsiteThemeAssignments,
+      registry: typeof PUBLIC_WEBSITE_THEME_REGISTRY,
+      getDefinition: (id: string) => ReturnType<typeof getPublicWebsiteThemeDefinition>,
+      getPalette: (id: string, mode: PublicWebsiteThemeMode) => ReturnType<typeof getPublicWebsiteThemePalette>,
+    ) => (
+      <section className="space-y-3 rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
+        <header>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-[#A9B8AD]">{description}</p>
+        </header>
+        <div className="grid gap-3 md:grid-cols-2">
+          {(['light', 'dark'] as const).map((mode) => {
+            const selectedId = assignments[mode];
+            const selected = getDefinition(selectedId);
+            const published = getDefinition(publishedAssignments[mode]);
+            const palette = getPalette(selectedId, mode);
+            const modeLabel = mode === 'light' ? 'Light Mode' : 'Dark Mode';
+            return (
+              <article key={`${scope}-${mode}`} className="rounded-xl border border-[#304135] bg-[#131D16] p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-[#ECF3EE]">{modeLabel}</h4>
+                    <p className="mt-1 text-[11px] text-[#A9B8AD]">{selected?.name ?? modeLabel}</p>
+                    {selectedId !== publishedAssignments[mode] && (
+                      <p className="mt-1 text-[10px] text-[#819087]">Published: {published?.name ?? 'Original appearance'}</p>
+                    )}
+                  </div>
+                  {scope === 'website' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewThemeMode(mode);
+                        setPreviewPath('/');
+                        setShowPreview(true);
+                      }}
+                      disabled={loading || loadFailed}
+                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-[#47594C] px-2.5 text-[11px] font-semibold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                    >
+                      <Eye className="h-3.5 w-3.5" /> Preview site
+                    </button>
+                  )}
+                </div>
+                <div
+                  className="mt-3 rounded-lg border p-3"
+                  style={{ backgroundColor: palette.background, borderColor: palette.border, color: palette.text }}
+                  aria-label={`${modeLabel} appearance preview`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold">NearGrow <span style={{ color: palette.primary }}>Ads</span></span>
+                    <span className="text-[9px]" style={{ color: palette.textMuted }}>Services&nbsp; Work&nbsp; Contact</span>
+                  </div>
+                  <p className="mt-3 text-sm font-extrabold leading-tight">A clear look for every screen.</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="rounded px-2 py-1 text-[9px] font-bold text-white" style={{ backgroundColor: palette.primary }}>Action</span>
+                    <span className="h-3 w-8 rounded-sm" style={{ backgroundColor: palette.backgroundSoft }} />
+                    <span className="h-3 w-8 rounded-sm" style={{ backgroundColor: palette.surface }} />
+                  </div>
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#B8C7BC]">Theme preset</span>
+                  <select
+                    aria-label={`${title} ${modeLabel} theme`}
+                    value={selectedId}
+                    disabled={!canEdit || !isPrimaryOwner || saving}
+                    onChange={(event) => updateThemeAssignment(scope, mode, event.currentTarget.value)}
+                    className="h-9 w-full rounded-lg border border-[#47594C] bg-[#131D16] px-2.5 text-xs text-[#ECF3EE] disabled:opacity-50"
+                  >
+                    {registry.map((theme) => (
+                      <option key={theme.id} value={theme.id}>{theme.name}</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[10px] leading-4 text-[#819087]">{selected?.description}</span>
+                </label>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+
+    return (
     <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme="dark">
       <div className={embedded ? '' : 'mx-auto max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9'}>
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -691,6 +841,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#ECF3EE]">Page Content Manager</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#A9B8AD]">Manage page copy, calls to action, and search/social metadata for your main website pages.</p>
           </div>
+          <ContentTabVisibility visible={!isThemesTab}>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setShowPreview((current) => !current)} disabled={loading || loadFailed} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50">
               {showPreview ? <X className="h-4 w-4" /> : <Eye className="h-4 w-4" />} {showPreview ? 'Close preview' : 'Live preview'}
@@ -708,10 +859,12 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
               {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish
             </button>}
           </div>
+          </ContentTabVisibility>
         </header>
 
         {error && <p role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</p>}
         {notice && <p role="status" className="mb-5 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200"><Check className="mr-2 inline h-4 w-4" />{notice}</p>}
+        <ContentTabVisibility visible={!isThemesTab}>
         {!loading && !loadFailed && (
           <div role="status" className={`mb-5 rounded-xl border px-4 py-3 text-xs ${dirty ? 'border-amber-300/25 bg-amber-400/10 text-amber-100' : 'border-[#304135] bg-[#131D16] text-[#A9B8AD]'}`}>
             <span className="font-bold">{dirty ? 'Unsaved edits' : JSON.stringify(savedDraft) !== JSON.stringify(publishedContent) ? 'Draft saved · unpublished' : 'No unsaved changes'}</span>
@@ -720,6 +873,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
             <span> · Published version {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'not set'}</span>
           </div>
         )}
+        </ContentTabVisibility>
 
         {showPreview && !loading && !loadFailed && (
           <section className="mb-5 overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
@@ -759,6 +913,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
           </section>
         )}
 
+        <ContentTabVisibility visible={!isThemesTab}>
         {showHistory && (
           <section className="mb-5 rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -780,21 +935,30 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
             )}
           </section>
         )}
+        </ContentTabVisibility>
 
         {loading ? (
           <div className="grid min-h-56 place-items-center text-sm text-[#A9B8AD]"><LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> Loading page content…</div>
         ) : (
           <div className="space-y-5">
-            <p className="text-xs text-[#A9B8AD]">Last published: {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'Built-in website content'} · Changes are drafts until published.</p>
+            <ContentTabVisibility visible={!isThemesTab}>
+              <p className="text-xs text-[#A9B8AD]">Last published: {publishedAt ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(publishedAt)) : 'Built-in website content'} · Changes are drafts until published.</p>
+            </ContentTabVisibility>
             <nav aria-label="Choose page to edit" className="flex flex-wrap gap-2 rounded-2xl border border-[#304135] bg-[#19241D] p-2">
               {copyPageTabs.map((tab) => (
                 <button key={tab.id} type="button" onClick={() => setActivePage(tab.id)} aria-pressed={activePage === tab.id} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activePage === tab.id ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
                   {tab.label}
                 </button>
               ))}
+              {isPrimaryOwner && (
+                <button type="button" onClick={() => setActivePage('themes')} aria-pressed={isThemesTab} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${isThemesTab ? 'bg-[#286D3B] text-white' : 'text-[#A9B8AD] hover:bg-white/5 hover:text-white'}`}>
+                  Themes
+                </button>
+              )}
             </nav>
 
-            {dedicatedModuleLinks[activePage] && (
+            <ContentTabVisibility visible={!isThemesTab}>
+            {activePage !== 'themes' && dedicatedModuleLinks[activePage] && (
               <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#304135] bg-[#19241D] p-4">
                 <div>
                   <h2 className="text-sm font-bold text-[#ECF3EE]">Dedicated content module</h2>
@@ -807,8 +971,65 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
                 </div>
               </section>
             )}
+            </ContentTabVisibility>
 
-            {activePage === 'siteLinks' ? (
+            {isThemesTab ? (
+              <section className="space-y-4">
+                <header className="rounded-2xl border border-[#304135] bg-[#19241D] p-4 sm:p-5">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#72D28B]">Primary Owner</p>
+                  <h2 className="mt-1 text-lg font-bold text-[#ECF3EE]">Theme Manager</h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-[#A9B8AD]">Assign published themes independently for the public website and Admin CMS. Mode toggles use their own assignments.</p>
+                </header>
+                {!canEdit && <p role="status" className="rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100">Your role can preview themes but cannot edit them.</p>}
+                {renderThemeGroup(
+                  'website',
+                  'Public Website',
+                  'The public Light/Dark toggle uses these published assignments.',
+                  content.websiteThemeAssignments,
+                  publishedWebsiteThemeAssignments,
+                  PUBLIC_WEBSITE_THEME_REGISTRY,
+                  getPublicWebsiteThemeDefinition,
+                  getPublicWebsiteThemePalette,
+                )}
+                {renderThemeGroup(
+                  'cms',
+                  'Admin CMS',
+                  'The CMS appearance toggle uses these assignments independently of the public website.',
+                  content.cmsThemeAssignments,
+                  publishedCmsThemeAssignments,
+                  ADMIN_CMS_THEME_REGISTRY,
+                  getAdminCmsThemeDefinition,
+                  getAdminCmsThemePalette,
+                )}
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#304135] bg-[#19241D] p-3">
+                  <button
+                    type="button"
+                    disabled={!canEdit || !isPrimaryOwner || saving || loading || loadFailed || !themeAssignmentsChanged}
+                    onClick={() => {
+                      setContent((current) => ({
+                        ...current,
+                        websiteThemeAssignments: { ...publishedWebsiteThemeAssignments },
+                        cmsThemeAssignments: { ...publishedCmsThemeAssignments },
+                      }));
+                      setNotice('Website and CMS assignments reset to the published selections.');
+                    }}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-4 w-4" /> Reset to Published
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canEdit || !canPublish || !isPrimaryOwner || saving || loading || loadFailed || !themeAssignmentsChanged}
+                    onClick={() => void publishThemeAssignments()}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#286D3B] px-4 text-xs font-bold text-white hover:bg-[#205C31] disabled:opacity-50"
+                  >
+                    {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Save &amp; Publish
+                  </button>
+                  <p className="basis-full text-[11px] leading-5 text-[#819087]">Selections stay in this draft until published. Save &amp; Publish uses the existing Page Content Manager workflow; any other edits in its current draft are included.</p>
+                </div>
+              </section>
+            ) : activePage === 'siteLinks' ? (
               <div className="space-y-5">
                 <section className="rounded-3xl border border-[#304135] bg-[#19241D] p-5 shadow-sm sm:p-7">
                   <div className="mb-5 border-b border-[#304135] pb-4">
@@ -1460,6 +1681,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
               </section>
             ))}
 
+            <ContentTabVisibility visible={!isThemesTab}>
             {activePage === 'home' && (
               <section className="rounded-3xl border border-[#304135] bg-[#19241D] p-5 shadow-sm sm:p-7">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-[#304135] pb-4">
@@ -1556,6 +1778,7 @@ export function AdminContentManager({ onBack, onSaved, embedded = false, canEdit
               </div>
             </section>}
             <p className="text-[10px] text-[#718077]">SEO tags are updated in the browser when visitors navigate to each page. Search and social crawlers can require a new crawl to reflect published metadata.</p>
+            </ContentTabVisibility>
           </div>
         )}
       </div>

@@ -33,6 +33,13 @@ import dotenv from 'dotenv';
 import { BLOG_CATEGORIES as defaultBlogCategories } from './src/data/blogCategories';
 import { SERVICES as staticServices } from './src/data/servicesData';
 import { DEFAULT_SITE_CONTENT as frontendDefaultSiteContent, type MascotSettings } from './src/data/siteContent';
+import {
+  DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
+  parseAdminCmsThemeAssignments,
+  parsePublicWebsiteThemeAssignments,
+  parsePublicWebsiteThemes,
+} from './src/data/publicWebsiteTheme';
 import { DEFAULT_MASCOT_SETTINGS, MASCOT_SCALE_MAX, MASCOT_SCALE_MIN } from './src/data/mascotSizing';
 import { normalizeGlobeLightAppearance } from './src/data/globeAppearance';
 import { isSafePublicDestination } from './src/data/publicLinks';
@@ -2186,6 +2193,9 @@ const servicePackageUploadDir = path.join(teamUploadRoot, 'service-store');
 let memoryTeam: TeamMember[] = [];
 
 const defaultSiteContent = {
+  websiteThemes: frontendDefaultSiteContent.websiteThemes,
+  websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
+  cmsThemeAssignments: frontendDefaultSiteContent.cmsThemeAssignments,
   copy: frontendDefaultSiteContent.copy,
   faqs: frontendDefaultSiteContent.faqs,
   media: frontendDefaultSiteContent.media,
@@ -2267,6 +2277,15 @@ const defaultSiteContent = {
 type SiteContent = typeof defaultSiteContent;
 const fallbackSiteContent: SiteContent = defaultSiteContent;
 
+function sameThemeConfiguration(
+  left: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments' | 'cmsThemeAssignments'>,
+  right: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments' | 'cmsThemeAssignments'>,
+): boolean {
+  return JSON.stringify(left.websiteThemes) === JSON.stringify(right.websiteThemes) &&
+    JSON.stringify(left.websiteThemeAssignments) === JSON.stringify(right.websiteThemeAssignments) &&
+    JSON.stringify(left.cmsThemeAssignments) === JSON.stringify(right.cmsThemeAssignments);
+}
+
 async function readLegacySiteContent(): Promise<SiteContent> {
   try {
     const parsed = await readCmsDocument<unknown>('site-content', siteContentFile);
@@ -2295,6 +2314,9 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
     supportingText: 240,
   };
   const content = {
+    websiteThemes: frontendDefaultSiteContent.websiteThemes,
+    websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
+    cmsThemeAssignments: frontendDefaultSiteContent.cmsThemeAssignments,
     seo: defaultSiteContent.seo,
     copy: DEFAULT_PUBLIC_COPY,
     media: DEFAULT_PUBLIC_MEDIA,
@@ -2302,6 +2324,23 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
     ctaDestinations: defaultSiteContent.ctaDestinations,
     footerSettings: defaultSiteContent.footerSettings,
   } as SiteContent;
+  const websiteThemes = parsePublicWebsiteThemes(
+    input.websiteThemes === undefined ? frontendDefaultSiteContent.websiteThemes : input.websiteThemes,
+  );
+  if (!websiteThemes) return undefined;
+  content.websiteThemes = websiteThemes;
+  const websiteThemeAssignments = input.websiteThemeAssignments === undefined
+    ? input.websiteThemes === undefined
+      ? DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS
+      : { light: 'legacy-light', dark: 'legacy-dark' }
+    : parsePublicWebsiteThemeAssignments(input.websiteThemeAssignments);
+  if (!websiteThemeAssignments) return undefined;
+  content.websiteThemeAssignments = websiteThemeAssignments;
+  const cmsThemeAssignments = input.cmsThemeAssignments === undefined
+    ? DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS
+    : parseAdminCmsThemeAssignments(input.cmsThemeAssignments);
+  if (!cmsThemeAssignments) return undefined;
+  content.cmsThemeAssignments = cmsThemeAssignments;
   const rawMascotSettings = input.mascotSettings === undefined
     ? DEFAULT_MASCOT_SETTINGS
     : input.mascotSettings;
@@ -2820,6 +2859,18 @@ async function listSiteContentRevisions(): Promise<Array<{ id: number; action: s
     actorLabel: row.actor_label || 'Administrator',
     createdAt: row.created_at,
   }));
+}
+
+async function readSiteContentRevision(revisionId: number): Promise<SiteContent | undefined> {
+  const query = new URLSearchParams({
+    select: 'content',
+    id: `eq.${revisionId}`,
+    limit: '1',
+  });
+  const response = await supabaseAdminRequest(`rest/v1/site_content_revisions?${query}`);
+  if (!response.ok) throw new Error(`Site content revision read failed (${response.status}).`);
+  const rows = await response.json() as Array<{ content?: unknown }>;
+  return rows[0]?.content ? validateSiteContent(rows[0].content) : undefined;
 }
 
 async function restoreSiteContentRevision(revisionId: number, actorId: string, actorLabel: string): Promise<SiteContent | undefined> {
@@ -8568,6 +8619,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
         return;
       }
+      if (!identity.isPrimaryOwner) {
+        const current = await readAdminSiteContent();
+        if (!sameThemeConfiguration(content, current.draft)) {
+          res.status(403).json({ message: 'Only the Primary Owner can change website or CMS theme settings.' });
+          return;
+        }
+      }
       const saved = await writeSiteContentDraft(content, identity.id, identity.email, expectedUpdatedAt);
       if (saved.conflict) {
         res.setHeader('Cache-Control', 'no-store');
@@ -8605,6 +8663,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const state = await readAdminSiteContent();
+        if (!sameThemeConfiguration(state.draft, state.published)) {
+          res.status(403).json({ message: 'Only the Primary Owner can publish website or CMS theme settings.' });
+          return;
+        }
+      }
       const result = await publishSiteContent(identity.id);
       res.setHeader('Cache-Control', 'no-store');
       res.json(result);
@@ -8642,6 +8707,20 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const [revision, state] = await Promise.all([
+          readSiteContentRevision(revisionId),
+          readAdminSiteContent(),
+        ]);
+        if (!revision) {
+          res.status(404).json({ message: 'That saved version no longer exists.' });
+          return;
+        }
+        if (!sameThemeConfiguration(revision, state.draft)) {
+          res.status(403).json({ message: 'Only the Primary Owner can restore website or CMS theme assignments.' });
+          return;
+        }
+      }
       const content = await restoreSiteContentRevision(revisionId, identity.id, identity.email);
       if (!content) {
         res.status(404).json({ message: 'That saved version no longer exists.' });
@@ -8668,6 +8747,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const state = await readAdminSiteContent();
+        if (!sameThemeConfiguration(state.draft, state.published)) {
+          res.status(403).json({ message: 'Only the Primary Owner can discard pending website or CMS theme settings.' });
+          return;
+        }
+      }
       let content = await discardSiteContentDraft(identity.id, identity.email);
       if (!content) {
         const state = await readAdminSiteContent();
