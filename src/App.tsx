@@ -32,7 +32,10 @@ import { PublicActivityTracker } from './components/PublicActivityTracker';
 import { ArrowLeft } from 'lucide-react';
 import { readAdminAuthRoute } from './components/admin/adminAuthCallback';
 import {
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEMES,
+  getPublicWebsiteThemePalette,
+  parsePublicWebsiteThemeAssignments,
   parsePublicWebsiteThemes,
   publicWebsiteThemeCssVariables,
   type PublicWebsiteThemeMode,
@@ -312,7 +315,14 @@ export default function App() {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     const themes = parsePublicWebsiteThemes(siteContent.websiteThemes) ?? DEFAULT_PUBLIC_WEBSITE_THEMES;
-    Object.entries(publicWebsiteThemeCssVariables(themes[theme])).forEach(([name, value]) => {
+    const assignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
+      DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
+    const palette = getPublicWebsiteThemePalette(
+      assignments[theme],
+      theme,
+      themes[theme],
+    );
+    Object.entries(publicWebsiteThemeCssVariables(palette)).forEach(([name, value]) => {
       document.documentElement.style.setProperty(name, value);
     });
     try {
@@ -320,7 +330,7 @@ export default function App() {
     } catch {
       // The selected theme remains active for this session if storage is unavailable.
     }
-  }, [siteContent.websiteThemes, theme]);
+  }, [siteContent.websiteThemeAssignments, siteContent.websiteThemes, theme]);
 
   useEffect(() => {
     document.documentElement.dataset.home = currentPath === '/' ? 'true' : 'false';

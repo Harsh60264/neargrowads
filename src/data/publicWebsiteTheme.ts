@@ -18,6 +18,15 @@ export interface PublicWebsiteThemes {
 }
 
 export type PublicWebsiteThemeMode = keyof PublicWebsiteThemes;
+export type PublicWebsiteThemeAssignments = Record<PublicWebsiteThemeMode, string>;
+
+export interface PublicWebsiteThemeDefinition {
+  id: string;
+  name: string;
+  description: string;
+  mode: PublicWebsiteThemeMode;
+  palette: PublicWebsiteThemePalette;
+}
 
 export const DEFAULT_PUBLIC_WEBSITE_THEMES: PublicWebsiteThemes = {
   light: {
@@ -47,6 +56,70 @@ export const DEFAULT_PUBLIC_WEBSITE_THEMES: PublicWebsiteThemes = {
     border: '#293B62',
   },
 };
+
+export const DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS: PublicWebsiteThemeAssignments = {
+  light: 'royal-light',
+  dark: 'midnight-dark',
+};
+
+export const PUBLIC_WEBSITE_THEME_REGISTRY: readonly PublicWebsiteThemeDefinition[] = [
+  {
+    id: 'royal-light',
+    name: 'Royal Blue',
+    description: 'Clean white surfaces with royal blue accents.',
+    mode: 'light',
+    palette: DEFAULT_PUBLIC_WEBSITE_THEMES.light,
+  },
+  {
+    id: 'cloud-light',
+    name: 'Cloud',
+    description: 'Soft neutral surfaces with crisp navy text.',
+    mode: 'light',
+    palette: {
+      background: '#F6F8FB',
+      backgroundSoft: '#EBF0F6',
+      surface: '#FFFFFF',
+      surfaceRaised: '#FFFFFF',
+      text: '#172235',
+      textMuted: '#536174',
+      primary: '#315B91',
+      primaryHover: '#24466F',
+      primarySoft: '#E5EDF7',
+      accent: '#4982B8',
+      border: '#D8E0EA',
+    },
+  },
+  {
+    id: 'midnight-dark',
+    name: 'Midnight Electric',
+    description: 'Midnight navy with electric blue and clear light text.',
+    mode: 'dark',
+    palette: DEFAULT_PUBLIC_WEBSITE_THEMES.dark,
+  },
+  {
+    id: 'ocean-dark',
+    name: 'Deep Ocean',
+    description: 'Deep blue surfaces with bright ocean-cyan accents.',
+    mode: 'dark',
+    palette: {
+      background: '#07151F',
+      backgroundSoft: '#0B202D',
+      surface: '#102A3A',
+      surfaceRaised: '#18394B',
+      text: '#F2FAFF',
+      textMuted: '#B6CFDC',
+      primary: '#168DB8',
+      primaryHover: '#35B4DE',
+      primarySoft: '#12394B',
+      accent: '#53D5E8',
+      border: '#294958',
+    },
+  },
+] as const;
+
+const publicWebsiteThemesById = new Map(
+  PUBLIC_WEBSITE_THEME_REGISTRY.map((theme) => [theme.id, theme]),
+);
 
 export const PUBLIC_WEBSITE_THEME_TOKENS = [
   { key: 'background', label: 'Page background' },
@@ -104,6 +177,32 @@ export function parsePublicWebsiteThemes(value: unknown): PublicWebsiteThemes | 
     result[mode] = palette;
   }
   return result;
+}
+
+export function parsePublicWebsiteThemeAssignments(value: unknown): PublicWebsiteThemeAssignments | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Partial<Record<PublicWebsiteThemeMode, unknown>>;
+  const assignments = {} as PublicWebsiteThemeAssignments;
+  for (const mode of ['light', 'dark'] as const) {
+    const id = input[mode];
+    if (typeof id !== 'string' ||
+      (id !== `legacy-${mode}` && !publicWebsiteThemesById.has(id))) return undefined;
+    assignments[mode] = id;
+  }
+  return assignments;
+}
+
+export function getPublicWebsiteThemeDefinition(id: string): PublicWebsiteThemeDefinition | undefined {
+  return publicWebsiteThemesById.get(id);
+}
+
+export function getPublicWebsiteThemePalette(
+  id: string,
+  mode: PublicWebsiteThemeMode,
+  legacyPalette: PublicWebsiteThemePalette,
+): PublicWebsiteThemePalette {
+  if (id === `legacy-${mode}`) return legacyPalette;
+  return publicWebsiteThemesById.get(id)?.palette ?? DEFAULT_PUBLIC_WEBSITE_THEMES[mode];
 }
 
 export function publicWebsiteThemeCssVariables(

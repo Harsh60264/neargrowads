@@ -13,7 +13,11 @@ import dotenv from 'dotenv';
 import { BLOG_CATEGORIES as defaultBlogCategories } from './src/data/blogCategories';
 import { SERVICES as staticServices } from './src/data/servicesData';
 import { DEFAULT_SITE_CONTENT as frontendDefaultSiteContent, type MascotSettings } from './src/data/siteContent';
-import { parsePublicWebsiteThemes } from './src/data/publicWebsiteTheme';
+import {
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
+  parsePublicWebsiteThemeAssignments,
+  parsePublicWebsiteThemes,
+} from './src/data/publicWebsiteTheme';
 import { DEFAULT_MASCOT_SETTINGS, MASCOT_SCALE_MAX, MASCOT_SCALE_MIN } from './src/data/mascotSizing';
 import { normalizeGlobeLightAppearance } from './src/data/globeAppearance';
 import { isSafePublicDestination } from './src/data/publicLinks';
@@ -2196,6 +2200,7 @@ let memoryTeam: TeamMember[] = [];
 
 const defaultSiteContent = {
   websiteThemes: frontendDefaultSiteContent.websiteThemes,
+  websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
   copy: frontendDefaultSiteContent.copy,
   faqs: frontendDefaultSiteContent.faqs,
   media: frontendDefaultSiteContent.media,
@@ -2277,6 +2282,14 @@ const defaultSiteContent = {
 type SiteContent = typeof defaultSiteContent;
 const fallbackSiteContent: SiteContent = defaultSiteContent;
 
+function sameWebsiteThemeConfiguration(
+  left: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments'>,
+  right: Pick<SiteContent, 'websiteThemes' | 'websiteThemeAssignments'>,
+): boolean {
+  return JSON.stringify(left.websiteThemes) === JSON.stringify(right.websiteThemes) &&
+    JSON.stringify(left.websiteThemeAssignments) === JSON.stringify(right.websiteThemeAssignments);
+}
+
 async function readLegacySiteContent(): Promise<SiteContent> {
   try {
     const parsed = await readCmsDocument<unknown>('site-content', siteContentFile);
@@ -2306,6 +2319,7 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
   };
   const content = {
     websiteThemes: frontendDefaultSiteContent.websiteThemes,
+    websiteThemeAssignments: frontendDefaultSiteContent.websiteThemeAssignments,
     seo: defaultSiteContent.seo,
     copy: DEFAULT_PUBLIC_COPY,
     media: DEFAULT_PUBLIC_MEDIA,
@@ -2318,6 +2332,13 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
   );
   if (!websiteThemes) return undefined;
   content.websiteThemes = websiteThemes;
+  const websiteThemeAssignments = input.websiteThemeAssignments === undefined
+    ? input.websiteThemes === undefined
+      ? DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS
+      : { light: 'legacy-light', dark: 'legacy-dark' }
+    : parsePublicWebsiteThemeAssignments(input.websiteThemeAssignments);
+  if (!websiteThemeAssignments) return undefined;
+  content.websiteThemeAssignments = websiteThemeAssignments;
   const rawMascotSettings = input.mascotSettings === undefined
     ? DEFAULT_MASCOT_SETTINGS
     : input.mascotSettings;
@@ -2836,6 +2857,18 @@ async function listSiteContentRevisions(): Promise<Array<{ id: number; action: s
     actorLabel: row.actor_label || 'Administrator',
     createdAt: row.created_at,
   }));
+}
+
+async function readSiteContentRevision(revisionId: number): Promise<SiteContent | undefined> {
+  const query = new URLSearchParams({
+    select: 'content',
+    id: `eq.${revisionId}`,
+    limit: '1',
+  });
+  const response = await supabaseAdminRequest(`rest/v1/site_content_revisions?${query}`);
+  if (!response.ok) throw new Error(`Site content revision read failed (${response.status}).`);
+  const rows = await response.json() as Array<{ content?: unknown }>;
+  return rows[0]?.content ? validateSiteContent(rows[0].content) : undefined;
 }
 
 async function restoreSiteContentRevision(revisionId: number, actorId: string, actorLabel: string): Promise<SiteContent | undefined> {
@@ -8488,7 +8521,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       if (!identity.isPrimaryOwner) {
         const current = await readAdminSiteContent();
-        if (JSON.stringify(content.websiteThemes) !== JSON.stringify(current.draft.websiteThemes)) {
+        if (!sameWebsiteThemeConfiguration(content, current.draft)) {
           res.status(403).json({ message: 'Only the Primary Owner can change public website theme settings.' });
           return;
         }
@@ -8532,7 +8565,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       if (!identity.isPrimaryOwner) {
         const state = await readAdminSiteContent();
-        if (JSON.stringify(state.draft.websiteThemes) !== JSON.stringify(state.published.websiteThemes)) {
+        if (!sameWebsiteThemeConfiguration(state.draft, state.published)) {
           res.status(403).json({ message: 'Only the Primary Owner can publish public website theme settings.' });
           return;
         }
@@ -8574,6 +8607,20 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const [revision, state] = await Promise.all([
+          readSiteContentRevision(revisionId),
+          readAdminSiteContent(),
+        ]);
+        if (!revision) {
+          res.status(404).json({ message: 'That saved version no longer exists.' });
+          return;
+        }
+        if (!sameWebsiteThemeConfiguration(revision, state.draft)) {
+          res.status(403).json({ message: 'Only the Primary Owner can restore public website theme assignments.' });
+          return;
+        }
+      }
       const content = await restoreSiteContentRevision(revisionId, identity.id, identity.email);
       if (!content) {
         res.status(404).json({ message: 'That saved version no longer exists.' });
@@ -8602,7 +8649,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       if (!identity.isPrimaryOwner) {
         const state = await readAdminSiteContent();
-        if (JSON.stringify(state.draft.websiteThemes) !== JSON.stringify(state.published.websiteThemes)) {
+        if (!sameWebsiteThemeConfiguration(state.draft, state.published)) {
           res.status(403).json({ message: 'Only the Primary Owner can discard pending public website theme settings.' });
           return;
         }

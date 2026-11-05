@@ -1,6 +1,11 @@
 import { DEFAULT_PUBLIC_COPY } from './publicCopy';
 import { DEFAULT_PUBLIC_MEDIA, type ManagedMedia } from './publicMedia';
-import { DEFAULT_PUBLIC_WEBSITE_THEMES, type PublicWebsiteThemes } from './publicWebsiteTheme';
+import {
+  DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
+  DEFAULT_PUBLIC_WEBSITE_THEMES,
+  type PublicWebsiteThemeAssignments,
+  type PublicWebsiteThemes,
+} from './publicWebsiteTheme';
 
 export type ManagedPage = 'home' | 'services' | 'catalogue' | 'work' | 'about' | 'blog' | 'contact';
 
@@ -92,6 +97,7 @@ export interface MascotSettings {
 
 export interface SiteContent {
   websiteThemes: PublicWebsiteThemes;
+  websiteThemeAssignments: PublicWebsiteThemeAssignments;
   copy: Record<string, string>;
   faqs: PublicFaq[];
   media: Record<string, ManagedMedia>;
@@ -172,6 +178,7 @@ export interface SiteContent {
 
 export const DEFAULT_SITE_CONTENT: SiteContent = {
   websiteThemes: DEFAULT_PUBLIC_WEBSITE_THEMES,
+  websiteThemeAssignments: DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
   copy: DEFAULT_PUBLIC_COPY,
   faqs: Array.from({ length: 7 }, (_, index) => ({
     id: `faq-${index + 1}`,
