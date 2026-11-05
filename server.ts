@@ -13,6 +13,7 @@ import dotenv from 'dotenv';
 import { BLOG_CATEGORIES as defaultBlogCategories } from './src/data/blogCategories';
 import { SERVICES as staticServices } from './src/data/servicesData';
 import { DEFAULT_SITE_CONTENT as frontendDefaultSiteContent, type MascotSettings } from './src/data/siteContent';
+import { parsePublicWebsiteThemes } from './src/data/publicWebsiteTheme';
 import { DEFAULT_MASCOT_SETTINGS, MASCOT_SCALE_MAX, MASCOT_SCALE_MIN } from './src/data/mascotSizing';
 import { normalizeGlobeLightAppearance } from './src/data/globeAppearance';
 import { isSafePublicDestination } from './src/data/publicLinks';
@@ -2194,6 +2195,7 @@ const servicePackageUploadDir = path.join(teamUploadRoot, 'service-store');
 let memoryTeam: TeamMember[] = [];
 
 const defaultSiteContent = {
+  websiteThemes: frontendDefaultSiteContent.websiteThemes,
   copy: frontendDefaultSiteContent.copy,
   faqs: frontendDefaultSiteContent.faqs,
   media: frontendDefaultSiteContent.media,
@@ -2303,6 +2305,7 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
     supportingText: 240,
   };
   const content = {
+    websiteThemes: frontendDefaultSiteContent.websiteThemes,
     seo: defaultSiteContent.seo,
     copy: DEFAULT_PUBLIC_COPY,
     media: DEFAULT_PUBLIC_MEDIA,
@@ -2310,6 +2313,11 @@ function validateSiteContent(value: unknown): SiteContent | undefined {
     ctaDestinations: defaultSiteContent.ctaDestinations,
     footerSettings: defaultSiteContent.footerSettings,
   } as SiteContent;
+  const websiteThemes = parsePublicWebsiteThemes(
+    input.websiteThemes === undefined ? frontendDefaultSiteContent.websiteThemes : input.websiteThemes,
+  );
+  if (!websiteThemes) return undefined;
+  content.websiteThemes = websiteThemes;
   const rawMascotSettings = input.mascotSettings === undefined
     ? DEFAULT_MASCOT_SETTINGS
     : input.mascotSettings;
@@ -8478,6 +8486,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
         return;
       }
+      if (!identity.isPrimaryOwner) {
+        const current = await readAdminSiteContent();
+        if (JSON.stringify(content.websiteThemes) !== JSON.stringify(current.draft.websiteThemes)) {
+          res.status(403).json({ message: 'Only the Primary Owner can change public website theme settings.' });
+          return;
+        }
+      }
       const saved = await writeSiteContentDraft(content, identity.id, identity.email, expectedUpdatedAt);
       if (saved.conflict) {
         res.setHeader('Cache-Control', 'no-store');
@@ -8515,6 +8530,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const state = await readAdminSiteContent();
+        if (JSON.stringify(state.draft.websiteThemes) !== JSON.stringify(state.published.websiteThemes)) {
+          res.status(403).json({ message: 'Only the Primary Owner can publish public website theme settings.' });
+          return;
+        }
+      }
       const result = await publishSiteContent(identity.id);
       res.setHeader('Cache-Control', 'no-store');
       res.json(result);
@@ -8578,6 +8600,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
+      if (!identity.isPrimaryOwner) {
+        const state = await readAdminSiteContent();
+        if (JSON.stringify(state.draft.websiteThemes) !== JSON.stringify(state.published.websiteThemes)) {
+          res.status(403).json({ message: 'Only the Primary Owner can discard pending public website theme settings.' });
+          return;
+        }
+      }
       let content = await discardSiteContentDraft(identity.id, identity.email);
       if (!content) {
         const state = await readAdminSiteContent();
