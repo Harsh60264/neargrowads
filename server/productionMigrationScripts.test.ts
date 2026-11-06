@@ -52,10 +52,12 @@ test('optional customer location Production preflight is pinned, read-only and h
   assert.match(locationPreflight, /\$expectedProjectRef = 'axbjzmdokfoftzfgwiql'/);
   assert.match(locationPreflight, /\$expectedMigrationHash = '[0-9A-F]{64}'/);
   assert.match(locationPreflight, /Invoke-ProductionAdminDeletionReadOnlyQuery/);
-  assert.match(locationPreflight, /CHECK\|location_columns/);
-  assert.match(locationPreflight, /CHECK\|location_constraints/);
   assert.match(locationPreflight, /CHECK\|location_security/);
-  assert.match(locationPreflight, /history is evidence only; this script never writes it/);
+  assert.match(locationPreflight, /CHECK\|location_state/);
+  assert.match(locationPreflight, /PRE_MIGRATION_GO/);
+  assert.match(locationPreflight, /UNAVAILABLE\|ledger relation is absent/);
+  assert.match(locationPreflight, /to_regclass\('supabase_migrations\.schema_migrations'\)/);
+  assert.match(locationPreflight, /\\if :migration_ledger_readable[\s\S]*FROM supabase_migrations\.schema_migrations/);
   assert.doesNotMatch(locationPreflight, /^\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|GRANT|REVOKE|TRUNCATE)\b/im);
 });
 
