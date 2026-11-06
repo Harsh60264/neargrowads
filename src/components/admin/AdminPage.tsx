@@ -11,6 +11,7 @@ import { AdminServicesManagement } from './AdminServicesManagement';
 import { AdminMascotSettings } from './AdminMascotSettings';
 import { AdminLeadExport } from './AdminLeadExport';
 import { AdminSecurityMonitoring } from './AdminSecurityMonitoring';
+import { AdminPremiumModuleFrame } from './AdminPremiumPrimitives';
 import type { SiteContent } from '../../data/siteContent';
 import {
   ArrowLeft,
@@ -916,6 +917,20 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const reviewedCount = leads.filter((lead) => lead.status === 'reviewed').length;
   const contactedCount = leads.filter((lead) => lead.status === 'contacted').length;
 
+  const premiumModuleMeta: Record<string, { eyebrow: string; title: string; description: string }> = {
+    leads: { eyebrow: 'Workspace', title: 'Leads & Inquiries', description: 'Review conversations, prioritize follow-ups, and keep every customer request moving.' },
+    serviceStore: { eyebrow: 'Commerce', title: 'Service Store', description: 'Manage packages, catalogue content, orders, payments, and fulfilment from one workspace.' },
+    content: { eyebrow: 'Content Studio', title: 'Page Content Manager', description: 'Shape the public experience with controlled drafts, previews, and publishing.' },
+    mascot: { eyebrow: 'Brand Experience', title: 'NEO Mascot', description: 'Tune the mascot experience while keeping the published presentation safe.' },
+    caseStudies: { eyebrow: 'Proof of Work', title: 'Case Studies', description: 'Keep customer outcomes organised, polished, and ready for publishing.' },
+    servicesManagement: { eyebrow: 'Catalogue', title: 'Services Management', description: 'Maintain the service catalogue and its public-facing presentation.' },
+    categories: { eyebrow: 'Organisation', title: 'Categories', description: 'Organise content and service discovery with clear, reusable groups.' },
+    blog: { eyebrow: 'Editorial', title: blogMode === 'editor' ? 'Blog Editor' : 'Blog Management', description: 'Create, review, optimise, and publish useful editorial content.' },
+    securityMonitoring: { eyebrow: 'Trust Centre', title: 'Security Monitoring', description: 'Monitor security signals and manage alerts without weakening protections.' },
+    settings: { eyebrow: 'Workspace Controls', title: 'Settings', description: 'Manage accounts, access, and owner-protected administration settings.' },
+  };
+  const moduleMeta = section ? premiumModuleMeta[section] : undefined;
+
   return (
     <main className="admin-portal min-h-screen" data-admin-theme={theme} data-admin-theme-preset={themePreset} data-admin-ready="true">
       <div className="min-h-screen w-full max-w-full lg:flex" inert={sessionExpired}>
@@ -1009,8 +1024,10 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
 
           {!sectionAllowed ? (
             <div role="alert" className="mt-8 rounded-2xl border border-rose-300/20 bg-rose-950/20 p-5 text-sm text-rose-200">Your administrator role does not include permission to view this section.</div>
-          ) : moduleContent ? (
-            <div className="mt-6 min-w-0">{moduleContent}</div>
+          ) : moduleContent && moduleMeta ? (
+            <div className="mt-6 min-w-0">
+              <AdminPremiumModuleFrame {...moduleMeta}>{moduleContent}</AdminPremiumModuleFrame>
+            </div>
           ) : <>
           {!section && <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
             <section aria-labelledby="cms-welcome-title" className="admin-dashboard-welcome relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#13271B] via-[#1F5933] to-[#328148] p-6 text-white shadow-lg sm:p-8">
