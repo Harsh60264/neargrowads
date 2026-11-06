@@ -22,6 +22,7 @@ import {
 } from './server/serviceOrders.ts';
 import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
 import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
+import { readCustomerLocation, withCustomerLocation } from './server/customerLocationSerialization.ts';
 import { canAccessServiceStoreAction, serviceStoreAdminAction } from './server/serviceStoreAuthorization.ts';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { once } from 'node:events';
@@ -178,25 +179,6 @@ const SERVICE_ENQUIRY_WINDOW_MS = 60 * 1000;
 const SERVICE_ENQUIRY_MAX_ATTEMPTS = 5;
 let warnedAdminAccountMigrationMissing = false;
 let warnedSiteContentMigrationMissing = false;
-
-function readCustomerLocation(row: Record<string, unknown>): CustomerLocation | undefined {
-  return validateCustomerLocation({
-    latitude: typeof row.customer_location_latitude === 'string' ? Number(row.customer_location_latitude) : row.customer_location_latitude,
-    longitude: typeof row.customer_location_longitude === 'string' ? Number(row.customer_location_longitude) : row.customer_location_longitude,
-    accuracyMeters: typeof row.customer_location_accuracy_meters === 'string' ? Number(row.customer_location_accuracy_meters) : row.customer_location_accuracy_meters,
-    capturedAt: row.customer_location_captured_at,
-    locality: row.customer_location_locality,
-    consent: row.customer_location_consent,
-  });
-}
-
-function withCustomerLocation(row: Record<string, unknown>): Record<string, unknown> {
-  const { customer_location_latitude: _latitude, customer_location_longitude: _longitude,
-    customer_location_accuracy_meters: _accuracy, customer_location_locality: _locality,
-    customer_location_captured_at: _capturedAt, customer_location_consent: _consent, ...safeRow } = row;
-  const location = readCustomerLocation(row);
-  return location ? { ...safeRow, location } : safeRow;
-}
 
 // In-memory lead buffer (for local inspection and logging)
 interface StoredLead {
