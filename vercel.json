@@ -31,6 +31,23 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/google-ads-delhi",
+      "destination": "/services/google-ads",
+      "statusCode": 301
+    },
+    {
+      "source": "/gmb-audit/",
+      "destination": "/services/google-business-profile",
+      "statusCode": 301
+    }
+  ],
+  "functions": {
+    "api/handler.ts": {
+      "includeFiles": "dist/index.html"
+    }
+  },
   "rewrites": [
     {
       "source": "/sitemap.xml",
@@ -45,23 +62,7 @@
       "destination": "/api/handler?__vercel_original_api_path=/api/uploads/:folder/:filename"
     },
     {
-      "source": "/admin",
-      "destination": "/index.html"
-    },
-    {
       "source": "/services",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/services/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/catalogue/:path*",
       "destination": "/index.html"
     },
     {
@@ -69,11 +70,27 @@
       "destination": "/index.html"
     },
     {
-      "source": "/blog/:path*",
+      "source": "/blog",
       "destination": "/index.html"
     },
     {
-      "source": "/blog",
+      "source": "/services/:path*",
+      "destination": "/api/handler?__vercel_original_api_path=/services/:path*"
+    },
+    {
+      "source": "/catalogue/:path*",
+      "destination": "/api/handler?__vercel_original_api_path=/catalogue/:path*"
+    },
+    {
+      "source": "/blog/:path*",
+      "destination": "/api/handler?__vercel_original_api_path=/blog/:path*"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/:path*",
       "destination": "/index.html"
     },
     {
