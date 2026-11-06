@@ -128,28 +128,44 @@ SELECT 'CHECK|location_state|' || state ||
   constraints_ok || ';constraints_expected=3'
 FROM location_state;
 
+WITH target(table_name) AS (
+  VALUES
+    ('service_orders'),
+    ('service_enquiry_requests'),
+    ('leads')
+),
+privilege(privilege_name) AS (
+  VALUES ('SELECT'), ('INSERT'), ('UPDATE')
+)
 SELECT 'CHECK|location_security|' ||
-  CASE WHEN count(*) = 3 AND bool_and(c.relrowsecurity)
-    AND bool_and(has_table_privilege('service_role', c.oid, 'INSERT'))
-    AND bool_and(has_table_privilege('service_role', c.oid, 'SELECT'))
-    AND bool_and(has_table_privilege('service_role', c.oid, 'UPDATE'))
-    AND has_table_privilege('anon', 'public.service_orders', 'SELECT') = false
-    AND has_table_privilege('authenticated', 'public.service_orders', 'SELECT') = false
-    AND has_table_privilege('anon', 'public.service_enquiry_requests', 'SELECT') = false
-    AND has_table_privilege('authenticated', 'public.service_enquiry_requests', 'SELECT') = false
-    AND has_table_privilege('anon', 'public.leads', 'SELECT') = false
-    AND has_table_privilege('anon', 'public.leads', 'UPDATE') = false
-    AND has_table_privilege('anon', 'public.leads', 'INSERT') = true
-    AND has_table_privilege('authenticated', 'public.leads', 'SELECT') = true
-    AND has_table_privilege('authenticated', 'public.leads', 'UPDATE') = true
-    AND has_table_privilege('authenticated', 'public.leads', 'INSERT') = true
+  CASE WHEN (SELECT count(*) FROM target t
+      JOIN pg_class c ON c.oid = to_regclass('public.' || t.table_name)) = 3
+    AND (SELECT bool_and(c.relrowsecurity) FROM target t
+      JOIN pg_class c ON c.oid = to_regclass('public.' || t.table_name))
+    AND (SELECT bool_and(has_table_privilege('service_role', c.oid, 'SELECT'))
+      FROM target t JOIN pg_class c ON c.oid = to_regclass('public.' || t.table_name))
+    AND (SELECT bool_and(has_table_privilege('service_role', c.oid, 'INSERT'))
+      FROM target t JOIN pg_class c ON c.oid = to_regclass('public.' || t.table_name))
+    AND has_table_privilege('service_role', 'public.service_orders', 'UPDATE')
+    AND has_table_privilege('service_role', 'public.leads', 'UPDATE')
+    AND NOT has_table_privilege('service_role', 'public.service_enquiry_requests', 'UPDATE')
+    AND NOT EXISTS (
+      SELECT 1
+      FROM target t CROSS JOIN privilege p
+      WHERE has_table_privilege('anon', 'public.' || t.table_name, p.privilege_name)
+        OR has_table_privilege('authenticated', 'public.' || t.table_name, p.privilege_name)
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM target t
+      JOIN pg_class c ON c.oid = to_regclass('public.' || t.table_name)
+      CROSS JOIN privilege p
+      CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a
+      WHERE a.grantee = 0
+        AND a.privilege_type = p.privilege_name
+    )
   THEN 'PASS' ELSE 'FAIL' END || '|RLS and existing service_role/client grants'
-FROM pg_class c
-WHERE c.oid IN (
-  to_regclass('public.service_orders'),
-  to_regclass('public.service_enquiry_requests'),
-  to_regclass('public.leads')
-);
+;
 
 SELECT to_regclass('supabase_migrations.schema_migrations') IS NOT NULL
   AS migration_ledger_exists \gset

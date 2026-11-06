@@ -34,11 +34,10 @@ ALTER TABLE public.service_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.service_enquiry_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.service_orders, public.service_enquiry_requests FROM anon, authenticated, PUBLIC;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.service_orders, public.service_enquiry_requests TO service_role;
+GRANT SELECT, INSERT, UPDATE ON TABLE public.service_orders TO service_role;
+GRANT SELECT, INSERT ON TABLE public.service_enquiry_requests TO service_role;
 REVOKE ALL ON TABLE public.leads FROM anon, authenticated, PUBLIC;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.leads TO service_role;
-GRANT INSERT ON TABLE public.leads TO anon;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.leads TO authenticated;
 '@
 
 function Invoke-LocalSql {
@@ -60,13 +59,17 @@ function Assert-State {
   $output = Invoke-LocalSql -Content $sql
   $state = @($output | Where-Object { $_ -like 'CHECK|location_state|*' })
   $history = @($output | Where-Object { $_ -like 'CHECK|migration_history|*' })
+  $security = @($output | Where-Object { $_ -like 'CHECK|location_security|*' })
   if ($state.Count -ne 1 -or $state[0] -notmatch "\|$ExpectedState\|") {
     throw "$Label state failed: $($state -join '; ')"
   }
   if ($history.Count -ne 1 -or $history[0] -notmatch "\|$ExpectedHistory\|") {
     throw "$Label history failed: $($history -join '; ')"
   }
-  Write-Output "$Label PASS: $state; $history"
+  if ($security.Count -ne 1 -or $security[0] -notmatch '\|PASS\|') {
+    throw "$Label security baseline failed: $($security -join '; ')"
+  }
+  Write-Output "$Label PASS: $state; $security; $history"
 }
 
 try {
@@ -83,6 +86,13 @@ try {
   $migration = Get-Content -LiteralPath $migrationPath -Raw
   Assert-State -Label 'COMPLETE' -Fixture $migration -ExpectedState 'COMPLETE' -ExpectedHistory 'UNAVAILABLE'
   Assert-State -Label 'MISSING_LEDGER' -ExpectedState 'COMPLETE' -ExpectedHistory 'UNAVAILABLE'
+  Invoke-LocalSql -Content 'REVOKE UPDATE ON TABLE public.leads FROM service_role;' | Out-Null
+  $securityFailure = Invoke-LocalSql -Content $sql
+  $securityFailureCheck = @($securityFailure | Where-Object { $_ -like 'CHECK|location_security|*' })
+  if ($securityFailureCheck.Count -ne 1 -or $securityFailureCheck[0] -notmatch '\|FAIL\|') {
+    throw "GENUINE_SECURITY_FAILURE test failed: $($securityFailureCheck -join '; ')"
+  }
+  Write-Output "GENUINE_SECURITY_FAILURE PASS: $securityFailureCheck"
   Write-Output 'Optional customer location Production preflight diagnostic tests PASS.'
 }
 finally {
