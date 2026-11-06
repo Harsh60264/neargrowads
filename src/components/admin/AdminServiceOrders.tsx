@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { LoaderCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDollarSign, Clock3, LoaderCircle, PackageCheck, RefreshCw, ShieldCheck, UserRound } from 'lucide-react';
 import { billingTypeLabel, formatServicePrice } from '../../data/serviceCatalogue';
 
 interface ServiceOrder {
@@ -101,67 +101,53 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
     }
   };
 
-  return <section className="overflow-hidden rounded-2xl border border-[#304135] bg-[#19241D]">
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#304135] p-5">
-      <div><h2 className="font-semibold text-[#ECF3EE]">Orders &amp; Fulfilment</h2><p className="mt-1 text-xs text-[#A9B8AD]">Payment status is set only after server-side provider verification of the payment, amount, and INR currency.</p></div>
-      <button type="button" onClick={() => void loadOrders()} disabled={loading} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs text-[#C8D4CB] disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
+  const paidCount = orders.filter((order) => order.payment_status === 'paid').length;
+  const liveCount = orders.filter((order) => order.provider_mode === 'live').length;
+  const awaitingCount = orders.filter((order) => order.fulfillment_status === 'awaiting_payment').length;
+
+  return <section className="admin-orders space-y-5">
+    <header className="admin-module-header flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <p className="admin-eyebrow">Service Store · Operations</p>
+        <h2 className="admin-page-title">Orders &amp; Fulfilment</h2>
+        <p className="admin-page-subtitle">Review provider-verified payments and move eligible live orders through fulfilment.</p>
+      </div>
+      <button type="button" onClick={() => void loadOrders()} disabled={loading} className="admin-button-secondary inline-flex min-h-10 items-center gap-2">
+        <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh orders
+      </button>
     </header>
-    {error && <p role="alert" className="m-4 rounded-xl border border-rose-400/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">{error}</p>}
-    {notice && <p role="status" className="m-4 rounded-xl border border-emerald-400/25 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-200">{notice}</p>}
-    {loading ? <div className="grid min-h-48 place-items-center text-sm text-[#A9B8AD]"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" /> Loading orders…</div> : orders.length === 0
-      ? <p className="p-10 text-center text-sm text-[#A9B8AD]">No checkout orders yet. Enquiry requests remain available in the Enquiry Requests tab.</p>
-      : <div className="divide-y divide-[#304135]">
-        {orders.map((order) => <article key={order.id} className="space-y-4 p-4 sm:p-5">
-          <header className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-bold text-[#ECF3EE]">{order.order_reference}</p>
-              <p className="mt-1 text-[11px] text-[#91A195]">{orderDate(order.created_at)} · {order.provider === 'cashfree' ? `Cashfree ${order.provider_mode === 'live' ? 'Production' : 'Sandbox'}` : `${order.provider} · Test mode`}</p>
+    <div className="admin-order-kpis grid gap-3 sm:grid-cols-3">
+      <div className="admin-kpi-card"><span className="admin-kpi-icon admin-kpi-icon-green"><PackageCheck /></span><span><strong>{orders.length}</strong><small>Total orders</small></span></div>
+      <div className="admin-kpi-card"><span className="admin-kpi-icon admin-kpi-icon-blue"><CircleDollarSign /></span><span><strong>{paidCount}</strong><small>Provider-verified paid</small></span></div>
+      <div className="admin-kpi-card"><span className="admin-kpi-icon admin-kpi-icon-amber"><Clock3 /></span><span><strong>{liveCount - awaitingCount < 0 ? 0 : liveCount - awaitingCount}</strong><small>Live orders in fulfilment</small></span></div>
+    </div>
+    <div className="admin-order-integrity"><ShieldCheck className="h-4 w-4" /><span><strong>Payment integrity:</strong> payment status is set only after server-side provider verification of amount and INR currency. Test gateway records are never treated as revenue.</span></div>
+    {error && <p role="alert" className="admin-alert admin-alert-error">{error}</p>}
+    {notice && <p role="status" className="admin-alert admin-alert-success">{notice}</p>}
+    {loading ? <div className="admin-empty-state"><LoaderCircle className="h-5 w-5 animate-spin" /> Loading orders…</div> : orders.length === 0
+      ? <div className="admin-empty-state"><PackageCheck className="h-8 w-8" /><strong>No checkout orders yet</strong><span>Enquiry requests remain available in the Enquiry Requests tab.</span></div>
+      : <div className="admin-order-list">
+        {orders.map((order) => {
+          const isTest = order.provider_mode !== 'live';
+          const canFulfil = canEdit && !isTest && order.payment_status === 'paid';
+          return <article key={order.id} className="admin-order-card">
+            <header className="admin-order-card-header">
+              <div><p className="admin-order-reference">{order.order_reference}</p><p className="admin-muted">{orderDate(order.created_at)} · {order.provider === 'cashfree' ? `Cashfree ${isTest ? 'Sandbox' : 'Production'}` : `${order.provider} · Test mode`}</p></div>
+              <div className="admin-badge-row">
+                <span className={`admin-status-badge ${order.payment_status === 'paid' ? 'is-success' : order.payment_status === 'failed' ? 'is-danger' : 'is-warning'}`}>{order.payment_status === 'paid' ? <CheckCircle2 /> : <Clock3 />} Payment {order.payment_status}</span>
+                <span className="admin-status-badge is-neutral"><PackageCheck /> {order.fulfillment_status.replaceAll('_', ' ')}</span>
+                <span className={`admin-status-badge ${isTest ? 'is-info' : 'is-success'}`}>{isTest ? 'Test · no real funds' : 'Live gateway'}</span>
+                {order.provider === 'cashfree' && order.cashfree_reconciliation_required && <span className="admin-status-badge is-danger"><AlertTriangle /> Reconciliation needed</span>}
+              </div>
+            </header>
+            <div className="admin-order-grid">
+              <section className="admin-order-panel"><p className="admin-panel-label"><UserRound /> Customer</p><p className="admin-order-customer">{order.customer_name}</p>{order.customer_business_name && <p className="admin-muted">{order.customer_business_name}</p>}<a href={`mailto:${encodeURIComponent(order.customer_email)}`}>{order.customer_email}</a><a href={`tel:${encodeURIComponent(order.customer_phone)}`}>{order.customer_phone}</a>{order.customer_onboarding_notes && <p className="admin-muted admin-order-notes">{order.customer_onboarding_notes}</p>}</section>
+              <section className="admin-order-panel"><p className="admin-panel-label"><PackageCheck /> Package details</p>{order.line_items.map((item, index) => <div key={`${item.packageCode}-${index}`} className="admin-line-item"><span>{item.title}{item.packageCode ? ` (${item.packageCode})` : ''}{item.quantity > 1 ? ` × ${item.quantity}` : ''}<small>{item.billingArrangement === 'single_cycle' ? 'Single monthly cycle' : item.billingArrangement === 'single_session' ? 'Single session' : billingTypeLabel[item.billingType]}</small></span><strong>{formatServicePrice(item.lineSubtotalInr)}</strong></div>)}<div className="admin-order-total"><span>Order total</span><strong>{formatServicePrice(order.total_amount_paise / 100)}</strong></div></section>
+              <section className="admin-order-panel admin-order-fulfilment"><p className="admin-panel-label"><ShieldCheck /> Fulfilment control</p>{canFulfil ? <label>Current status<select disabled={busyId === order.id} value={order.fulfillment_status} onChange={(event) => void updateFulfillment(order, event.target.value as ServiceOrder['fulfillment_status'])}>{statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}</select></label> : <p className="admin-muted">{isTest ? 'Test orders cannot be fulfilled.' : order.payment_status !== 'paid' ? 'Awaiting provider-verified payment.' : 'Fulfilment changes require edit permission.'}</p>}</section>
             </div>
-            <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase">
-              <span className={`rounded-full px-2.5 py-1 ${order.payment_status === 'paid' ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200'}`}>Payment {order.payment_status}</span>
-              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[#C8D4CB]">{order.fulfillment_status.replaceAll('_', ' ')}</span>
-              <span className="rounded-full bg-sky-400/10 px-2.5 py-1 text-sky-200">Test · no real funds</span>
-              {order.provider === 'cashfree' && order.cashfree_reconciliation_required && <span className="rounded-full bg-rose-400/10 px-2.5 py-1 text-rose-200">Reconciliation needed</span>}
-            </div>
-          </header>
-          <div className="grid gap-4 sm:grid-cols-[1fr_1.3fr_auto]">
-            <div className="text-xs text-[#C8D4CB]">
-              <p className="font-semibold text-[#ECF3EE]">{order.customer_name}</p>
-              {order.customer_business_name && <p className="mt-1">{order.customer_business_name}</p>}
-              <a className="mt-1 block break-all text-[#9FD9A9]" href={`mailto:${encodeURIComponent(order.customer_email)}`}>{order.customer_email}</a>
-              <a className="mt-1 block text-[#A9B8AD]" href={`tel:${encodeURIComponent(order.customer_phone)}`}>{order.customer_phone}</a>
-              {order.customer_onboarding_notes && <p className="mt-2 whitespace-pre-wrap text-[#A9B8AD]">Onboarding: {order.customer_onboarding_notes}</p>}
-            </div>
-            <div className="space-y-1 text-xs text-[#C8D4CB]">
-              {order.line_items.map((item, index) => <div key={`${item.packageCode}-${index}`} className="flex justify-between gap-4">
-                <span>{item.title}{item.packageCode ? ` (${item.packageCode})` : ''}{item.quantity > 1 ? ` × ${item.quantity}` : ''} · {item.billingArrangement === 'single_cycle' ? 'single monthly cycle' : item.billingArrangement === 'single_session' ? 'single session' : billingTypeLabel[item.billingType].toLowerCase()}</span>
-                <span className="shrink-0">{formatServicePrice(item.lineSubtotalInr)}</span>
-              </div>)}
-              <p className="border-t border-[#304135] pt-2 font-bold text-[#ECF3EE]">Order total: {formatServicePrice(order.total_amount_paise / 100)}</p>
-              {order.provider_order_id && <p className="break-all text-[10px] text-[#91A195]">{order.provider === 'cashfree' ? 'Merchant order reference' : 'Razorpay order'}: {order.provider_order_id}</p>}
-              {order.provider === 'cashfree' && order.cashfree_order_id && <p className="break-all text-[10px] text-[#91A195]">Cashfree order reference: {order.cashfree_order_id}</p>}
-              {order.provider_payment_id && <p className="break-all text-[10px] text-[#91A195]">Verified payment reference: {order.provider_payment_id}</p>}
-              {order.provider === 'cashfree' && (order.cashfree_payment_attempts || []).length > 0 && <div className="mt-2 rounded-lg border border-[#304135] p-2.5">
-                <p className="font-semibold text-[#ECF3EE]">Cashfree payment attempts</p>
-                {order.cashfree_payment_attempts?.map((attempt) => <p key={attempt.providerPaymentId} className="mt-1 break-all text-[10px] text-[#A9B8AD]">
-                  {attempt.providerPaymentId} · {attempt.status} · {attempt.currency} {formatServicePrice(attempt.amountPaise / 100)} · {orderDate(attempt.lastSeenAt)}
-                </p>)}
-              </div>}
-              {order.provider === 'cashfree' && order.cashfree_reconciliation_required && <div role="alert" className="mt-2 rounded-lg border border-rose-400/20 bg-rose-950/20 p-2.5 text-[10px] text-rose-200">
-                Reconciliation reason: {(order.cashfree_reconciliation_reasons || []).map((reason) => reason.replaceAll('_', ' ')).join(', ')}
-              </div>}
-              {order.provider === 'cashfree' && (order.cashfree_webhook_events || []).length > 0 && <div className="mt-2 text-[10px] text-[#91A195]">
-                Recent verified webhook handling: {order.cashfree_webhook_events?.slice(0, 3).map((event) => `${event.eventType.replaceAll('_', ' ')} · ${event.processingStatus}`).join(' / ')}
-              </div>}
-            </div>
-            {canEdit && order.provider_mode === 'live' && order.payment_status === 'paid' && <label className="text-[10px] font-semibold uppercase text-[#91A195]">Fulfilment status
-              <select disabled={busyId === order.id} value={order.fulfillment_status} onChange={(event) => void updateFulfillment(order, event.target.value as ServiceOrder['fulfillment_status'])} className="mt-1.5 min-h-10 rounded-lg border border-[#33453A] bg-[#101913] px-3 text-xs normal-case text-[#ECF3EE]">
-                {statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
-              </select>
-            </label>}
-          </div>
-          <p className="text-[10px] leading-5 text-[#91A195]">This order is from the Test gateway. It represents no real payment and must not be fulfilled as a paid customer order.</p>
-        </article>)}
+            <details className="admin-order-timeline"><summary>Payment verification &amp; webhook activity</summary><div className="admin-timeline">{order.provider_payment_id && <p><CheckCircle2 /> Verified payment reference: <code>{order.provider_payment_id}</code></p>}{order.provider === 'cashfree' && order.cashfree_payment_attempts?.map((attempt) => <p key={attempt.providerPaymentId}><Clock3 /> Payment attempt · {attempt.status} · {attempt.currency} {formatServicePrice(attempt.amountPaise / 100)} · {orderDate(attempt.lastSeenAt)}</p>)}{order.provider === 'cashfree' && order.cashfree_webhook_events?.map((event) => <p key={`${event.eventType}-${event.receivedAt}`}><ShieldCheck /> {event.eventType.replaceAll('_', ' ')} · {event.processingStatus} · {orderDate(event.receivedAt)}</p>)}{!order.provider_payment_id && !order.cashfree_payment_attempts?.length && !order.cashfree_webhook_events?.length && <p className="admin-muted">No provider payment or webhook activity recorded.</p>}</div></details>
+          </article>;
+        })}
       </div>}
   </section>;
 }

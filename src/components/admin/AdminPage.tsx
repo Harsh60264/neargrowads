@@ -916,7 +916,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const contactedCount = leads.filter((lead) => lead.status === 'contacted').length;
 
   return (
-    <main className="admin-portal min-h-screen" data-admin-theme="dark" data-admin-ready="true">
+    <main className="admin-portal min-h-screen" data-admin-theme={theme} data-admin-ready="true">
       <div className="min-h-screen w-full max-w-full lg:flex" inert={sessionExpired}>
         <header className="flex items-center justify-between border-b border-white/10 bg-[#14251A] px-4 py-3 text-white lg:hidden">
           <a href="/" aria-label="NearGrow Ads home" className="flex min-w-0 items-center gap-3">
