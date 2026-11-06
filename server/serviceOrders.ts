@@ -1,4 +1,5 @@
 export type ServiceBillingType = 'monthly' | 'one_time' | 'per_session';
+import { validateCustomerLocation, type CustomerLocation } from '../src/data/customerLocation';
 
 export interface ServiceOrderInput {
   customerName: string;
@@ -6,6 +7,7 @@ export interface ServiceOrderInput {
   customerPhone: string;
   customerBusinessName: string;
   onboardingNotes: string;
+  location?: CustomerLocation;
   consent: true;
   packages: { packageId: string; quantity: number }[];
 }
@@ -67,7 +69,9 @@ export function validateServiceOrder(value: unknown): ServiceOrderInput | undefi
     seenIds.add(item.packageId);
     packages.push({ packageId: item.packageId, quantity: item.quantity as number });
   }
-  return { customerName, customerEmail, customerPhone, customerBusinessName, onboardingNotes, consent: true, packages };
+  const location = input.location === undefined ? undefined : validateCustomerLocation(input.location);
+  if (input.location !== undefined && !location) return undefined;
+  return { customerName, customerEmail, customerPhone, customerBusinessName, onboardingNotes, consent: true, packages, location };
 }
 
 export function buildServiceOrderLines(

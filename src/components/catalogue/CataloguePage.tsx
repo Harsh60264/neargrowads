@@ -34,6 +34,8 @@ import {
   type ServicePackage,
 } from '../../data/serviceCatalogue';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
+import { OptionalLocationPicker } from '../forms/OptionalLocationPicker';
+import type { CustomerLocation } from '../../data/customerLocation';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
 import { publicText } from '../../data/publicCopy';
 import {
@@ -1150,6 +1152,7 @@ function ServiceEnquiryDialog({ target, whatsappNumber, onClose }: {
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerBusinessName, setCustomerBusinessName] = useState('');
   const [requestNote, setRequestNote] = useState('');
+  const [location, setLocation] = useState<CustomerLocation>();
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -1178,6 +1181,7 @@ function ServiceEnquiryDialog({ target, whatsappNumber, onClose }: {
           customerBusinessName,
           serviceInterest,
           requestNote,
+          location,
           consent,
           packages: item ? [{ packageId: item.id, quantity: 1 }] : [],
         }),
@@ -1240,6 +1244,7 @@ function ServiceEnquiryDialog({ target, whatsappNumber, onClose }: {
             <label className="block text-xs font-semibold">Message or specific requirements (optional)
               <textarea maxLength={1000} value={requestNote} onChange={(event) => setRequestNote(event.target.value)} placeholder="Share a little about your goals or questions." className="mt-1.5 min-h-24 w-full rounded-xl border bg-transparent p-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
             </label>
+            <OptionalLocationPicker value={location} onChange={setLocation} />
             <label className="flex items-start gap-2.5 text-xs leading-5 text-[var(--brand-text-muted)]">
               <input required type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-[#3EA259]" />
               <span>I agree that NearGrow Ads may use these details to respond to this enquiry, as described in the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-[#70BE55] underline">Privacy Policy</a>.</span>
@@ -1413,6 +1418,7 @@ function CheckoutDialog({ entries, onPaid, onClose }: {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerBusinessName, setCustomerBusinessName] = useState('');
   const [onboardingNotes, setOnboardingNotes] = useState('');
+  const [location, setLocation] = useState<CustomerLocation>();
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -1452,6 +1458,7 @@ function CheckoutDialog({ entries, onPaid, onClose }: {
           customerPhone,
           customerBusinessName,
           onboardingNotes,
+          location,
           consent,
           packages: entries.map(({ item, quantity }) => ({ packageId: item.id, quantity })),
         }),
@@ -1581,6 +1588,7 @@ function CheckoutDialog({ entries, onPaid, onClose }: {
         <label className="block text-xs font-semibold">Onboarding information (optional)
           <textarea maxLength={2000} value={onboardingNotes} onChange={(event) => setOnboardingNotes(event.target.value)} placeholder="Share relevant goals or onboarding details." className="mt-1.5 min-h-24 w-full rounded-xl border bg-transparent p-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
         </label>
+        <OptionalLocationPicker value={location} onChange={setLocation} />
         <label className="flex items-start gap-2.5 text-xs leading-5 text-[var(--brand-text-muted)]">
           <input required type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-[#3EA259]" />
           <span>I agree that NearGrow Ads may use these details to process this Test checkout and respond about the service, as described in the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-[#70BE55] underline">Privacy Policy</a>. The email address is not independently verified by this checkout.</span>
@@ -1608,6 +1616,7 @@ function CashfreeCheckoutDialog({ entries, mode, onPaid, onClose }: {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerBusinessName, setCustomerBusinessName] = useState('');
   const [onboardingNotes, setOnboardingNotes] = useState('');
+  const [location, setLocation] = useState<CustomerLocation>();
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -1711,6 +1720,7 @@ function CashfreeCheckoutDialog({ entries, mode, onPaid, onClose }: {
         customerPhone,
         customerBusinessName,
         onboardingNotes,
+        location,
         packages: entries.map(({ item, quantity }) => ({ packageId: item.id, quantity })),
       };
       const attempt = await getOrCreateCashfreeAttempt(snapshot, window.sessionStorage, globalThis.crypto, mode);

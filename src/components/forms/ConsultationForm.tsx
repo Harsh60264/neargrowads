@@ -6,6 +6,8 @@ import type { SiteContent } from '../../data/siteContent';
 import { DEFAULT_SITE_CONTENT } from '../../data/siteContent';
 import { getCtaDestination } from '../../data/publicLinks';
 import { getLeadTracking } from '../../data/leadTracking';
+import { OptionalLocationPicker } from './OptionalLocationPicker';
+import type { CustomerLocation } from '../../data/customerLocation';
 import {
   validateConsultationForm,
   type ConsultationFormValidationMessages,
@@ -27,6 +29,7 @@ export interface LeadSubmissionPayload {
   utmSource?: string;
   utmMedium?: string;
   utmCampaign?: string;
+  location?: CustomerLocation;
   _hpTrap?: string; // honeypot
 }
 
@@ -68,6 +71,7 @@ export const ConsultationForm: React.FC<ConsultationFormProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [location, setLocation] = useState<CustomerLocation>();
 
   // Capture UTM parameters and current path
   const [tracking, setTracking] = useState<{
@@ -124,6 +128,7 @@ export const ConsultationForm: React.FC<ConsultationFormProps> = ({
     const payload: LeadSubmissionPayload = {
       submissionId: submissionId.current,
       ...formData,
+      location,
       ...tracking,
       email: formData.email.trim().toLowerCase(),
       name: formData.name.trim(),
@@ -423,6 +428,7 @@ export const ConsultationForm: React.FC<ConsultationFormProps> = ({
           </label>
           {errors.consent && <p id="consultation-consent-error" className="text-xs text-red-500 mt-1">{errors.consent}</p>}
         </div>
+        <OptionalLocationPicker value={location} onChange={setLocation} />
 
         {/* Submit button */}
         <div className="pt-2">

@@ -20,6 +20,7 @@ import {
   validateServiceOrder,
   type ServiceOrderInput,
 } from './server/serviceOrders.ts';
+import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
 import { canAccessServiceStoreAction, serviceStoreAdminAction } from './server/serviceStoreAuthorization.ts';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { once } from 'node:events';
@@ -177,6 +178,25 @@ const SERVICE_ENQUIRY_MAX_ATTEMPTS = 5;
 let warnedAdminAccountMigrationMissing = false;
 let warnedSiteContentMigrationMissing = false;
 
+function readCustomerLocation(row: Record<string, unknown>): CustomerLocation | undefined {
+  return validateCustomerLocation({
+    latitude: typeof row.customer_location_latitude === 'string' ? Number(row.customer_location_latitude) : row.customer_location_latitude,
+    longitude: typeof row.customer_location_longitude === 'string' ? Number(row.customer_location_longitude) : row.customer_location_longitude,
+    accuracyMeters: typeof row.customer_location_accuracy_meters === 'string' ? Number(row.customer_location_accuracy_meters) : row.customer_location_accuracy_meters,
+    capturedAt: row.customer_location_captured_at,
+    locality: row.customer_location_locality,
+    consent: row.customer_location_consent,
+  });
+}
+
+function withCustomerLocation(row: Record<string, unknown>): Record<string, unknown> {
+  const { customer_location_latitude: _latitude, customer_location_longitude: _longitude,
+    customer_location_accuracy_meters: _accuracy, customer_location_locality: _locality,
+    customer_location_captured_at: _capturedAt, customer_location_consent: _consent, ...safeRow } = row;
+  const location = readCustomerLocation(row);
+  return location ? { ...safeRow, location } : safeRow;
+}
+
 // In-memory lead buffer (for local inspection and logging)
 interface StoredLead {
   id: string;
@@ -197,6 +217,7 @@ interface StoredLead {
   utmCampaign?: string;
   createdAt: string;
   updatedAt?: string;
+  location?: CustomerLocation;
   status: 'new' | 'reviewed' | 'contacted';
 }
 
@@ -1399,6 +1420,7 @@ interface ServiceEnquiryInput {
   customerBusinessName: string;
   serviceInterest: string;
   requestNote: string;
+  location?: CustomerLocation;
   consent: true;
   packages: { packageId: string; quantity: number }[];
 }
@@ -1423,6 +1445,7 @@ interface ServiceEnquiryRequest {
     lineSubtotalInr: number;
   }[];
   requestNote: string;
+  location?: CustomerLocation;
   status: 'received' | 'in_progress' | 'closed';
   createdAt: string;
 }
@@ -1436,11 +1459,13 @@ function validateServiceEnquiry(value: unknown): ServiceEnquiryInput | undefined
   const customerBusinessName = typeof input.customerBusinessName === 'string' ? input.customerBusinessName.trim() : '';
   const serviceInterest = typeof input.serviceInterest === 'string' ? input.serviceInterest.trim() : '';
   const requestNote = typeof input.requestNote === 'string' ? input.requestNote.trim() : '';
+  const location = input.location === undefined ? undefined : validateCustomerLocation(input.location);
   if (customerName.length < 2 || customerName.length > 120 ||
     (customerEmail && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) || customerEmail.length > 255)) ||
     !/^[+0-9().\s-]{7,25}$/.test(customerPhone) || customerBusinessName.length > 160 ||
     serviceInterest.length > 120 || !serviceInterest ||
     requestNote.length > 1000 || input.consent !== true ||
+    (input.location !== undefined && !location) ||
     !Array.isArray(input.packages) || input.packages.length > 12 ||
     (input.packages.length === 0 && !serviceInterest)) return undefined;
   const packages: ServiceEnquiryInput['packages'] = [];
@@ -1455,10 +1480,11 @@ function validateServiceEnquiry(value: unknown): ServiceEnquiryInput | undefined
     seenIds.add(packageEntry.packageId);
     packages.push({ packageId: packageEntry.packageId, quantity: packageEntry.quantity as number });
   }
-  return { customerName, customerEmail, customerPhone, customerBusinessName, serviceInterest, requestNote, consent: true, packages };
+  return { customerName, customerEmail, customerPhone, customerBusinessName, serviceInterest, requestNote, consent: true, packages, location };
 }
 
 function fromSupabaseServiceEnquiry(row: Record<string, unknown>): ServiceEnquiryRequest {
+  const location = readCustomerLocation(row);
   const selectedPackages = Array.isArray(row.selected_packages)
     ? row.selected_packages.filter((entry): entry is ServiceEnquiryRequest['selectedPackages'][number] =>
       Boolean(entry && typeof entry === 'object' &&
@@ -1476,6 +1502,7 @@ function fromSupabaseServiceEnquiry(row: Record<string, unknown>): ServiceEnquir
     serviceInterest: String(row.service_interest || ''),
     selectedPackages,
     requestNote: String(row.request_note || ''),
+    ...(location ? { location } : {}),
     status,
     createdAt: String(row.created_at),
   };
@@ -1517,6 +1544,12 @@ async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ reque
         consent: input.consent,
         selected_packages: selectedPackages,
         request_note: input.requestNote,
+        customer_location_latitude: input.location?.latitude ?? null,
+        customer_location_longitude: input.location?.longitude ?? null,
+        customer_location_accuracy_meters: input.location?.accuracyMeters ?? null,
+        customer_location_locality: input.location?.locality ?? null,
+        customer_location_captured_at: input.location?.capturedAt ?? null,
+        customer_location_consent: Boolean(input.location),
       }),
     }),
   );
@@ -1764,6 +1797,12 @@ async function createServiceOrder(input: ServiceOrderInput): Promise<{
         total_amount_paise: amountPaise,
         provider_order_id: providerBody.id,
         provider_snapshot: snapshot,
+        customer_location_latitude: input.location?.latitude ?? null,
+        customer_location_longitude: input.location?.longitude ?? null,
+        customer_location_accuracy_meters: input.location?.accuracyMeters ?? null,
+        customer_location_locality: input.location?.locality ?? null,
+        customer_location_captured_at: input.location?.capturedAt ?? null,
+        customer_location_consent: Boolean(input.location),
       }),
     }),
   );
@@ -4170,6 +4209,7 @@ async function ensurePrimaryOwnerAccount(): Promise<void> {
 }
 
 function fromSupabaseLead(row: Record<string, unknown>): StoredLead {
+  const location = readCustomerLocation(row);
   return {
     id: String(row.id),
     name: String(row.name || ''),
@@ -4190,6 +4230,7 @@ function fromSupabaseLead(row: Record<string, unknown>): StoredLead {
     utmCampaign: row.utm_campaign ? String(row.utm_campaign) : undefined,
     createdAt: String(row.created_at),
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : undefined,
+    ...(location ? { location } : {}),
     status: row.status === 'reviewed' || row.status === 'contacted' ? row.status : 'new',
   };
 }
@@ -4298,6 +4339,12 @@ async function saveLeadToSupabase(lead: StoredLead): Promise<void> {
       utm_medium: lead.utmMedium,
       utm_campaign: lead.utmCampaign,
       status: lead.status,
+      customer_location_latitude: lead.location?.latitude ?? null,
+      customer_location_longitude: lead.location?.longitude ?? null,
+      customer_location_accuracy_meters: lead.location?.accuracyMeters ?? null,
+      customer_location_locality: lead.location?.locality ?? null,
+      customer_location_captured_at: lead.location?.capturedAt ?? null,
+      customer_location_consent: Boolean(lead.location),
     }),
   });
   await ensureLeadResponse(response, 'insert');
@@ -4340,7 +4387,8 @@ function isSameLeadSubmission(existing: StoredLead, submitted: StoredLead): bool
     existing.consentStatus === submitted.consentStatus &&
     existing.utmSource === submitted.utmSource &&
     existing.utmMedium === submitted.utmMedium &&
-    existing.utmCampaign === submitted.utmCampaign;
+    existing.utmCampaign === submitted.utmCampaign &&
+    JSON.stringify(existing.location) === JSON.stringify(submitted.location);
 }
 
 async function readSupabaseLeads(options: {
@@ -9750,9 +9798,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     if (!requireAdmin(req, res)) return;
     try {
       const rows = await servicePackageResponse<Record<string, unknown>[]>(
-        await supabaseAdminRequest('rest/v1/service_orders?select=id,order_reference,customer_name,customer_email,customer_phone,customer_business_name,customer_onboarding_notes,line_items,total_amount_paise,currency,provider,provider_mode,provider_order_id,provider_payment_id,payment_status,fulfillment_status,provider_snapshot,paid_at,created_at,updated_at&order=created_at.desc&limit=100'),
+        await supabaseAdminRequest('rest/v1/service_orders?select=id,order_reference,customer_name,customer_email,customer_phone,customer_business_name,customer_onboarding_notes,line_items,total_amount_paise,currency,provider,provider_mode,provider_order_id,provider_payment_id,payment_status,fulfillment_status,provider_snapshot,paid_at,created_at,updated_at,customer_location_latitude,customer_location_longitude,customer_location_accuracy_meters,customer_location_locality,customer_location_captured_at,customer_location_consent&order=created_at.desc&limit=100'),
       );
-      const orders = await enrichCashfreeAdminOrders(rows, (path) => supabaseAdminRequest(path));
+      const orders = await enrichCashfreeAdminOrders(rows.map(withCustomerLocation), (path) => supabaseAdminRequest(path));
       res.setHeader('Cache-Control', 'no-store');
       res.json({ orders });
     } catch (error) {
@@ -10945,6 +10993,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         utmSource,
         utmMedium,
         utmCampaign,
+        location: rawLocation,
         _hpTrap,
       } = req.body;
 
@@ -10998,6 +11047,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(400).json({ success: false, message: 'Please provide a message of at least 10 characters.' });
         return;
       }
+      const location = rawLocation === undefined ? undefined : validateCustomerLocation(rawLocation);
+      if (rawLocation !== undefined && !location) {
+        res.status(400).json({ success: false, message: 'The shared location details are invalid. Remove the location and try again.' });
+        return;
+      }
 
       const storage = leadStorageMode();
       const leadId = String(submissionId);
@@ -11020,6 +11074,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         utmCampaign: utmCampaign ? String(utmCampaign).slice(0, 80) : undefined,
         createdAt: new Date().toISOString(),
         status: 'new',
+        ...(location ? { location } : {}),
       };
 
       const existingMemoryLead = memoryLeads.find((lead) => lead.id === leadId);

@@ -3,12 +3,15 @@ export interface CashfreeCartItem {
   quantity: number;
 }
 
+import type { CustomerLocation } from '../../data/customerLocation';
+
 export interface CashfreeCustomer {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
   customerBusinessName: string;
   onboardingNotes: string;
+  location?: CustomerLocation;
 }
 
 export interface CashfreeCheckoutSnapshot extends CashfreeCustomer {
@@ -86,6 +89,7 @@ export async function cashfreeSnapshotFingerprint(
     customerPhone: snapshot.customerPhone.trim(),
     customerBusinessName: snapshot.customerBusinessName.trim(),
     onboardingNotes: snapshot.onboardingNotes.trim(),
+    location: snapshot.location,
     packages: [...snapshot.packages]
       .map(({ packageId, quantity }) => ({ packageId, quantity }))
   });
