@@ -9,6 +9,7 @@ import { TeamPhotoAdjustmentControls } from './TeamPhotoAdjustmentControls';
 interface Props {
   onBack: () => void;
   theme?: 'light' | 'dark';
+  themePreset?: string;
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
@@ -68,7 +69,7 @@ async function prepareImage(file: File): Promise<Blob> {
 const reindex = (list: TeamMember[]): TeamMember[] =>
   GROUPS.flatMap(({ key }) => list.filter((m) => m.group === key).map((m, i) => ({ ...m, order: i + 1 })));
 
-export function AdminTeamManager({ onBack, theme = 'dark', canCreate = true, canEdit = true, canDelete = true }: Props) {
+export function AdminTeamManager({ onBack, theme = 'dark', themePreset = 'original-cms-dark', canCreate = true, canEdit = true, canDelete = true }: Props) {
   const [members, setMembers] = useState<TeamMember[]>(() => sortTeam(TEAM_SEED));
   const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string>(TEAM_SEED[0]?.id ?? '');
@@ -336,7 +337,7 @@ export function AdminTeamManager({ onBack, theme = 'dark', canCreate = true, can
   const counts = useMemo(() => Object.fromEntries(GROUPS.map(({ key }) => [key, members.filter((m) => m.group === key && m.visible).length])), [members]);
 
   return (
-    <main className="admin-portal admin-team-manager min-h-screen" data-admin-theme={theme}>
+    <main className="admin-portal admin-team-manager min-h-screen" data-admin-theme={theme} data-admin-theme-preset={themePreset}>
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9">
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>

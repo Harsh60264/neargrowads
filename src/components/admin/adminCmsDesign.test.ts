@@ -8,8 +8,16 @@ const stylesheet = readFileSync(new URL('../../index.css', import.meta.url), 'ut
 
 test('admin theme follows the selected CMS theme without changing public routes', () => {
   assert.match(adminPageSource, /className="admin-portal min-h-screen" data-admin-theme=\{theme\}/);
+  assert.match(adminPageSource, /data-admin-theme-preset=\{themePreset\}/);
   assert.match(stylesheet, /\.admin-portal\[data-admin-theme='light'\]/);
   assert.match(stylesheet, /\.admin-portal\[data-admin-theme='dark'\]/);
+});
+
+test('premium CMS presets are selectable independently from public website themes', () => {
+  assert.match(adminPageSource, /themePreset\?: string/);
+  assert.match(ordersSource, /admin-order-card/);
+  assert.match(stylesheet, /data-admin-theme-preset='premium-cms-light'/);
+  assert.match(stylesheet, /data-admin-theme-preset='premium-cms-dark'/);
 });
 
 test('orders keep payment, fulfilment, test-mode and webhook states distinct', () => {

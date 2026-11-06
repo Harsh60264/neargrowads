@@ -460,6 +460,8 @@ export default function App() {
 
   const adminThemeControls = {
     theme: adminTheme,
+    themePreset: (parseAdminCmsThemeAssignments(siteContent.cmsThemeAssignments) ??
+      DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS)[adminTheme],
     onToggleTheme: () => setAdminTheme((current) => current === 'dark' ? 'light' : 'dark'),
   };
 

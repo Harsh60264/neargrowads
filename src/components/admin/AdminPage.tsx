@@ -172,13 +172,14 @@ export function shouldRefreshLeads({
   return authenticated && canViewLeads && section === 'leads' && now - lastFetchedAt >= refreshIntervalMs;
 }
 
-export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, onSiteContentSaved, theme = 'dark', onToggleTheme = () => {} }: {
+export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, onSiteContentSaved, theme = 'dark', themePreset = 'original-cms-dark', onToggleTheme = () => {} }: {
   section?: 'blog' | 'team' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'leads' | 'categories' | 'securityMonitoring' | 'settings' | 'serviceStore';
   blogMode?: 'list' | 'editor';
   isNewBlog?: boolean;
   onNavigate?: (path: string) => void;
   onSiteContentSaved?: (content: SiteContent) => void;
   theme?: 'light' | 'dark';
+  themePreset?: string;
   onToggleTheme?: () => void;
 }) {
   const themeToggle = (
@@ -874,13 +875,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
     session.user.permissions.securityMonitoring.edit === true
   );
   const moduleContent = section === 'team'
-    ? <AdminTeamManager onBack={() => navigate('/admin')} theme={theme} canCreate={hasAction('team', 'create')} canEdit={hasAction('team', 'edit')} canDelete={hasAction('team', 'delete')} />
+    ? <AdminTeamManager onBack={() => navigate('/admin')} theme={theme} themePreset={themePreset} canCreate={hasAction('team', 'create')} canEdit={hasAction('team', 'edit')} canDelete={hasAction('team', 'delete')} />
     : section === 'serviceStore'
       ? <AdminServiceStore onBack={() => navigate('/admin')} canCreate={hasAction('serviceStore', 'create')} canEdit={hasAction('serviceStore', 'edit')} canDelete={hasAction('serviceStore', 'delete')} canPublish={hasAction('serviceStore', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
     : section === 'blog'
       ? <AdminBlogManager mode={blogMode || 'list'} onBack={() => navigate('/admin')} onNavigate={navigate} canCreate={hasAction('blogs', 'create')} canEdit={hasAction('blogs', 'edit')} canDelete={hasAction('blogs', 'delete')} canPublish={hasAction('blogs', 'publish')} canViewCategories={hasView('categories')} />
       : section === 'content'
-        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded theme={theme} canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
+        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded theme={theme} themePreset={themePreset} canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
         : section === 'mascot'
           ? hasView('mascot')
             ? <AdminMascotSettings canEdit={hasAction('mascot', 'edit')} canPublish={hasAction('mascot', 'publish')} />
@@ -916,7 +917,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const contactedCount = leads.filter((lead) => lead.status === 'contacted').length;
 
   return (
-    <main className="admin-portal min-h-screen" data-admin-theme={theme} data-admin-ready="true">
+    <main className="admin-portal min-h-screen" data-admin-theme={theme} data-admin-theme-preset={themePreset} data-admin-ready="true">
       <div className="min-h-screen w-full max-w-full lg:flex" inert={sessionExpired}>
         <header className="flex items-center justify-between border-b border-white/10 bg-[#14251A] px-4 py-3 text-white lg:hidden">
           <a href="/" aria-label="NearGrow Ads home" className="flex min-w-0 items-center gap-3">
