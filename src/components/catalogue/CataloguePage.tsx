@@ -1288,6 +1288,7 @@ function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, p
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerBusinessName, setCustomerBusinessName] = useState('');
+  const [location, setLocation] = useState<CustomerLocation>();
   const [consent, setConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -1314,6 +1315,7 @@ function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, p
           customerEmail,
           customerPhone,
           customerBusinessName,
+          location,
           serviceInterest: [...new Set(cart.map(({ item }) => item.category))].length === 1
             ? cart[0]?.item.category || 'Multiple services'
             : 'Multiple services',
@@ -1383,6 +1385,7 @@ function CartDialog({ cart, setCart, remove, totalFor, note, setNote, message, p
               <label className="block text-xs font-semibold">Business name (optional)
                 <input maxLength={160} autoComplete="organization" value={customerBusinessName} onChange={(event) => setCustomerBusinessName(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
               </label>
+              <OptionalLocationPicker value={location} onChange={setLocation} />
               <label className="block text-xs font-semibold">What would you like us to know?
                 <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Share your goals or questions (optional)" className="mt-1.5 min-h-20 w-full rounded-xl border bg-transparent p-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
               </label>
@@ -1836,6 +1839,7 @@ function CashfreeCheckoutDialog({ entries, mode, onPaid, onClose }: {
         <label className="block text-xs font-semibold">Business name (optional)
           <input maxLength={160} autoComplete="organization" value={customerBusinessName} onChange={(event) => setCustomerBusinessName(event.target.value)} className="mt-1.5 min-h-11 w-full rounded-xl border bg-transparent px-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
         </label>
+        <OptionalLocationPicker value={location} onChange={setLocation} />
         <label className="block text-xs font-semibold">Onboarding information (optional)
           <textarea maxLength={2000} value={onboardingNotes} onChange={(event) => setOnboardingNotes(event.target.value)} placeholder="Share relevant goals or onboarding details." className="mt-1.5 min-h-24 w-full rounded-xl border bg-transparent p-3 text-sm outline-none focus:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }} />
         </label>
