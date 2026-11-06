@@ -25,12 +25,13 @@ import {
   Scissors,
   Wrench,
 } from 'lucide-react';
-import { DeferredMount } from './DeferredMount';
+import { ConsultationForm } from '../forms/ConsultationForm';
 import { SERVICES } from '../../data/servicesData';
 import type { BlogPost } from '../../data/blogData';
 import type { CaseStudy } from '../../data/caseStudiesData';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
+import { Skiper52Showcase } from './Skiper52Showcase';
 import { publicText } from '../../data/publicCopy';
 import { HOME_HERO_DARK_VIDEO_ID, HOME_HERO_LIGHT_VIDEO_ID, publicMedia } from '../../data/publicMedia';
 import { resolveHeroVideoSource, type HeroVideoSource, type HeroVideoTheme } from '../../data/heroVideo';
@@ -38,8 +39,6 @@ import { followPublicDestination, getCtaDestination } from '../../data/publicLin
 import heroVideo from '../../assets/media/neargrow_ads_kinetic_4x3.mp4';
 
 const GlobalReachSection = React.lazy(() => import('./GlobalReach'));
-const Skiper52Showcase = React.lazy(() => import('./Skiper52Showcase').then((module) => ({ default: module.Skiper52Showcase })));
-const ConsultationForm = React.lazy(() => import('../forms/ConsultationForm').then((module) => ({ default: module.ConsultationForm })));
 
 interface HomePageProps {
   onNavigate: (path: string) => void;
@@ -867,13 +866,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </button>
           </div>
 
-          {publishedCaseStudies.length > 0 && (
-            <DeferredMount rootMargin="900px 0px">
-              <React.Suspense fallback={null}>
-                <Skiper52Showcase onNavigate={onNavigate} media={siteContent.media} studies={publishedCaseStudies} theme={theme} />
-              </React.Suspense>
-            </DeferredMount>
-          )}
+          <Skiper52Showcase onNavigate={onNavigate} media={siteContent.media} studies={publishedCaseStudies} theme={theme} />
         </div>
       </section>
 
@@ -1232,14 +1225,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
             {/* Right Column: Interactive Consultation Form */}
             <div className="lg:col-span-7">
-              <DeferredMount
-                rootMargin="900px 0px"
-                fallback={<div className="min-h-[32rem]" aria-hidden="true" />}
-              >
-                <React.Suspense fallback={<div className="min-h-[32rem]" aria-hidden="true" />}>
-                  <ConsultationForm className="home-consultation-form" siteContent={siteContent} />
-                </React.Suspense>
-              </DeferredMount>
+              <ConsultationForm className="home-consultation-form" siteContent={siteContent} />
             </div>
           </div>
         </div>
@@ -1458,11 +1444,9 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      <DeferredMount rootMargin="1000px 0px">
-        <React.Suspense fallback={null}>
-          <GlobalReachSection media={siteContent.media} settings={siteContent.animations} theme={theme} />
-        </React.Suspense>
-      </DeferredMount>
+      <React.Suspense fallback={null}>
+        <GlobalReachSection media={siteContent.media} settings={siteContent.animations} theme={theme} />
+      </React.Suspense>
 
       {/* SECTION 16: TRUSTED TECHNOLOGY */}
       <section className="border-b border-white/10 bg-[#080E16] py-14 text-white">

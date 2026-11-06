@@ -11,7 +11,6 @@ import {
 } from './neoMascotInteractions.js';
 import { calculateMascotDockTarget } from './neoMascotDocking.js';
 import { createNeo2D } from './neo-2d.mjs';
-import { shouldRenderMascotFrame } from './animationTiming.js';
 
 const PI = Math.PI;
 const expressionTargets = {
@@ -314,8 +313,7 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     ? createNeo2D(svgHost, { autoplay: false, autoExpressions: false })
     : null;
 
-  const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let reducedMotion = reducedMotionQuery.matches;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   let width = 1;
   let height = 1;
   let size = 150;
@@ -340,7 +338,6 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   let lastFrame = performance.now();
   let frame = 0;
   let destroyed = false;
-  let inViewport = true;
   let visible = !document.hidden;
   let mode = 'idle';
   let modeTime = 0;
@@ -620,7 +617,6 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     frame = 0;
     if (destroyed || !visible) return;
     frame = requestAnimationFrame(animate);
-    if (!shouldRenderMascotFrame(now, lastFrame, reducedMotion)) return;
     const delta = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     elapsed += delta;
@@ -744,7 +740,7 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   };
   const start = () => {
     if (!frame && !destroyed && visible) {
-      lastFrame = performance.now() - 1000 / 60;
+      lastFrame = performance.now();
       frame = requestAnimationFrame(animate);
     }
   };
@@ -752,15 +748,8 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
   };
-  const updateMotionPreference = () => {
-    const nextPreference = reducedMotionQuery.matches;
-    if (reducedMotion === nextPreference) return;
-    reducedMotion = nextPreference;
-    stop();
-    start();
-  };
   const updateVisibility = () => {
-    visible = inViewport && !document.hidden;
+    visible = !document.hidden;
     if (visible) start();
     else stop();
   };
@@ -796,8 +785,7 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     }), { threshold: 0.6 });
   }
   sceneObserver = new IntersectionObserver(([entry]) => {
-    inViewport = entry.isIntersecting;
-    visible = inViewport && !document.hidden;
+    visible = entry.isIntersecting && !document.hidden;
     if (visible) start();
     else stop();
   }, { threshold: 0 });
@@ -825,7 +813,6 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     reconcilePointTargets();
   }
   document.addEventListener('visibilitychange', updateVisibility);
-  reducedMotionQuery.addEventListener('change', updateMotionPreference);
   start();
 
   return {
@@ -878,7 +865,6 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       window.removeEventListener('scroll', onScroll, true);
       interactionTracker?.cleanup();
       document.removeEventListener('visibilitychange', updateVisibility);
-      reducedMotionQuery.removeEventListener('change', updateMotionPreference);
       pointObserver?.disconnect();
       sceneObserver.disconnect();
       mutationObserver?.disconnect();
