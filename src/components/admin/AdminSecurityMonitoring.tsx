@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Clock3, LoaderCircle, LockKeyhole, Monitor, RefreshCw, Search, ShieldAlert, ShieldCheck, Smartphone, Tablet, UsersRound } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Clock3, Eye, LoaderCircle, LockKeyhole, Monitor, RefreshCw, Search, ShieldAlert, ShieldCheck, Smartphone, Tablet, UsersRound } from 'lucide-react';
 import { DEFAULT_SECURITY_RULES, type SecurityRuleSettings } from '../../../server/securityMonitoring';
 
 type Severity = 'low' | 'medium' | 'high' | 'critical';
@@ -234,13 +234,16 @@ export function AdminSecurityMonitoring({
 
   const counters = data?.counters;
   const statCards = [
-    { label: 'Security events · 30 days', value: counters?.totalEvents, icon: Activity, style: 'text-sky-300' },
-    { label: 'Failed logins · 30 days', value: counters?.failedLogins, icon: LockKeyhole, style: 'text-amber-300' },
+    { label: 'Security events · 30 days', value: counters?.totalEvents, icon: Activity, style: 'text-sky-300', accent: 'border-sky-400/25 bg-sky-400/[0.06]', isLoading: loading, unavailable: Boolean(error && !data) },
+    { label: 'Failed logins · 30 days', value: counters?.failedLogins, icon: LockKeyhole, style: 'text-amber-300', accent: 'border-amber-400/25 bg-amber-400/[0.06]', isLoading: loading, unavailable: Boolean(error && !data) },
     {
       label: 'Unauthorized API · 30 days',
       value: counters?.unauthorizedRequests,
       icon: ShieldAlert,
       style: 'text-orange-300',
+      accent: 'border-orange-400/25 bg-orange-400/[0.06]',
+      isLoading: loading,
+      unavailable: Boolean(error && !data),
       onClick: () => {
         setEventSearch('api.unauthorized');
         setSearchInput('api.unauthorized');
@@ -249,21 +252,36 @@ export function AdminSecurityMonitoring({
         window.setTimeout(() => document.getElementById('security-event-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
       },
     },
-    { label: 'Open suspicious indicators', value: counters?.suspiciousAlerts, icon: AlertTriangle, style: 'text-rose-300' },
-    { label: 'Active admin sessions', value: counters?.activeSessions, icon: UsersRound, style: 'text-emerald-300' },
+    { label: 'Open suspicious indicators', value: counters?.suspiciousAlerts, icon: AlertTriangle, style: 'text-rose-300', accent: 'border-rose-400/25 bg-rose-400/[0.06]', isLoading: loading, unavailable: Boolean(error && !data) },
+    { label: 'Active admin sessions', value: counters?.activeSessions, icon: UsersRound, style: 'text-emerald-300', accent: 'border-emerald-400/25 bg-emerald-400/[0.06]', isLoading: loading, unavailable: Boolean(error && !data) },
+    {
+      label: 'Live visitors · 5 min',
+      value: websiteActivity?.activeVisitors,
+      icon: Eye,
+      style: 'text-violet-300',
+      accent: 'border-violet-400/25 bg-violet-400/[0.06]',
+      isLoading: websiteActivityLoading,
+      unavailable: !websiteActivity && !websiteActivityLoading,
+    },
   ];
 
   return (
-    <section className="admin-security-monitoring space-y-4" aria-label="Security Monitoring Center">
-      <div className={`${panel} flex flex-wrap items-start justify-between gap-3`}>
-        <div>
-          <h2 className="flex items-center gap-2 text-base font-bold text-[#ECF3EE]"><ShieldCheck className="h-5 w-5 text-[#83D296]" /> Security Monitoring Center</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-[#A9B8AD]">
-            Live indicators from administrator authentication, authorization, access audit logs, and sessions. Alerts indicate suspicious patterns for review; they are not confirmation of an attack.
-          </p>
+    <section className="admin-security-monitoring space-y-5" aria-label="Security Monitoring Center">
+      <div className="security-monitoring-banner flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-5 shadow-sm sm:px-7 sm:py-6">
+        <div className="flex min-w-0 items-start gap-4">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-emerald-100 ring-1 ring-white/15">
+            <ShieldCheck className="h-6 w-6" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-100/75">NearGrow Ads · Security</p>
+            <h2 className="mt-1 text-lg font-bold tracking-tight text-white sm:text-xl">Security Monitoring Center</h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-emerald-50/80">
+              Live indicators from administrator authentication, authorization, access audit logs, and sessions. Alerts indicate suspicious patterns for review; they are not confirmation of an attack.
+            </p>
+          </div>
         </div>
-        <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs font-semibold text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50">
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3.5 text-xs font-semibold text-white transition-colors hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-50">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" /> Refresh
         </button>
       </div>
       {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/30 bg-rose-950/25 px-4 py-3 text-xs text-rose-200">
@@ -274,11 +292,31 @@ export function AdminSecurityMonitoring({
       </div>}
       {notice && <p role="status" className="rounded-xl border border-emerald-400/25 bg-emerald-950/20 px-4 py-3 text-xs text-emerald-200">{notice}</p>}
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6" aria-label="Security monitoring overview">
+        {statCards.map(({ label, value, icon: Icon, style, accent, isLoading, unavailable, onClick }) => {
+          const displayValue = value === undefined
+            ? isLoading ? '…' : unavailable ? 'Unavailable' : '—'
+            : value.toLocaleString('en-IN');
+          const className = `security-kpi-card flex min-h-24 flex-col justify-between rounded-2xl border p-3.5 shadow-sm transition-all sm:p-4 ${accent}`;
+          return onClick ? (
+            <button key={label} type="button" onClick={onClick} aria-label={`${label}: ${displayValue}. Show matching events.`} className={`${className} text-left hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400`}>
+              <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" />{label}</p>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-[#ECF3EE]">{displayValue}</p>
+            </button>
+          ) : (
+            <article key={label} className={className}>
+              <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" aria-hidden="true" />{label}</p>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-[#ECF3EE]">{displayValue}</p>
+            </article>
+          );
+        })}
+      </div>
+
       <section className={panel} aria-label="Live website activity" aria-live="polite">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="flex items-center gap-2 text-sm font-bold text-[#ECF3EE]"><Activity className="h-4 w-4 text-[#83D296]" /> Live website activity</h3>
-            <p className="mt-1 text-[10px] leading-4 text-[#A9B8AD]">Estimated distinct browsers active within the last 5 minutes.</p>
+            <h3 className="flex items-center gap-2 text-sm font-bold text-[#ECF3EE]"><Activity className="h-4 w-4 text-[#83D296]" aria-hidden="true" /> Live website activity</h3>
+            <p className="mt-1 text-[10px] leading-4 text-[#A9B8AD]">Anonymous public-site activity in the last five minutes. Admin-panel activity is excluded.</p>
           </div>
           <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-[10px] font-semibold text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50">
             <RefreshCw className={`h-3 w-3 ${websiteActivityRefreshing ? 'animate-spin' : ''}`} /> Refresh
@@ -290,43 +328,59 @@ export function AdminSecurityMonitoring({
             <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing} className="font-semibold underline disabled:opacity-50">Retry</button>
           </div>
         )}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3">
-            <p className="flex items-center gap-2 text-[10px] font-semibold text-emerald-300"><UsersRound className="h-4 w-4" /> Active website visitors · 5 min</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{websiteActivity ? websiteActivity.activeVisitors : websiteActivityLoading ? '…' : 'Unavailable'}</p>
-            <p className="mt-1 text-[9px] text-[#91A195]">Distinct anonymous browsers, not identified people.</p>
-          </article>
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3 sm:col-span-1 xl:col-span-2">
-            <p className="flex items-center gap-2 text-[10px] font-semibold text-sky-300"><Activity className="h-4 w-4" /> Most-viewed active pages · 5 min</p>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(260px,1fr)]">
+          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-4">
+            <p className="flex items-center gap-2 text-[10px] font-semibold text-sky-300"><Activity className="h-4 w-4" aria-hidden="true" /> Most-viewed active pages</p>
             {websiteActivity?.pages.length ? (
-              <ol className="mt-2 space-y-1.5">
+              <ol className="mt-3 space-y-3">
                 {websiteActivity.pages.slice(0, 5).map((page) => (
-                  <li key={page.path} className="flex items-center justify-between gap-3 text-[10px] text-[#C8D8CA]">
-                    <span className="min-w-0 truncate" title={page.path}>{page.path}</span><span className="shrink-0 font-semibold">{page.count}</span>
+                  <li key={page.path} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 text-[10px] text-[#C8D8CA]">
+                    <span className="min-w-0 truncate" title={page.path}>{page.path}</span>
+                    <span className="shrink-0 font-semibold tabular-nums">{page.count.toLocaleString('en-IN')}</span>
+                    <span className="security-activity-track col-span-2 h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                      <span className="block h-full rounded-full bg-sky-400" style={{ width: `${Math.max(3, (page.count / Math.max(1, ...websiteActivity.pages.map((item) => item.count))) * 100)}%` }} />
+                    </span>
                   </li>
                 ))}
               </ol>
             ) : websiteActivity ? (
-              <p className="mt-2 text-[10px] text-[#91A195]">No public visitors are active in this window.</p>
+              <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-4 py-6 text-center text-[10px] text-[#91A195]">No public pages are active in this window.</p>
             ) : (
-              <p className="mt-2 text-[10px] text-[#91A195]">{websiteActivityLoading ? 'Loading active pages…' : 'Active pages unavailable.'}</p>
+              <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-4 py-6 text-center text-[10px] text-[#91A195]">{websiteActivityLoading ? 'Loading active pages…' : 'Active pages unavailable.'}</p>
             )}
           </article>
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3">
-            <p className="text-[10px] font-semibold text-violet-300">Active visitor devices · 5 min</p>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              {([
-                ['Mobile', Smartphone, websiteActivity?.devices.mobile],
-                ['Desktop', Monitor, websiteActivity?.devices.desktop],
-                ['Tablet', Tablet, websiteActivity?.devices.tablet],
-              ] as const).map(([label, Icon, count]) => (
-                <div key={label} className="text-center text-[9px] text-[#A9B8AD]">
-                  <Icon className="mx-auto h-4 w-4 text-[#83D296]" />
-                  <p className="mt-1 font-semibold text-[#ECF3EE]">{count ?? (websiteActivityLoading ? '…' : '—')}</p>
-                  <p>{label}</p>
-                </div>
-              ))}
-            </div>
+          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-4">
+            <p className="text-[10px] font-semibold text-violet-300">Visitor devices</p>
+            {websiteActivity ? (() => {
+              const devices = [
+                ['Mobile', Smartphone, websiteActivity.devices.mobile, 'bg-emerald-400'],
+                ['Desktop', Monitor, websiteActivity.devices.desktop, 'bg-sky-400'],
+                ['Tablet', Tablet, websiteActivity.devices.tablet, 'bg-violet-400'],
+              ] as const;
+              const deviceTotal = devices.reduce((total, [, , count]) => total + count, 0);
+              return deviceTotal > 0 ? (
+                <>
+                  <div className="security-device-track mt-4 flex h-2.5 overflow-hidden rounded-full bg-white/10" role="img" aria-label={`Active visitor devices: ${devices.map(([label, , count]) => `${label} ${count}`).join(', ')}`}>
+                    {devices.map(([label, , count, color]) => count > 0 && (
+                      <span key={label} className={`h-full ${color}`} style={{ width: `${(count / deviceTotal) * 100}%` }} title={`${label}: ${count}`} />
+                    ))}
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    {devices.map(([label, Icon, count, color]) => (
+                      <div key={label} className="min-w-0 rounded-xl border border-[#304135] bg-[#19241D] p-2.5 text-center">
+                        <Icon className={`mx-auto h-4 w-4 ${color.replace('bg-', 'text-')}`} aria-hidden="true" />
+                        <p className="mt-1 text-sm font-bold tabular-nums text-[#ECF3EE]">{count.toLocaleString('en-IN')}</p>
+                        <p className="text-[9px] text-[#A9B8AD]">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-3 py-6 text-center text-[10px] text-[#91A195]">No device data in this activity window.</p>
+              );
+            })() : (
+              <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-3 py-6 text-center text-[10px] text-[#91A195]">{websiteActivityLoading ? 'Loading device activity…' : 'Device activity unavailable.'}</p>
+            )}
           </article>
         </div>
         <p className="mt-3 text-[9px] text-[#91A195]">
@@ -337,48 +391,46 @@ export function AdminSecurityMonitoring({
         </p>
       </section>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        {statCards.map(({ label, value, icon: Icon, style, onClick }) => onClick ? (
-          <button key={label} type="button" onClick={onClick} aria-label={`${label}: ${value ?? 'unavailable'}. Show matching events.`} className={`${panel} text-left transition-colors hover:border-orange-300/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-300`}>
-            <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" />{label}</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{loading && value === undefined ? '…' : error && !data ? 'Unavailable' : value ?? '—'}</p>
-          </button>
-        ) : (
-          <article key={label} className={panel}>
-            <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" />{label}</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{loading && value === undefined ? '…' : error && !data ? 'Unavailable' : value ?? '—'}</p>
-          </article>
-        ))}
-      </div>
-
       <section className={panel}>
-        <div className="flex items-center justify-between gap-3">
-          <div><h3 className="text-sm font-bold text-[#ECF3EE]">Security event timeline</h3><p className="mt-1 text-[10px] text-[#91A195]">Append-only events retained for 180 days; the chart shows observed events from the seven-day window.</p></div>
-          <Activity className="h-4 w-4 text-[#83D296]" />
+        <div className="flex items-start justify-between gap-3">
+          <div><h3 className="text-sm font-bold text-[#ECF3EE]">Security event timeline</h3><p className="mt-1 text-[10px] text-[#91A195]">Observed events by day for the seven-day chart window; records are retained for 180 days.</p></div>
+          <Activity className="mt-0.5 h-4 w-4 shrink-0 text-[#83D296]" aria-hidden="true" />
         </div>
-        <div className="mt-4 flex h-28 items-end gap-2 border-b border-[#304135] px-1">
-          {(data?.timelineDaily || []).map((day) => {
-            const maximum = Math.max(1, ...(data?.timelineDaily || []).map((item) => item.count));
-            const height = day.count ? Math.max(8, Math.round((day.count / maximum) * 100)) : 3;
-            return <div key={day.date} className="flex h-full flex-1 flex-col justify-end text-center">
-              <span className="mb-1 text-[9px] text-[#A9B8AD]">{day.count || ''}</span>
-              <span title={`${day.date}: ${day.count} events`} className={`mx-auto w-full max-w-10 rounded-t-md ${day.count ? 'bg-[#43A663]' : 'bg-[#304135]'}`} style={{ height: `${height}%` }} />
-              <span className="py-1 text-[9px] text-[#91A195]">{day.date.slice(5)}</span>
-            </div>;
-          })}
-          {!data && !loading && error && <p className="w-full pb-4 text-center text-xs text-rose-200">Timeline unavailable. Retry after resolving the data-loading error.</p>}
-          {data && data.timelineDaily.every((day) => day.count === 0) && <p className="w-full pb-4 text-center text-xs text-[#91A195]">No security events recorded in the chart window.</p>}
-        </div>
+        {data && data.timelineDaily.length > 0 ? (
+          data.timelineDaily.every((day) => day.count === 0) ? (
+            <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-4 py-8 text-center text-xs text-[#91A195]">No security events recorded in the chart window.</p>
+          ) : (
+            <div className="security-timeline-chart mt-5 grid grid-cols-7 gap-2 sm:gap-4" role="img" aria-label="Security events by day for the seven-day window">
+              {data.timelineDaily.map((day) => {
+                const maximum = Math.max(1, ...data.timelineDaily.map((item) => item.count));
+                const height = day.count ? Math.max(8, Math.round((day.count / maximum) * 100)) : 3;
+                return (
+                  <div key={day.date} className="flex min-w-0 flex-col items-center">
+                    <span className="mb-2 min-h-4 text-[9px] font-semibold tabular-nums text-[#A9B8AD]">{day.count ? day.count.toLocaleString('en-IN') : ''}</span>
+                    <div className="security-timeline-track flex h-28 w-full items-end overflow-hidden rounded-t-lg border-b border-[#304135] bg-white/[0.025]">
+                      <span title={`${day.date}: ${day.count} events`} className={`mx-auto block w-3/5 max-w-12 rounded-t-md transition-[height] ${day.count ? 'bg-[#43A663]' : 'bg-[#304135]'}`} style={{ height: `${height}%` }} />
+                    </div>
+                    <span className="mt-2 text-[9px] text-[#91A195]">{day.date.slice(5)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          <p className="mt-4 rounded-xl border border-dashed border-[#304135] px-4 py-8 text-center text-xs text-[#91A195]">
+            {!data && !loading && error ? 'Timeline unavailable. Retry after resolving the data-loading error.' : loading ? 'Loading the seven-day timeline…' : 'Timeline data is unavailable.'}
+          </p>
+        )}
       </section>
 
       {isPrimaryOwner && (
-        <section className={panel}>
+        <section className={`${panel} security-rules-panel`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><h3 className="text-sm font-bold text-[#ECF3EE]">Detection rules</h3><p className="mt-1 text-[10px] text-[#91A195]">Owner-controlled thresholds. Rule matches create review indicators, not confirmed-attack verdicts.</p></div>
-            <button type="button" disabled={!data || savingRules} onClick={() => setRulesDraft(DEFAULT_SECURITY_RULES)} className="text-[10px] font-semibold text-[#A9B8AD] underline disabled:opacity-40">Restore defaults</button>
+            {data && <p className="text-[10px] text-[#91A195]">Last saved {dateTime(data.rulesUpdatedAt)}</p>}
           </div>
           {data ? <>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="security-rules-grid mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {([
                 ['windowMinutes', 'Detection window (minutes)', 1, 1440],
                 ['failedLogins', 'Failed logins per account', 2, 100],
@@ -387,26 +439,29 @@ export function AdminSecurityMonitoring({
                 ['bulkLeadExportRecords', 'Large export threshold (records)', 10, 100000],
               ] as const).map(([key, label, min, max]) => (
                 <label key={key} className="space-y-1.5 text-[10px] font-semibold text-[#B8C7BC]">{label}
-                  <input type="number" min={min} max={max} disabled={savingRules} value={rulesDraft[key]} onChange={(event) => setRulesDraft((current) => ({ ...current, [key]: Number(event.target.value) }))} className={`${input} w-full disabled:opacity-50`} />
+                  <input type="number" min={min} max={max} disabled={savingRules} value={rulesDraft[key]} onChange={(event) => setRulesDraft((current) => ({ ...current, [key]: Number(event.target.value) }))} className={`${input} w-full tabular-nums disabled:opacity-50`} />
                 </label>
               ))}
-              <label className="flex items-center gap-2 self-end pb-2 text-[10px] text-[#B8C7BC]">
+              <label className="flex min-h-10 items-center gap-2 rounded-xl border border-[#304135] bg-[#121B15] px-3 py-2 text-[10px] text-[#B8C7BC]">
                 <input type="checkbox" disabled={savingRules} checked={rulesDraft.alertNonOwnerPrivilegeChanges} onChange={(event) => setRulesDraft((current) => ({ ...current, alertNonOwnerPrivilegeChanges: event.target.checked }))} />
                 Alert on delegated privileged account changes
               </label>
             </div>
-            <button type="button" onClick={() => void saveRules()} disabled={savingRules} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#286D3B] px-4 text-xs font-semibold text-white disabled:opacity-50">
-              {savingRules ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Save detection rules
-            </button>
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-[#304135] pt-4">
+              <button type="button" disabled={!data || savingRules} onClick={() => setRulesDraft(DEFAULT_SECURITY_RULES)} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#33453A] px-4 text-xs font-semibold text-[#C8D8CA] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 disabled:opacity-50">Restore defaults</button>
+              <button type="button" onClick={() => void saveRules()} disabled={savingRules} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-[#286D3B] px-4 text-xs font-semibold text-white transition-colors hover:bg-[#328148] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 disabled:opacity-50">
+                {savingRules ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" aria-hidden="true" />} Save detection rules
+              </button>
+            </div>
           </> : <p className="mt-4 text-xs text-[#91A195]">{loading ? 'Loading saved detection rules…' : 'Saved detection rules are unavailable. Default values have not been applied.'}</p>}
         </section>
       )}
 
-      <section className={panel}>
+      <section className={`${panel} security-indicators-panel`}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div><h3 className="text-sm font-bold text-[#ECF3EE]">Suspicious activity indicators</h3><p className="mt-1 text-[10px] text-[#91A195]">Repeated failures, denied access, bulk exports, and delegated privileged changes.</p></div>
-          <label className="text-[10px] font-semibold text-[#B8C7BC]">Alert status
-            <select value={alertStatus} onChange={(event) => { setAlertPage(1); setAlertStatus(event.target.value as AlertStatus | 'all'); }} className={`${input} ml-2`}>
+          <label className="security-alert-filter flex flex-col gap-1.5 text-[10px] font-semibold text-[#B8C7BC]">Alert status
+            <select value={alertStatus} onChange={(event) => { setAlertPage(1); setAlertStatus(event.target.value as AlertStatus | 'all'); }} className={input}>
               <option value="all">All history</option><option value="new">New</option><option value="investigating">Investigating</option><option value="resolved">Resolved</option>
             </select>
           </label>
@@ -427,7 +482,11 @@ export function AdminSecurityMonitoring({
               </div>
             </article>
           ))}
-          {data && !data.alerts.length && <p className="rounded-xl border border-dashed border-[#304135] p-5 text-center text-xs text-[#91A195]"><CheckCircle2 className="mx-auto mb-2 h-5 w-5 text-emerald-300" />No alert indicators match this filter.</p>}
+          {data && !data.alerts.length && <div className="rounded-xl border border-dashed border-[#304135] bg-[#121B15] px-5 py-8 text-center">
+            <span className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-emerald-950/30 text-emerald-300"><CheckCircle2 className="h-5 w-5" aria-hidden="true" /></span>
+            <p className="mt-3 text-xs font-semibold text-[#C8D8CA]">{alertStatus === 'all' ? 'No suspicious indicators recorded.' : `No ${alertStatus} indicators match this filter.`}</p>
+            <p className="mt-1 text-[10px] text-[#91A195]">Detection indicators identify patterns for review and do not confirm an attack.</p>
+          </div>}
         </div>
         <div className="mt-3 flex items-center justify-between text-[10px] text-[#A9B8AD]">
           <span>{data ? `${data.alertTotal} alert history records` : loading ? 'Loading alert history…' : 'Alert history unavailable'}</span>
@@ -441,23 +500,24 @@ export function AdminSecurityMonitoring({
       <section id="security-event-list" tabIndex={-1} className={`${panel} overflow-hidden scroll-mt-4`}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div><h3 className="text-sm font-bold text-[#ECF3EE]">Security events</h3><p className="mt-1 text-[10px] text-[#91A195]">Sanitized operational events from the 180-day retention period; listing defaults to the last 30 days.</p></div>
-          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
+          <form className="security-event-toolbar flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
             <label className="sr-only" htmlFor="security-event-search">Search event types</label>
-            <span className="relative"><Search className="absolute left-3 top-3 h-3.5 w-3.5 text-[#91A195]" /><input id="security-event-search" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className={`${input} pl-8`} placeholder="Search event types" /></span>
+            <span className="relative min-w-0 flex-1 sm:flex-none"><Search className="absolute left-3 top-3 h-3.5 w-3.5 text-[#91A195]" aria-hidden="true" /><input id="security-event-search" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className={`${input} w-full pl-8 sm:w-56`} placeholder="Search event types" /></span>
             <label className="sr-only" htmlFor="security-event-severity">Filter event severity</label>
-            <select id="security-event-severity" value={eventSeverity} onChange={(event) => { setEventPage(1); setEventSeverity(event.target.value as Severity | 'all'); }} className={input}>
+            <select id="security-event-severity" value={eventSeverity} onChange={(event) => { setEventPage(1); setEventSeverity(event.target.value as Severity | 'all'); }} className={`${input} min-w-0 flex-1 sm:flex-none`}>
               <option value="all">All severities</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option>
             </select>
-            <button type="submit" className="rounded-xl border border-[#33453A] px-3 text-xs font-semibold text-[#C8D8CA]">Filter</button>
+            <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-[#33453A] px-4 text-xs font-semibold text-[#C8D8CA] transition-colors hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"><Search className="h-3.5 w-3.5" aria-hidden="true" />Filter</button>
           </form>
         </div>
-        <div className="mt-4 overflow-x-auto rounded-xl border border-[#304135]">
+        <div className="security-events-table mt-4 overflow-x-auto rounded-xl border border-[#304135]">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="bg-[#131D16] text-[9px] uppercase tracking-wide text-[#A9B8AD]"><tr><th className="px-3 py-3">Event</th><th className="px-3 py-3">Severity</th><th className="px-3 py-3">Module / result</th><th className="px-3 py-3">Actor</th><th className="px-3 py-3">Time</th></tr></thead>
+            <caption className="sr-only">Sanitized security events matching the selected filters</caption>
+            <thead className="bg-[#131D16] text-[9px] uppercase tracking-wide text-[#A9B8AD]"><tr><th scope="col" className="px-3 py-3">Event</th><th scope="col" className="px-3 py-3">Severity</th><th scope="col" className="px-3 py-3">Module / result</th><th scope="col" className="px-3 py-3">Actor</th><th scope="col" className="px-3 py-3">Time</th></tr></thead>
             <tbody className="divide-y divide-[#304135]">
-              {(data?.events || []).map((event) => <tr key={event.id} className="text-[#D5DED7]">
+              {(data?.events || []).map((event) => <tr key={event.id} className="text-[#D5DED7] transition-colors hover:bg-white/[0.025]">
                 <td className="px-3 py-3 font-medium">{event.eventType.replaceAll('.', ' ')}</td>
-                <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[9px] font-semibold uppercase ${severityStyle[event.severity]}`}>{event.severity}</span></td>
+                <td className="px-3 py-3"><span className={`inline-flex min-w-16 justify-center rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide ${severityStyle[event.severity]}`}>{event.severity}</span></td>
                 <td className="px-3 py-3">{event.route || '—'}{event.statusCode ? ` · HTTP ${event.statusCode}` : ''}</td>
                 <td className="px-3 py-3 font-mono text-[10px]">{event.actorId ? `${event.actorId.slice(0, 8)}…` : 'Unauthenticated'}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-[10px] text-[#A9B8AD]"><Clock3 className="mr-1 inline h-3 w-3" />{dateTime(event.occurredAt)}</td>

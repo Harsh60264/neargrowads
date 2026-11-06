@@ -7643,6 +7643,43 @@ html[data-theme='light'] [data-public-theme='light'] .catalogue-page section[rol
   border-color: var(--brand-border) !important;
 }
 
+.admin-portal .admin-security-monitoring .security-kpi-card {
+  box-shadow: 0 2px 8px rgba(8, 24, 13, 0.1);
+}
+
+.admin-portal .admin-security-monitoring .security-activity-track > span,
+.admin-portal .admin-security-monitoring .security-device-track > span {
+  transition: width 180ms ease-out;
+}
+
+.admin-portal .admin-security-monitoring .security-rules-grid > label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+.admin-portal .admin-security-monitoring .security-rules-grid input[type='number'] {
+  min-height: 2.5rem;
+}
+
+html[data-theme='light'] .admin-portal .admin-security-monitoring .security-kpi-card {
+  background-color: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 8px rgba(31, 54, 35, 0.07);
+}
+
+html[data-theme='light'] .admin-portal .admin-security-monitoring .security-timeline-track {
+  background-color: rgba(237, 243, 235, 0.72);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-portal .admin-security-monitoring .security-activity-track > span,
+  .admin-portal .admin-security-monitoring .security-device-track > span {
+    transition: none;
+  }
+}
+
 html[data-theme='light'] [data-public-theme='light'] .catalogue-page [role='dialog'] > section[aria-modal='true'],
 html[data-theme='light'] [data-public-theme='light'] .catalogue-page [role='dialog'] > section[aria-labelledby] {
   background-color: var(--brand-surface) !important;
