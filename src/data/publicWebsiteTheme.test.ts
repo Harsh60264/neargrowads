@@ -26,14 +26,14 @@ test('public defaults reproduce the original website Light and Dark palettes', (
   });
 });
 
-test('active catalogues contain only original presets and support separate appearance groups', () => {
+test('public and CMS catalogues keep independent appearance groups', () => {
   assert.deepEqual(
     PUBLIC_WEBSITE_THEME_REGISTRY.map(({ id }) => id),
     ['original-website-light', 'original-website-dark'],
   );
   assert.deepEqual(
     ADMIN_CMS_THEME_REGISTRY.map(({ id }) => id),
-    ['original-cms-light', 'original-cms-dark'],
+    ['original-cms-light', 'original-cms-dark', 'premium-cms-light', 'premium-cms-dark'],
   );
   assert.deepEqual(DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS, {
     light: 'original-cms-light',
@@ -41,6 +41,8 @@ test('active catalogues contain only original presets and support separate appea
   });
   assert.equal(getPublicWebsiteThemeDefinition('royal-light')?.id, 'original-website-light');
   assert.equal(getAdminCmsThemeDefinition('original-cms-dark')?.palette.background, '#0D1814');
+  assert.equal(getAdminCmsThemeDefinition('premium-cms-light')?.mode, 'light');
+  assert.equal(getAdminCmsThemeDefinition('premium-cms-dark')?.mode, 'dark');
 });
 
 test('theme assignments are independent and migrate rejected legacy preset ids to original themes', () => {
@@ -75,6 +77,13 @@ test('theme assignments are independent and migrate rejected legacy preset ids t
   }), {
     light: 'original-cms-dark',
     dark: 'original-cms-light',
+  });
+  assert.deepEqual(parseAdminCmsThemeAssignments({
+    light: 'premium-cms-light',
+    dark: 'original-cms-dark',
+  }), {
+    light: 'premium-cms-light',
+    dark: 'original-cms-dark',
   });
   assert.equal(parseAdminCmsThemeAssignments({ light: 'unknown', dark: 'original-cms-dark' }), undefined);
 });

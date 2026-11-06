@@ -36,6 +36,8 @@ interface Props {
   canEdit?: boolean;
   canPublish?: boolean;
   isPrimaryOwner?: boolean;
+  theme?: 'light' | 'dark';
+  themePreset?: string;
 }
 
 const groups = [
@@ -265,6 +267,8 @@ export function AdminContentManager({
   canEdit = true,
   canPublish = canEdit,
   isPrimaryOwner = false,
+  theme = 'dark',
+  themePreset = 'original-cms-dark',
 }: Props) {
   const [content, setContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [savedDraft, setSavedDraft] = useState<SiteContent | null>(null);
@@ -830,7 +834,7 @@ export function AdminContentManager({
     );
 
     return (
-    <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme="dark">
+    <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme={theme} data-admin-theme-preset={themePreset}>
       <div className={embedded ? '' : 'mx-auto max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9'}>
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -1016,6 +1020,20 @@ export function AdminContentManager({
                     className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
                   >
                     <RotateCcw className="h-4 w-4" /> Reset to Published
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canEdit || !isPrimaryOwner || saving || loading || loadFailed}
+                    onClick={() => {
+                      setContent((current) => ({
+                        ...current,
+                        cmsThemeAssignments: { light: 'original-cms-light', dark: 'original-cms-dark' },
+                      }));
+                      setNotice('CMS assignments reset to the original Light and Dark themes. Publish to apply.');
+                    }}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#47594C] px-3 text-xs font-bold text-[#D7E3D9] hover:bg-white/5 disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-4 w-4" /> Reset CMS to Original
                   </button>
                   <button
                     type="button"
