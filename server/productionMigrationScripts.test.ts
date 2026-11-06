@@ -11,6 +11,10 @@ const postMigration = readFileSync(
   new URL('../scripts/verify-production-admin-permanent-deletion-post-migration.ps1', import.meta.url),
   'utf8',
 );
+const locationPreflight = readFileSync(
+  new URL('../scripts/verify-production-optional-customer-location-preflight.ps1', import.meta.url),
+  'utf8',
+);
 const deployment = readFileSync(new URL('../docs/deployment.md', import.meta.url), 'utf8');
 
 function assertBalancedPsqlConditionals(sql: string) {
@@ -42,6 +46,17 @@ test('Production migration scripts are pinned to the exact Production project an
     assert.match(script, /Assert-ProductionAdminDeletionTarget -ProjectRef \$ProjectRef/);
   }
   assert.match(common, /if \(\$ProjectRef -cne \$script:ProductionAdminDeletionProjectRef\)/);
+});
+
+test('optional customer location Production preflight is pinned, read-only and hash-gated', () => {
+  assert.match(locationPreflight, /\$expectedProjectRef = 'axbjzmdokfoftzfgwiql'/);
+  assert.match(locationPreflight, /\$expectedMigrationHash = '[0-9A-F]{64}'/);
+  assert.match(locationPreflight, /Invoke-ProductionAdminDeletionReadOnlyQuery/);
+  assert.match(locationPreflight, /CHECK\|location_columns/);
+  assert.match(locationPreflight, /CHECK\|location_constraints/);
+  assert.match(locationPreflight, /CHECK\|location_security/);
+  assert.match(locationPreflight, /history is evidence only; this script never writes it/);
+  assert.doesNotMatch(locationPreflight, /^\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|GRANT|REVOKE|TRUNCATE)\b/im);
 });
 
 test('both Production database scripts set the session read-only and run only inspection SQL', () => {

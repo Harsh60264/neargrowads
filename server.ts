@@ -21,6 +21,7 @@ import {
   type ServiceOrderInput,
 } from './server/serviceOrders.ts';
 import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
+import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
 import { canAccessServiceStoreAction, serviceStoreAdminAction } from './server/serviceStoreAuthorization.ts';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { once } from 'node:events';
@@ -1534,7 +1535,7 @@ async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ reque
     await supabaseAdminRequest('rest/v1/service_enquiry_requests?select=request_reference,status,created_at', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
+      body: JSON.stringify(withOptionalCustomerLocation({
         request_reference: requestReference,
         customer_name: input.customerName,
         customer_email: input.customerEmail || null,
@@ -1544,13 +1545,7 @@ async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ reque
         consent: input.consent,
         selected_packages: selectedPackages,
         request_note: input.requestNote,
-        customer_location_latitude: input.location?.latitude ?? null,
-        customer_location_longitude: input.location?.longitude ?? null,
-        customer_location_accuracy_meters: input.location?.accuracyMeters ?? null,
-        customer_location_locality: input.location?.locality ?? null,
-        customer_location_captured_at: input.location?.capturedAt ?? null,
-        customer_location_consent: Boolean(input.location),
-      }),
+      }, input.location)),
     }),
   );
   if (!rows[0]) throw new ServicePackageStorageError(500, 'empty_enquiry_result');
@@ -1785,7 +1780,7 @@ async function createServiceOrder(input: ServiceOrderInput): Promise<{
     await supabaseAdminRequest('rest/v1/service_orders?select=id,order_reference', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
+      body: JSON.stringify(withOptionalCustomerLocation({
         order_reference: orderReference,
         tracking_token_hash: trackingTokenHash,
         customer_name: input.customerName,
@@ -1797,13 +1792,7 @@ async function createServiceOrder(input: ServiceOrderInput): Promise<{
         total_amount_paise: amountPaise,
         provider_order_id: providerBody.id,
         provider_snapshot: snapshot,
-        customer_location_latitude: input.location?.latitude ?? null,
-        customer_location_longitude: input.location?.longitude ?? null,
-        customer_location_accuracy_meters: input.location?.accuracyMeters ?? null,
-        customer_location_locality: input.location?.locality ?? null,
-        customer_location_captured_at: input.location?.capturedAt ?? null,
-        customer_location_consent: Boolean(input.location),
-      }),
+      }, input.location)),
     }),
   );
   if (!rows[0] || typeof rows[0].id !== 'string') throw new ServicePackageStorageError(500, 'empty_order_insert');
@@ -4321,7 +4310,7 @@ async function saveLeadToSupabase(lead: StoredLead): Promise<void> {
   const response = await supabaseRequest('leads', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({
+    body: JSON.stringify(withOptionalCustomerLocation({
       id: lead.id,
       name: lead.name,
       business_name: lead.businessName,
@@ -4339,13 +4328,7 @@ async function saveLeadToSupabase(lead: StoredLead): Promise<void> {
       utm_medium: lead.utmMedium,
       utm_campaign: lead.utmCampaign,
       status: lead.status,
-      customer_location_latitude: lead.location?.latitude ?? null,
-      customer_location_longitude: lead.location?.longitude ?? null,
-      customer_location_accuracy_meters: lead.location?.accuracyMeters ?? null,
-      customer_location_locality: lead.location?.locality ?? null,
-      customer_location_captured_at: lead.location?.capturedAt ?? null,
-      customer_location_consent: Boolean(lead.location),
-    }),
+    }, lead.location)),
   });
   await ensureLeadResponse(response, 'insert');
   let rows: Record<string, unknown>[];
