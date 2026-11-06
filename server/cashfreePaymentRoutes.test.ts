@@ -115,7 +115,10 @@ function sequentialIds(): () => string {
   return () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 }
 
-function makeOrderHandler(overrides: Partial<Parameters<typeof createCashfreeOrderHandler>[0]> = {}) {
+function makeOrderHandler(
+  overrides: Partial<Parameters<typeof createCashfreeOrderHandler>[0]> = {},
+  locationPatchResponse: Response = jsonResponse([{ id: 'database-order-id' }]),
+) {
   const calls: { url: string; init?: RequestInit }[] = [];
   const databaseCalls: { path: string; init?: RequestInit }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
@@ -171,6 +174,7 @@ function makeOrderHandler(overrides: Partial<Parameters<typeof createCashfreeOrd
           customer_phone: payload.p_customer_phone,
         });
       }
+      if (init?.method === 'PATCH' && path.includes('/service_orders?')) return locationPatchResponse;
       if (path.endsWith('/prepare_cashfree_checkout_create')) return jsonResponse(true);
       if (path.includes('/complete_cashfree_checkout_intent')) {
         const payload = JSON.parse(String(init?.body)) as { p_payment_session_id?: string };
@@ -474,6 +478,59 @@ test('Create Order fails closed when the server-generated return URL does not ma
   assert.equal(result.statusCode, 503);
   assert.equal(calls.length, 0);
   assert.equal(JSON.stringify(result.body).includes('payment_session_id'), false);
+});
+
+test('Create Order persists explicitly consented location before creating the Cashfree order', async () => {
+  const { handler, calls, databaseCalls } = makeOrderHandler();
+  const result = await invoke(handler, request({
+    ...validOrderBody,
+    location: {
+      latitude: 28.6139,
+      longitude: 77.209,
+      accuracyMeters: 25,
+      capturedAt: '2026-11-06T08:30:00.000Z',
+      consent: true,
+    },
+  }));
+  const locationPatch = databaseCalls.find((call) => call.init?.method === 'PATCH');
+  assert.equal(result.statusCode, 201);
+  assert.equal(calls.length, 1);
+  assert.equal(locationPatch?.path, 'rest/v1/service_orders?id=eq.database-order-id&select=id');
+  assert.deepEqual(JSON.parse(String(locationPatch?.init?.body)), {
+    customer_location_latitude: 28.6139,
+    customer_location_longitude: 77.209,
+    customer_location_accuracy_meters: 25,
+    customer_location_captured_at: '2026-11-06T08:30:00.000Z',
+    customer_location_locality: null,
+    customer_location_consent: true,
+  });
+  assert.equal(locationPatch?.init?.headers && new Headers(locationPatch.init.headers).get('Prefer'), 'return=representation');
+});
+
+test('Create Order omits location persistence when the customer does not share location', async () => {
+  const { handler, calls, databaseCalls } = makeOrderHandler();
+  const result = await invoke(handler, request(validOrderBody));
+  assert.equal(result.statusCode, 201);
+  assert.equal(calls.length, 1);
+  assert.equal(databaseCalls.some((call) => call.init?.method === 'PATCH'), false);
+});
+
+test('Create Order fails closed when location update matched no order', async () => {
+  const { handler, calls, databaseCalls } = makeOrderHandler({}, jsonResponse([]));
+  const result = await invoke(handler, request({
+    ...validOrderBody,
+    location: {
+      latitude: 28.6139,
+      longitude: 77.209,
+      accuracyMeters: 25,
+      capturedAt: '2026-11-06T08:30:00.000Z',
+      consent: true,
+    },
+  }));
+  assert.equal(result.statusCode, 503);
+  assert.equal(calls.length, 0);
+  assert.equal(databaseCalls.some((call) => call.path.endsWith('/rpc/prepare_cashfree_checkout_create')), false);
+  assert.equal(databaseCalls.some((call) => call.path.includes('/complete_cashfree_checkout_intent')), false);
 });
 
 test('Create Order fails closed for missing credentials, disabled opt-in, disabled gateway, and missing migration', async (t) => {

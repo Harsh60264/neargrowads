@@ -340,9 +340,9 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
         createAttemptCount: Number(claim.create_attempt_count || 0),
       };
       if (input.location) {
-        const locationResponse = await deps.databaseRequest(`rest/v1/service_orders?id=eq.${encodeURIComponent(intent.serviceOrderId)}`, {
+        const locationResponse = await deps.databaseRequest(`rest/v1/service_orders?id=eq.${encodeURIComponent(intent.serviceOrderId)}&select=id`, {
           method: 'PATCH',
-          headers: { Prefer: 'return=minimal' },
+          headers: { Prefer: 'return=representation' },
           body: JSON.stringify({
             customer_location_latitude: input.location.latitude,
             customer_location_longitude: input.location.longitude,
@@ -353,6 +353,12 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
           }),
         });
         if (!locationResponse.ok) throw new Error('Cashfree customer location could not be stored securely.');
+        const updatedOrders: unknown = await locationResponse.json();
+        if (!Array.isArray(updatedOrders) || updatedOrders.length !== 1 ||
+          !updatedOrders[0] || typeof updatedOrders[0] !== 'object' ||
+          (updatedOrders[0] as Record<string, unknown>).id !== intent.serviceOrderId) {
+          throw new Error('Cashfree customer location could not be stored securely.');
+        }
       }
       const markAmbiguous = async (failureKind: 'provider_outcome_unknown' | 'manual_reconciliation_required' = 'provider_outcome_unknown'): Promise<void> => {
         const response = await deps.databaseRequest('rest/v1/rpc/mark_cashfree_checkout_intent_ambiguous', {
