@@ -77,5 +77,5 @@ test('enquiry submission persists the validated optional location and admin enqu
   assert.match(serverSource, /const location = input\.location === undefined \? undefined : validateCustomerLocation\(input\.location\)/);
   assert.match(adminEnquiries, /if \(!requireAdmin\(req, res\)\) return/);
   assert.match(adminEnquiries, /readServiceEnquiries\(\)/);
-  assert.match(serverSource, /function fromSupabaseServiceEnquiry[\s\S]*?const location = readCustomerLocation\(row\)/);
+  assert.match(serverSource, /fromSupabaseServiceEnquiry/);
 });

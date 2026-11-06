@@ -1,14 +1,34 @@
-import { validateCustomerLocation, type CustomerLocation } from '../src/data/customerLocation';
+import type { CustomerLocation } from '../src/data/customerLocation';
+
+function storedNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 export function readCustomerLocation(row: Record<string, unknown>): CustomerLocation | undefined {
-  return validateCustomerLocation({
-    latitude: typeof row.customer_location_latitude === 'string' ? Number(row.customer_location_latitude) : row.customer_location_latitude,
-    longitude: typeof row.customer_location_longitude === 'string' ? Number(row.customer_location_longitude) : row.customer_location_longitude,
-    accuracyMeters: typeof row.customer_location_accuracy_meters === 'string' ? Number(row.customer_location_accuracy_meters) : row.customer_location_accuracy_meters,
-    capturedAt: row.customer_location_captured_at,
-    locality: row.customer_location_locality,
-    consent: row.customer_location_consent,
-  });
+  const latitude = storedNumber(row.customer_location_latitude);
+  const longitude = storedNumber(row.customer_location_longitude);
+  const accuracyMeters = storedNumber(row.customer_location_accuracy_meters);
+  const capturedAt = row.customer_location_captured_at;
+  if (row.customer_location_consent !== true ||
+    latitude === undefined || latitude < -90 || latitude > 90 ||
+    longitude === undefined || longitude < -180 || longitude > 180 ||
+    accuracyMeters === undefined || accuracyMeters <= 0 ||
+    typeof capturedAt !== 'string' || Number.isNaN(Date.parse(capturedAt))) return undefined;
+
+  const locality = typeof row.customer_location_locality === 'string'
+    ? row.customer_location_locality.trim()
+    : '';
+  return {
+    latitude,
+    longitude,
+    accuracyMeters,
+    capturedAt,
+    consent: true,
+    ...(locality && locality.length <= 160 ? { locality } : {}),
+  };
 }
 
 export function withCustomerLocation(row: Record<string, unknown>): Record<string, unknown> {
