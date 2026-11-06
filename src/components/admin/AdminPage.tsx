@@ -874,13 +874,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
     session.user.permissions.securityMonitoring.edit === true
   );
   const moduleContent = section === 'team'
-    ? <AdminTeamManager onBack={() => navigate('/admin')} canCreate={hasAction('team', 'create')} canEdit={hasAction('team', 'edit')} canDelete={hasAction('team', 'delete')} />
+    ? <AdminTeamManager onBack={() => navigate('/admin')} theme={theme} canCreate={hasAction('team', 'create')} canEdit={hasAction('team', 'edit')} canDelete={hasAction('team', 'delete')} />
     : section === 'serviceStore'
       ? <AdminServiceStore onBack={() => navigate('/admin')} canCreate={hasAction('serviceStore', 'create')} canEdit={hasAction('serviceStore', 'edit')} canDelete={hasAction('serviceStore', 'delete')} canPublish={hasAction('serviceStore', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
     : section === 'blog'
       ? <AdminBlogManager mode={blogMode || 'list'} onBack={() => navigate('/admin')} onNavigate={navigate} canCreate={hasAction('blogs', 'create')} canEdit={hasAction('blogs', 'edit')} canDelete={hasAction('blogs', 'delete')} canPublish={hasAction('blogs', 'publish')} canViewCategories={hasView('categories')} />
       : section === 'content'
-        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
+        ? <AdminContentManager onBack={() => navigate('/admin')} onSaved={onSiteContentSaved || (() => undefined)} embedded theme={theme} canEdit={hasAction('content', 'edit')} canPublish={hasAction('content', 'publish')} isPrimaryOwner={session.user?.isPrimaryOwner === true} />
         : section === 'mascot'
           ? hasView('mascot')
             ? <AdminMascotSettings canEdit={hasAction('mascot', 'edit')} canPublish={hasAction('mascot', 'publish')} />

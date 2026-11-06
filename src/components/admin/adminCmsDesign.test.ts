@@ -27,3 +27,20 @@ test('orders expose responsive cards and a verification timeline', () => {
   assert.match(ordersSource, /admin-order-timeline/);
   assert.match(stylesheet, /@media \(max-width: 640px\)[\s\S]*\.admin-order-grid/);
 });
+
+test('demo order is staging-only, visibly isolated, and cannot mutate data', () => {
+  assert.match(ordersSource, /import\.meta\.env\.VERCEL_ENV === 'preview'/);
+  assert.match(ordersSource, /import\.meta\.env\.VITE_SITE_URL === 'https:\/\/staging\.neargrowads\.com'/);
+  assert.match(ordersSource, /DEMO — NOT A REAL ORDER \/ NO PAYMENT/);
+  assert.match(ordersSource, /disabled value=\{order\.fulfillment_status\}/);
+  assert.match(ordersSource, /Real counts and orders above remain unchanged/);
+  assert.match(ordersSource, /preview-order-only/);
+});
+
+test('CMS modules receive the selected theme and light-mode overrides cover legacy controls', () => {
+  assert.match(adminPageSource, /AdminTeamManager[\s\S]*theme=\{theme\}/);
+  assert.match(adminPageSource, /AdminContentManager[\s\S]*theme=\{theme\}/);
+  assert.match(ordersSource, /admin-demo-toolbar/);
+  assert.match(stylesheet, /admin-portal\[data-admin-theme='light'\] \.admin-content-manager input/);
+  assert.match(stylesheet, /admin-portal\[data-admin-theme='light'\] \.admin-team-manager h1/);
+});

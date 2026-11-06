@@ -36,6 +36,7 @@ interface Props {
   canEdit?: boolean;
   canPublish?: boolean;
   isPrimaryOwner?: boolean;
+  theme?: 'light' | 'dark';
 }
 
 const groups = [
@@ -265,6 +266,7 @@ export function AdminContentManager({
   canEdit = true,
   canPublish = canEdit,
   isPrimaryOwner = false,
+  theme = 'dark',
 }: Props) {
   const [content, setContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
   const [savedDraft, setSavedDraft] = useState<SiteContent | null>(null);
@@ -830,7 +832,7 @@ export function AdminContentManager({
     );
 
     return (
-    <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme="dark">
+    <main className={`admin-portal admin-content-manager ${embedded ? '' : 'min-h-screen'}`} data-admin-theme={theme}>
       <div className={embedded ? '' : 'mx-auto max-w-7xl px-4 py-6 sm:px-7 lg:px-10 lg:py-9'}>
         <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>

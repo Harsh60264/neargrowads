@@ -61,6 +61,53 @@
   color: var(--cms-muted) !important;
 }
 
+/* Legacy CMS modules still use dark utility classes; keep their controls legible
+   when the independently selected CMS theme is light. */
+.admin-portal[data-admin-theme='light'] [class~='bg-[#19241D]'],
+.admin-portal[data-admin-theme='light'] [class~='bg-[#131D16]'],
+.admin-portal[data-admin-theme='light'] [class~='bg-[#101713]'],
+.admin-portal[data-admin-theme='light'] [class~='bg-[#0D1510]'] {
+  background-color: var(--cms-surface) !important;
+}
+
+.admin-portal[data-admin-theme='light'] [class~='border-[#47594C]'],
+.admin-portal[data-admin-theme='light'] [class~='border-[#405344]'] {
+  border-color: var(--cms-border) !important;
+}
+
+.admin-portal[data-admin-theme='light'] [class~='text-[#D7E3D9]'],
+.admin-portal[data-admin-theme='light'] [class~='text-[#819087]'],
+.admin-portal[data-admin-theme='light'] [class~='text-[#718077]'],
+.admin-portal[data-admin-theme='light'] [class~='text-[#526056]'] {
+  color: var(--cms-muted) !important;
+}
+
+.admin-portal[data-admin-theme='light'] .admin-content-manager h1,
+.admin-portal[data-admin-theme='light'] .admin-content-manager h2,
+.admin-portal[data-admin-theme='light'] .admin-content-manager h3,
+.admin-portal[data-admin-theme='light'] .admin-content-manager h4,
+.admin-portal[data-admin-theme='light'] .admin-team-manager h1,
+.admin-portal[data-admin-theme='light'] .admin-team-manager h2,
+.admin-portal[data-admin-theme='light'] .admin-team-manager h3,
+.admin-portal[data-admin-theme='light'] .admin-team-manager h4 {
+  color: var(--cms-text) !important;
+}
+
+.admin-portal[data-admin-theme='light'] .admin-content-manager input,
+.admin-portal[data-admin-theme='light'] .admin-content-manager textarea,
+.admin-portal[data-admin-theme='light'] .admin-content-manager select,
+.admin-portal[data-admin-theme='light'] .admin-team-manager input,
+.admin-portal[data-admin-theme='light'] .admin-team-manager textarea,
+.admin-portal[data-admin-theme='light'] .admin-team-manager select {
+  color: var(--cms-text) !important;
+  background-color: var(--cms-surface-soft) !important;
+}
+
+.admin-portal[data-admin-theme='light'] .admin-content-manager button:not([class~='bg-[#286D3B]']),
+.admin-portal[data-admin-theme='light'] .admin-team-manager button:not([class~='bg-[#286D3B]']) {
+  color: var(--cms-text);
+}
+
 .admin-portal .admin-sidebar,
 .admin-portal > div > header {
   background: var(--cms-sidebar) !important;

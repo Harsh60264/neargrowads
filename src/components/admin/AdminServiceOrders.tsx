@@ -48,6 +48,38 @@ interface ServiceOrder {
 }
 
 const statusOptions: ServiceOrder['fulfillment_status'][] = ['queued', 'in_progress', 'completed', 'cancelled'];
+const stagingDemoEnabled = import.meta.env.VERCEL_ENV === 'preview' && import.meta.env.VITE_SITE_URL === 'https://staging.neargrowads.com';
+const previewOrder: ServiceOrder = {
+  id: 'preview-order-only',
+  order_reference: 'DEMO-ORDER-001',
+  customer_name: 'Preview Customer',
+  customer_email: 'preview.customer@example.invalid',
+  customer_phone: '+91 90000 00000',
+  customer_business_name: 'Demo Business · Preview only',
+  customer_onboarding_notes: 'This local fixture is never sent to the order API.',
+  line_items: [{
+    title: 'Google Ads Growth Sprint',
+    packageCode: 'DEMO-GADS',
+    billingType: 'one_time',
+    billingArrangement: 'one_time',
+    quantity: 1,
+    originalPriceInr: 25000,
+    unitPriceInr: 25000,
+    lineSubtotalInr: 25000,
+  }],
+  total_amount_paise: 2500000,
+  provider: 'cashfree',
+  provider_mode: 'test',
+  provider_order_id: 'demo_cf_order_not_real',
+  provider_payment_id: 'demo_cf_payment_not_real',
+  payment_status: 'paid',
+  fulfillment_status: 'queued',
+  provider_snapshot: { merchantName: 'Staging Preview', settlementVerified: false },
+  cashfree_payment_attempts: [{ providerPaymentId: 'demo_attempt_not_real', status: 'SUCCESS (DEMO)', amountPaise: 2500000, currency: 'INR', lastSeenAt: '2026-11-06T08:00:00.000Z' }],
+  cashfree_webhook_events: [{ eventType: 'PAYMENT_SUCCESS (DEMO)', processingStatus: 'preview only', receivedAt: '2026-11-06T08:00:00.000Z' }],
+  paid_at: '2026-11-06T08:00:00.000Z',
+  created_at: '2026-11-06T07:55:00.000Z',
+};
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', ...init });
@@ -62,6 +94,7 @@ function orderDate(value: string): string {
 
 export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
+  const [showPreviewOrder, setShowPreviewOrder] = useState(stagingDemoEnabled);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
@@ -104,6 +137,7 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
   const paidCount = orders.filter((order) => order.payment_status === 'paid').length;
   const liveCount = orders.filter((order) => order.provider_mode === 'live').length;
   const awaitingCount = orders.filter((order) => order.fulfillment_status === 'awaiting_payment').length;
+  const previewOrders = stagingDemoEnabled && showPreviewOrder ? [previewOrder] : [];
 
   return <section className="admin-orders space-y-5">
     <header className="admin-module-header flex flex-wrap items-end justify-between gap-4">
@@ -122,11 +156,28 @@ export function AdminServiceOrders({ canEdit }: { canEdit: boolean }) {
       <div className="admin-kpi-card"><span className="admin-kpi-icon admin-kpi-icon-amber"><Clock3 /></span><span><strong>{liveCount - awaitingCount < 0 ? 0 : liveCount - awaitingCount}</strong><small>Live orders in fulfilment</small></span></div>
     </div>
     <div className="admin-order-integrity"><ShieldCheck className="h-4 w-4" /><span><strong>Payment integrity:</strong> payment status is set only after server-side provider verification of amount and INR currency. Test gateway records are never treated as revenue.</span></div>
+    {stagingDemoEnabled && <div className="admin-demo-toolbar"><div><strong>Preview sample order</strong><span>Staging-only local fixture. Real counts and orders above remain unchanged.</span></div><label><input type="checkbox" checked={showPreviewOrder} onChange={(event) => setShowPreviewOrder(event.target.checked)} /> Show demo</label></div>}
     {error && <p role="alert" className="admin-alert admin-alert-error">{error}</p>}
     {notice && <p role="status" className="admin-alert admin-alert-success">{notice}</p>}
-    {loading ? <div className="admin-empty-state"><LoaderCircle className="h-5 w-5 animate-spin" /> Loading orders…</div> : orders.length === 0
+    {loading ? <div className="admin-empty-state"><LoaderCircle className="h-5 w-5 animate-spin" /> Loading orders…</div> : orders.length === 0 && previewOrders.length === 0
       ? <div className="admin-empty-state"><PackageCheck className="h-8 w-8" /><strong>No checkout orders yet</strong><span>Enquiry requests remain available in the Enquiry Requests tab.</span></div>
       : <div className="admin-order-list">
+        {previewOrders.map((order) => {
+          const isTest = true;
+          return <article key={order.id} className="admin-order-card admin-order-card-demo">
+            <div className="admin-demo-banner">DEMO — NOT A REAL ORDER / NO PAYMENT</div>
+            <header className="admin-order-card-header">
+              <div><p className="admin-order-reference">{order.order_reference}</p><p className="admin-muted">{orderDate(order.created_at)} · Cashfree Sandbox · local fixture</p></div>
+              <div className="admin-badge-row"><span className="admin-status-badge is-info">Preview only</span><span className="admin-status-badge is-warning">No payment</span></div>
+            </header>
+            <div className="admin-order-grid">
+              <section className="admin-order-panel"><p className="admin-panel-label"><UserRound /> Customer</p><p className="admin-order-customer">{order.customer_name}</p><p className="admin-muted">{order.customer_business_name}</p><p className="admin-muted">{order.customer_email}</p></section>
+              <section className="admin-order-panel"><p className="admin-panel-label"><PackageCheck /> Package details</p>{order.line_items.map((item, index) => <div key={`${item.packageCode}-${index}`} className="admin-line-item"><span>{item.title}<small>Preview package</small></span><strong>{formatServicePrice(item.lineSubtotalInr)}</strong></div>)}<div className="admin-order-total"><span>Demo total</span><strong>{formatServicePrice(order.total_amount_paise / 100)}</strong></div></section>
+              <section className="admin-order-panel admin-order-fulfilment"><p className="admin-panel-label"><ShieldCheck /> Fulfilment control</p><p className="admin-muted">Disabled for demo orders. No changes are persisted.</p><select disabled value={order.fulfillment_status} onChange={() => undefined} aria-label="Demo fulfilment status">{statusOptions.map((status) => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}</select></section>
+            </div>
+            <details className="admin-order-timeline" open><summary>Demo payment timeline (not verified)</summary><div className="admin-timeline"><p><Clock3 /> Payment attempt · SUCCESS (DEMO) · INR 25,000</p><p><ShieldCheck /> PAYMENT_SUCCESS (DEMO) · preview only</p></div></details>
+          </article>;
+        })}
         {orders.map((order) => {
           const isTest = order.provider_mode !== 'live';
           const canFulfil = canEdit && !isTest && order.payment_status === 'paid';
