@@ -127,6 +127,11 @@ const legacyPublicAssignments: Record<string, string> = {
   'legacy-dark': 'original-website-dark',
 };
 
+const legacyAdminAssignments: Record<string, string> = {
+  'premium-cms-light': 'original-cms-light',
+  'premium-cms-dark': 'original-cms-dark',
+};
+
 export const PUBLIC_WEBSITE_THEME_TOKENS = [
   { key: 'background', label: 'Page background' },
   { key: 'backgroundSoft', label: 'Soft background' },
@@ -198,7 +203,7 @@ export function parsePublicWebsiteThemeAssignments(value: unknown): PublicWebsit
 }
 
 export function parseAdminCmsThemeAssignments(value: unknown): PublicWebsiteThemeAssignments | undefined {
-  return parseThemeAssignments(value, adminThemesById);
+  return parseThemeAssignments(value, adminThemesById, legacyAdminAssignments);
 }
 
 export function getPublicWebsiteThemeDefinition(id: string): PublicWebsiteThemeDefinition | undefined {
@@ -206,7 +211,7 @@ export function getPublicWebsiteThemeDefinition(id: string): PublicWebsiteThemeD
 }
 
 export function getAdminCmsThemeDefinition(id: string): PublicWebsiteThemeDefinition | undefined {
-  return adminThemesById.get(id);
+  return adminThemesById.get(legacyAdminAssignments[id] ?? id);
 }
 
 export function getPublicWebsiteThemePalette(

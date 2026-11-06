@@ -76,6 +76,11 @@ test('theme assignments are independent and migrate rejected legacy preset ids t
     light: 'original-cms-dark',
     dark: 'original-cms-light',
   });
+  assert.deepEqual(parseAdminCmsThemeAssignments({
+    light: 'premium-cms-light',
+    dark: 'premium-cms-dark',
+  }), DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS);
+  assert.equal(getAdminCmsThemeDefinition('premium-cms-light')?.id, 'original-cms-light');
   assert.equal(parseAdminCmsThemeAssignments({ light: 'unknown', dark: 'original-cms-dark' }), undefined);
 });
 

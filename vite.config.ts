@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
     ],
     define: {
       'import.meta.env.VITE_SITE_URL': JSON.stringify(siteOrigin),
+      'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV || ''),
     },
     resolve: {
       alias: {
