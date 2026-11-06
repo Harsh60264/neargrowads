@@ -46,6 +46,15 @@ test('restores the explicit sitemap rewrite path', () => {
   assert.equal(req.url, '/sitemap.xml');
 });
 
+test('restores only known public dynamic page families', () => {
+  for (const path of ['/services/google-ads', '/catalogue/published-package', '/blog/published-article']) {
+    const req = { url: `/api/handler?__vercel_original_api_path=${encodeURIComponent(path)}` };
+
+    assert.equal(restoreOriginalApiUrl(req), true);
+    assert.equal(req.url, path);
+  }
+});
+
 test('does not dispatch requests without an internal API path marker', () => {
   const req = { url: '/api/handler?filter=published' };
 
@@ -60,4 +69,12 @@ test('rejects internal paths outside the API namespace', () => {
 
   assert.equal(restoreOriginalApiUrl(req), false);
   assert.equal(req.url, '/api/handler?__vercel_original_api_path=%2Fadmin');
+});
+
+test('rejects non-public paths passed as dynamic page rewrites', () => {
+  for (const path of ['/hi', '/services', '/services/', '/other/slug', '/services/a?x=1', '/services/a#top']) {
+    const req = { url: `/api/handler?__vercel_original_api_path=${encodeURIComponent(path)}` };
+
+    assert.equal(restoreOriginalApiUrl(req), false);
+  }
 });

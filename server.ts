@@ -84,6 +84,7 @@ import {
 } from './server/adminOwnerConfig';
 import { isSameOriginHost } from './server/adminAuthOrigin';
 import { createPublicSitemapHandler } from './server/publicSitemap';
+import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
@@ -4775,9 +4776,28 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
   }
   const serviceMatch = normalized.match(/^\/services\/([a-z0-9-]+)$/);
   if (serviceMatch) {
-    const service = (await readWebsiteServices(false)).find((item) => item.slug === serviceMatch[1]);
+    const staticService = staticServices.find((item) => item.slug === serviceMatch[1]);
+    if (staticService) {
+      return {
+        found: true,
+        title: `${staticService.title} | NearGrow Ads`,
+        description: staticService.shortDescription,
+        image: '',
+        noindex: false,
+      };
+    }
+    const service = (await readWebsiteServices(false)).find((item) =>
+      (item.publishedContent?.slug ?? item.slug) === serviceMatch[1],
+    );
+    const publicContent = service?.publishedContent ?? service;
     return service
-      ? { found: true, title: `${service.title} | NearGrow Ads`, description: service.shortDescription, image: service.backgroundImageUrl, noindex: false }
+      ? {
+        found: true,
+        title: `${publicContent?.title ?? service.title} | NearGrow Ads`,
+        description: publicContent?.shortDescription ?? service.shortDescription,
+        image: publicContent?.backgroundImageUrl ?? '',
+        noindex: false,
+      }
       : { found: false, title: 'Page Not Found | NearGrow Ads', description: 'The requested page is not available.', image: '', noindex: true };
   }
   const blogMatch = normalized.match(/^\/blog\/([a-z0-9-]+)$/);
@@ -11119,6 +11139,13 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (serverless || isProduction) {
+    if (serverless) {
+      const distPath = path.resolve(__dirname, process.env.VERCEL === '1' ? '..' : '.', 'dist');
+      app.get([...PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS], createPublicDynamicPageHandler(async (pathname) => {
+        const indexHtml = await fs.readFile(path.resolve(distPath, 'index.html'), 'utf8');
+        return renderInitialPageHtml(pathname, indexHtml);
+      }));
+    }
     app.get('/sitemap.xml', createPublicSitemapHandler(async () => {
       const [siteContent, services, posts, packages] = await Promise.all([
         readSiteContentRecord(),

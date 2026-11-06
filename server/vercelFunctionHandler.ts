@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { createVercelApplication } from '../serverless-build/serverless-app.mjs';
 import { getPreviewConfigurationVariable } from './adminOwnerConfig';
+import { isPublicDynamicPagePath } from './publicDynamicPages';
 
 const ORIGINAL_API_PATH_PARAMETER = '__vercel_original_api_path';
 
@@ -28,7 +29,8 @@ export function getVercelInitializationDiagnostic(error: unknown): {
 export function restoreOriginalApiUrl(req: Pick<Request, 'url'>): boolean {
   const rewrittenUrl = new URL(req.url, 'http://vercel.internal');
   const originalApiPath = rewrittenUrl.searchParams.get(ORIGINAL_API_PATH_PARAMETER);
-  if (!originalApiPath || (originalApiPath !== '/sitemap.xml' && !originalApiPath.startsWith('/api/')) ||
+  if (!originalApiPath || (originalApiPath !== '/sitemap.xml' &&
+    !originalApiPath.startsWith('/api/') && !isPublicDynamicPagePath(originalApiPath)) ||
     originalApiPath.includes('?') || originalApiPath.includes('#')) return false;
 
   const queryStart = req.url.indexOf('?');
