@@ -13,7 +13,6 @@ import {
 import { calculateMascotDockTarget } from './neoMascotDocking.js';
 import { mountNeoMascotCanvasFallback } from './neoMascotCanvasFallback.js';
 import { resolveMascotRendererVariant } from './neoMascotRendererSelection.js';
-import { shouldRenderMascotFrame } from './animationTiming.js';
 
 const expressions = {
   happy: [1, 1, 1, 0, 1, 1, 1, 0, 0.55, 1, 0, 0],
@@ -47,7 +46,7 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   previewDevice = 'desktop',
 } = {}) {
   const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let reducedMotion = reducedMotionQuery.matches;
+  const reducedMotion = reducedMotionQuery.matches;
   const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -429,7 +428,6 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   let pointTargetRectDirty = true;
   let frame = 0;
   let destroyed = false;
-  let inViewport = true;
   let visible = !document.hidden;
   let scrollTimer = 0;
   let isScrolling = false;
@@ -738,7 +736,6 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     frame = 0;
     if (destroyed || !visible) return;
     frame = requestAnimationFrame(animate);
-    if (!shouldRenderMascotFrame(now, lastFrame, reducedMotion)) return;
     const delta = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     elapsed += delta;
@@ -961,22 +958,16 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
 
   const start = () => {
     if (frame || destroyed || !visible) return;
-    lastFrame = performance.now() - 1000 / 60;
+    lastFrame = performance.now();
     frame = requestAnimationFrame(animate);
   };
   const stop = () => {
-    if (frame) cancelAnimationFrame(frame);
+    if (!frame) return;
+    cancelAnimationFrame(frame);
     frame = 0;
   };
-  const updateMotionPreference = () => {
-    const nextPreference = reducedMotionQuery.matches;
-    if (reducedMotion === nextPreference) return;
-    reducedMotion = nextPreference;
-    stop();
-    start();
-  };
   const updateVisibility = () => {
-    visible = inViewport && !document.hidden;
+    visible = !document.hidden;
     if (visible) start();
     else stop();
   };
@@ -1018,8 +1009,7 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     }, { threshold: 0.6 });
   }
   sceneObserver = new IntersectionObserver(([entry]) => {
-    inViewport = entry.isIntersecting;
-    visible = inViewport && !document.hidden;
+    visible = entry.isIntersecting && !document.hidden;
     if (visible) start();
     else stop();
   }, { threshold: 0 });
@@ -1049,7 +1039,6 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   window.visualViewport?.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('scroll', onScroll, { passive: true, capture: true });
   document.addEventListener('visibilitychange', updateVisibility);
-  reducedMotionQuery.addEventListener('change', updateMotionPreference);
   if (floating) reconcilePointTargets();
   start();
 
@@ -1103,7 +1092,6 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       window.removeEventListener('scroll', onScroll, true);
       interactionTracker?.cleanup();
       document.removeEventListener('visibilitychange', updateVisibility);
-      reducedMotionQuery.removeEventListener('change', updateMotionPreference);
       pointObserver?.disconnect();
       sceneObserver.disconnect();
       mainMutationObserver?.disconnect();
