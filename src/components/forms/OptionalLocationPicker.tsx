@@ -40,8 +40,8 @@ export function OptionalLocationPicker({ value, onChange }: OptionalLocationPick
     <div className="rounded-xl border border-[var(--brand-border)] p-3 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="font-semibold">Optional location</p>
-          <p className="mt-1 text-[var(--brand-text-muted)]">Share your location for service coordination. It will be included with this order or enquiry.</p>
+          <p className="font-semibold">Share your location (optional)</p>
+          <p className="mt-1 text-[var(--brand-text-muted)]">Your location is optional and is included only if you choose to share it. You can remove it before submitting.</p>
         </div>
         {value ? (
           <button type="button" onClick={() => { onChange(undefined); setStatus('Location removed from this submission.'); }} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 font-semibold" style={{ borderColor: 'var(--brand-border)' }}>
@@ -49,7 +49,7 @@ export function OptionalLocationPicker({ value, onChange }: OptionalLocationPick
           </button>
         ) : (
           <button type="button" onClick={requestLocation} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 font-semibold" style={{ borderColor: 'var(--brand-border)' }}>
-            <MapPin className="h-3.5 w-3.5" aria-hidden="true" /> Use My Location
+            <MapPin className="h-3.5 w-3.5" aria-hidden="true" /> Share My Location
           </button>
         )}
       </div>
