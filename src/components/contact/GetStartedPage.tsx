@@ -4,6 +4,8 @@ import { NearGrowMascot } from '../mascot/NearGrowMascot';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
 import { publicText } from '../../data/publicCopy';
 import { getLeadTracking } from '../../data/leadTracking';
+import { OptionalLocationPicker } from '../forms/OptionalLocationPicker';
+import type { CustomerLocation } from '../../data/customerLocation';
 
 interface GetStartedPageProps {
   onNavigate: (path: string) => void;
@@ -27,6 +29,7 @@ export const GetStartedPage: React.FC<GetStartedPageProps> = ({ onNavigate, site
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [location, setLocation] = useState<CustomerLocation>();
   const submissionId = useRef(window.crypto.randomUUID());
 
   const businessTypes = [
@@ -74,6 +77,7 @@ export const GetStartedPage: React.FC<GetStartedPageProps> = ({ onNavigate, site
       serviceInterest: primaryGoal,
       budgetRange: budget,
       message: `[Discovery Wizard] Business Type: ${businessType}. Goal: ${primaryGoal}. Notes: ${contactInfo.notes || 'None'}`,
+      location,
       preferredContactMethod: 'whatsapp',
       consent,
       ...getLeadTracking('/get-started', window.location.search),
@@ -415,6 +419,7 @@ export const GetStartedPage: React.FC<GetStartedPageProps> = ({ onNavigate, site
                     <a href="/privacy-policy" className="font-semibold text-[#216F3D] underline">privacy notice</a>.
                   </span>
                 </label>
+                <OptionalLocationPicker value={location} onChange={setLocation} />
                 {error && !consent && (
                   <p id="get-started-consent-error" className="text-xs text-red-700" role="alert">
                     Consent is required to submit this enquiry.

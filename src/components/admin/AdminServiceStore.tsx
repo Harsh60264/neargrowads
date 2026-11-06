@@ -5,6 +5,7 @@ import { normalizeCatalogueCategoryName, serviceCatalogueSlug, uniqueServiceCata
 import { AdminPaymentReceiving } from './AdminPaymentReceiving';
 import { AdminServiceOrders } from './AdminServiceOrders';
 import { uploadAdminMedia } from './uploadAdminMedia';
+import type { CustomerLocation } from '../../data/customerLocation';
 
 interface PackageForm {
   slug: string;
@@ -50,6 +51,7 @@ interface ServiceEnquiryRecord {
   requestNote: string;
   status: 'received' | 'in_progress' | 'closed';
   createdAt: string;
+  location?: CustomerLocation;
 }
 
 const emptyForm: PackageForm = {
@@ -714,7 +716,7 @@ export function AdminServiceStore({
             {enquiries.map((enquiry) => (
               <article key={enquiry.id} className="grid gap-3 p-4 sm:grid-cols-[1fr_1fr_1.2fr_auto] sm:items-start sm:px-5">
                 <div><p className="text-xs font-bold text-[#ECF3EE]">{enquiry.requestReference}</p><p className="mt-1 text-[11px] text-[#A9B8AD]">{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(enquiry.createdAt))}</p><span className="mt-2 inline-flex rounded-full bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-300">{enquiry.status.replace('_', ' ')}</span></div>
-                <div><p className="text-sm font-semibold text-[#ECF3EE]">{enquiry.customerName}</p>{enquiry.customerBusinessName && <p className="mt-1 text-xs text-[#A9B8AD]">{enquiry.customerBusinessName}</p>}{enquiry.customerEmail && <a href={`mailto:${encodeURIComponent(enquiry.customerEmail)}`} className="mt-1 block break-all text-xs text-[#9FD9A9] hover:underline">{enquiry.customerEmail}</a>}{enquiry.customerPhone && <a href={`tel:${encodeURIComponent(enquiry.customerPhone)}`} className="mt-1 block text-xs text-[#A9B8AD] hover:underline">{enquiry.customerPhone}</a>}</div>
+                <div><p className="text-sm font-semibold text-[#ECF3EE]">{enquiry.customerName}</p>{enquiry.customerBusinessName && <p className="mt-1 text-xs text-[#A9B8AD]">{enquiry.customerBusinessName}</p>}{enquiry.customerEmail && <a href={`mailto:${encodeURIComponent(enquiry.customerEmail)}`} className="mt-1 block break-all text-xs text-[#9FD9A9] hover:underline">{enquiry.customerEmail}</a>}{enquiry.customerPhone && <a href={`tel:${encodeURIComponent(enquiry.customerPhone)}`} className="mt-1 block text-xs text-[#A9B8AD] hover:underline">{enquiry.customerPhone}</a>}{enquiry.location ? <a href={`https://www.google.com/maps?q=${encodeURIComponent(`${enquiry.location.latitude},${enquiry.location.longitude}`)}`} target="_blank" rel="noopener noreferrer" className="mt-2 block text-xs text-[#9FD9A9] hover:underline">Customer Location: {enquiry.location.locality || 'Shared coordinates'} · accuracy about {Math.round(enquiry.location.accuracyMeters)} m · View on Map</a> : <p className="mt-2 text-xs text-[#A9B8AD]">Customer Location: Not shared</p>}</div>
                 <div className="text-xs text-[#C8D4CB]"><p className="font-semibold">Selected services</p>{enquiry.serviceInterest && <p className="mt-1 text-[#9FD9A9]">{enquiry.serviceInterest}</p>}<ul className="mt-1 space-y-1">{enquiry.selectedPackages.map((item, index) => <li key={`${item.title}-${index}`}>{item.title}{item.quantity > 1 ? ` × ${item.quantity}` : ''} · {item.originalPriceInr != null && item.originalPriceInr !== item.priceInr && <span className="mr-1 line-through text-[#91A195]">{formatServicePrice(item.originalPriceInr)}</span>}{formatServicePrice(item.priceInr)} / {billingTypeLabel[item.billingType].toLowerCase()}</li>)}</ul>{enquiry.requestNote && <p className="mt-2 whitespace-pre-wrap text-[#A9B8AD]">Note: {enquiry.requestNote}</p>}</div>
                 <div className="text-[10px] text-[#A9B8AD]">Enquiry only · no payment</div>
               </article>

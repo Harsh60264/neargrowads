@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { billingTypeLabel, formatServicePrice } from '../../data/serviceCatalogue';
+import type { CustomerLocation } from '../../data/customerLocation';
 import {
   FulfillmentStatus,
   getOrderMetrics,
@@ -45,6 +46,16 @@ function badgeTone(order: ServiceOrder): string {
 
 function StatusBadge({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <span className={`admin-order-badge ${className}`}>{children}</span>;
+}
+
+function CustomerLocationDetails({ location }: { location?: CustomerLocation }) {
+  if (!location) return <p className="admin-order-muted">Customer Location: Not shared</p>;
+  const mapUrl = `https://www.google.com/maps?q=${encodeURIComponent(`${location.latitude},${location.longitude}`)}`;
+  return <div className="admin-order-location">
+    <strong>Customer Location</strong>
+    <span>{location.locality || 'Coordinates shared'} · accuracy about {Math.round(location.accuracyMeters)} m</span>
+    <a href={mapUrl} target="_blank" rel="noopener noreferrer">View on Map</a>
+  </div>;
 }
 
 function StatCard({ label, value, tone, icon }: { label: string; value: number; tone: string; icon: ReactNode }) {
@@ -95,6 +106,7 @@ function OrderCard({
         <h3><UserRound aria-hidden="true" /> Customer Details</h3>
         <dl className="admin-order-details"><div><dt>Name</dt><dd>{order.customer_name}</dd></div>{order.customer_business_name && <div><dt>Business</dt><dd>{order.customer_business_name}</dd></div>}<div><dt>Email</dt><dd><a href={`mailto:${encodeURIComponent(order.customer_email)}`}>{order.customer_email}</a></dd></div><div><dt>Phone</dt><dd>{order.customer_phone}</dd></div></dl>
         {order.customer_onboarding_notes && <p className="admin-order-note">{order.customer_onboarding_notes}</p>}
+        <CustomerLocationDetails location={order.location} />
       </div>
       <div className="admin-order-column">
         <h3><Package aria-hidden="true" /> Package / Service</h3>

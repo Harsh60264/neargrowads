@@ -227,6 +227,7 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
         customerPhone: input.customerPhone,
         customerBusinessName: input.customerBusinessName,
         onboardingNotes: input.onboardingNotes,
+        location: input.location,
         cart: input.packages,
       })).digest('hex');
       const clientIdempotencyHash = createHash('sha256')
@@ -338,6 +339,21 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
         claimToken: claim.claim_token,
         createAttemptCount: Number(claim.create_attempt_count || 0),
       };
+      if (input.location) {
+        const locationResponse = await deps.databaseRequest(`rest/v1/service_orders?id=eq.${encodeURIComponent(intent.serviceOrderId)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            customer_location_latitude: input.location.latitude,
+            customer_location_longitude: input.location.longitude,
+            customer_location_accuracy_meters: input.location.accuracyMeters,
+            customer_location_captured_at: input.location.capturedAt,
+            customer_location_locality: input.location.locality ?? null,
+            customer_location_consent: true,
+          }),
+        });
+        if (!locationResponse.ok) throw new Error('Cashfree customer location could not be stored securely.');
+      }
       const markAmbiguous = async (failureKind: 'provider_outcome_unknown' | 'manual_reconciliation_required' = 'provider_outcome_unknown'): Promise<void> => {
         const response = await deps.databaseRequest('rest/v1/rpc/mark_cashfree_checkout_intent_ambiguous', {
           method: 'POST',

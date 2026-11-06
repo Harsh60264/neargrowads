@@ -1,3 +1,5 @@
+import type { CustomerLocation } from '../../data/customerLocation';
+
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 export type FulfillmentStatus = 'awaiting_payment' | 'queued' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -44,6 +46,7 @@ export interface ServiceOrder {
   cashfree_reconciliation_reasons?: string[];
   paid_at: string | null;
   created_at: string;
+  location?: CustomerLocation;
 }
 
 export type OrderFilter = 'all' | PaymentStatus | FulfillmentStatus;

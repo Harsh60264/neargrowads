@@ -5,6 +5,7 @@ import { AdminTeamManager } from './AdminTeamManager';
 import { AdminContentManager } from './AdminContentManager';
 import { AdminBlogCategories } from './AdminBlogCategories';
 import { AdminServiceStore } from './AdminServiceStore';
+import type { CustomerLocation } from '../../data/customerLocation';
 import { AdminSettings } from './AdminSettings';
 import { AdminCaseStudies } from './AdminCaseStudies';
 import { AdminServicesManagement } from './AdminServicesManagement';
@@ -66,6 +67,7 @@ interface AdminLead {
   notificationStatus?: 'pending' | 'not_configured' | 'delivered' | 'failed';
   sourcePage: string;
   createdAt: string;
+  location?: CustomerLocation;
   status: LeadStatus;
 }
 
@@ -1293,6 +1295,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               <Detail icon={BriefcaseBusiness} label="Service" value={selectedLead.serviceInterest} />
               <Detail icon={CalendarDays} label="Received" value={formatDateTime(selectedLead.createdAt)} />
             </div>
+            {selectedLead.location ? <p className="mt-4 text-sm"><span className="font-semibold">Customer Location: </span>{selectedLead.location.locality || 'Shared coordinates'} · accuracy about {Math.round(selectedLead.location.accuracyMeters)} m · <a href={`https://www.google.com/maps?q=${encodeURIComponent(`${selectedLead.location.latitude},${selectedLead.location.longitude}`)}`} target="_blank" rel="noopener noreferrer" className="text-[#328148] underline">View on Map</a></p> : <p className="mt-4 text-sm"><span className="font-semibold">Customer Location: </span>Not shared</p>}
             {selectedLead.websiteUrl && <p className="mt-4 text-sm"><span className="font-semibold">Website: </span><a href={selectedLead.websiteUrl} target="_blank" rel="noreferrer" className="text-[#328148] underline">{selectedLead.websiteUrl}</a></p>}
             {selectedLead.budgetRange && <p className="mt-3 text-sm"><span className="font-semibold">Budget: </span>{selectedLead.budgetRange}</p>}
             <div className="mt-5 rounded-2xl bg-[#F5F7F4] p-4">
