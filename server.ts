@@ -23,6 +23,11 @@ import {
 import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
 import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
 import { readCustomerLocation, withCustomerLocation } from './server/customerLocationSerialization.ts';
+import {
+  fromSupabaseServiceEnquiry,
+  type ServiceBillingType,
+  type ServiceEnquiryRequest,
+} from './server/serviceEnquirySerialization.ts';
 import { canAccessServiceStoreAction, serviceStoreAdminAction } from './server/serviceStoreAuthorization.ts';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { once } from 'node:events';
@@ -264,7 +269,6 @@ interface ManagedBlogPost {
 
 type LeadStatus = StoredLead['status'];
 
-type ServiceBillingType = 'monthly' | 'one_time' | 'per_session';
 type ServicePackageKind = 'service' | 'add_on';
 type ServicePackageStatus = 'draft' | 'published';
 type ServiceCatalogueBadge = 'featured' | 'recommended' | 'most_popular';
@@ -1408,31 +1412,6 @@ interface ServiceEnquiryInput {
   packages: { packageId: string; quantity: number }[];
 }
 
-interface ServiceEnquiryRequest {
-  id: string;
-  requestReference: string;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
-  customerBusinessName: string;
-  serviceInterest: string;
-  selectedPackages: {
-    packageId: string;
-    packageCode: string;
-    title: string;
-    priceInr: number;
-    originalPriceInr: number;
-    discountedPriceInr: number | null;
-    billingType: ServiceBillingType;
-    quantity: number;
-    lineSubtotalInr: number;
-  }[];
-  requestNote: string;
-  location?: CustomerLocation;
-  status: 'received' | 'in_progress' | 'closed';
-  createdAt: string;
-}
-
 function validateServiceEnquiry(value: unknown): ServiceEnquiryInput | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
@@ -1464,31 +1443,6 @@ function validateServiceEnquiry(value: unknown): ServiceEnquiryInput | undefined
     packages.push({ packageId: packageEntry.packageId, quantity: packageEntry.quantity as number });
   }
   return { customerName, customerEmail, customerPhone, customerBusinessName, serviceInterest, requestNote, consent: true, packages, location };
-}
-
-function fromSupabaseServiceEnquiry(row: Record<string, unknown>): ServiceEnquiryRequest {
-  const location = readCustomerLocation(row);
-  const selectedPackages = Array.isArray(row.selected_packages)
-    ? row.selected_packages.filter((entry): entry is ServiceEnquiryRequest['selectedPackages'][number] =>
-      Boolean(entry && typeof entry === 'object' &&
-        typeof (entry as Record<string, unknown>).packageId === 'string' &&
-        typeof (entry as Record<string, unknown>).title === 'string'))
-    : [];
-  const status = row.status === 'in_progress' || row.status === 'closed' ? row.status : 'received';
-  return {
-    id: String(row.id),
-    requestReference: String(row.request_reference),
-    customerName: String(row.customer_name),
-    customerEmail: String(row.customer_email || ''),
-    customerPhone: String(row.customer_phone || ''),
-    customerBusinessName: String(row.customer_business_name || ''),
-    serviceInterest: String(row.service_interest || ''),
-    selectedPackages,
-    requestNote: String(row.request_note || ''),
-    ...(location ? { location } : {}),
-    status,
-    createdAt: String(row.created_at),
-  };
 }
 
 async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ requestReference: string; status: string; createdAt: string }> {
@@ -1540,7 +1494,7 @@ async function createServiceEnquiry(input: ServiceEnquiryInput): Promise<{ reque
 
 async function readServiceEnquiries(): Promise<ServiceEnquiryRequest[]> {
   const rows = await servicePackageResponse<Record<string, unknown>[]>(
-    await supabaseAdminRequest('rest/v1/service_enquiry_requests?select=*&order=created_at.desc&limit=200'),
+    await supabaseAdminRequest('rest/v1/service_enquiry_requests?select=id,request_reference,customer_name,customer_email,customer_phone,customer_business_name,service_interest,selected_packages,request_note,status,created_at,customer_location_latitude,customer_location_longitude,customer_location_accuracy_meters,customer_location_locality,customer_location_captured_at,customer_location_consent&order=created_at.desc&limit=200'),
   );
   return rows.map(fromSupabaseServiceEnquiry);
 }
