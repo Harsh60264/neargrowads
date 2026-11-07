@@ -68,8 +68,8 @@ interface WebsiteActivityData {
   generatedAt: string;
 }
 
-const panel = 'rounded-2xl border border-[#304135] bg-[#19241D] p-4 shadow-sm sm:p-5';
-const input = 'min-h-10 rounded-xl border border-[#33453A] bg-[#101913] px-3 text-xs text-[#EAF1EB] outline-none focus:border-[#67D8B7]';
+const panel = 'smc-panel';
+const input = 'smc-control';
 const severityStyle: Record<Severity, string> = {
   low: 'bg-sky-500/15 text-sky-300',
   medium: 'bg-amber-500/15 text-amber-300',
@@ -234,13 +234,17 @@ export function AdminSecurityMonitoring({
 
   const counters = data?.counters;
   const statCards = [
-    { label: 'Security events · 30 days', value: counters?.totalEvents, icon: Activity, style: 'text-sky-300' },
-    { label: 'Failed logins · 30 days', value: counters?.failedLogins, icon: LockKeyhole, style: 'text-amber-300' },
+    { label: 'Active Visitors', detail: 'Public site · last 5 min', value: websiteActivity?.activeVisitors, icon: UsersRound, tone: 'green', waiting: websiteActivityLoading, unavailable: Boolean(websiteActivityError && !websiteActivity) },
+    { label: 'Security Events', detail: 'Last 30 days', value: counters?.totalEvents, icon: Activity, tone: 'blue', waiting: loading, unavailable: Boolean(error && !data) },
+    { label: 'Failed Logins', detail: 'Last 30 days', value: counters?.failedLogins, icon: LockKeyhole, tone: 'amber', waiting: loading, unavailable: Boolean(error && !data) },
     {
-      label: 'Unauthorized API · 30 days',
+      label: 'Unauthorized API',
+      detail: 'Last 30 days',
       value: counters?.unauthorizedRequests,
       icon: ShieldAlert,
-      style: 'text-orange-300',
+      tone: 'orange',
+      waiting: loading,
+      unavailable: Boolean(error && !data),
       onClick: () => {
         setEventSearch('api.unauthorized');
         setSearchInput('api.unauthorized');
@@ -249,136 +253,158 @@ export function AdminSecurityMonitoring({
         window.setTimeout(() => document.getElementById('security-event-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
       },
     },
-    { label: 'Open suspicious indicators', value: counters?.suspiciousAlerts, icon: AlertTriangle, style: 'text-rose-300' },
-    { label: 'Active admin sessions', value: counters?.activeSessions, icon: UsersRound, style: 'text-emerald-300' },
+    { label: 'Suspicious Indicators', detail: 'Open for review', value: counters?.suspiciousAlerts, icon: AlertTriangle, tone: 'rose', waiting: loading, unavailable: Boolean(error && !data) },
+    { label: 'Active Admin Sessions', detail: 'Currently active', value: counters?.activeSessions, icon: UsersRound, tone: 'green', waiting: loading, unavailable: Boolean(error && !data) },
   ];
+  const devices = [
+    { label: 'Mobile', icon: Smartphone, count: websiteActivity?.devices.mobile },
+    { label: 'Desktop', icon: Monitor, count: websiteActivity?.devices.desktop },
+    { label: 'Tablet', icon: Tablet, count: websiteActivity?.devices.tablet },
+  ];
+  const pages = websiteActivity?.pages.slice(0, 5) ?? [];
+  const highestPageCount = Math.max(0, ...pages.map((page) => page.count));
+  const timeline = data?.timelineDaily ?? [];
+  const timelineMaximum = Math.max(0, ...timeline.map((day) => day.count));
+  const timelineScaleMaximum = Math.max(1, timelineMaximum);
+  const timelineHasEvents = timeline.some((day) => day.count > 0);
 
   return (
-    <section className="admin-security-monitoring space-y-4" aria-label="Security Monitoring Center">
-      <div className={`${panel} flex flex-wrap items-start justify-between gap-3`}>
-        <div>
-          <h2 className="flex items-center gap-2 text-base font-bold text-[#ECF3EE]"><ShieldCheck className="h-5 w-5 text-[#83D296]" /> Security Monitoring Center</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-[#A9B8AD]">
-            Live indicators from administrator authentication, authorization, access audit logs, and sessions. Alerts indicate suspicious patterns for review; they are not confirmation of an attack.
-          </p>
+    <section className="admin-security-monitoring smc-dashboard" aria-label="Security Monitoring Center">
+      <header className="smc-hero">
+        <div className="smc-hero-copy">
+          <span className="smc-hero-mark" aria-hidden="true"><ShieldCheck /></span>
+          <div>
+            <p className="smc-eyebrow">NearGrow Ads · Admin</p>
+            <h2>Security Monitoring Center</h2>
+            <p>Live indicators from administrator authentication, authorization, access audit logs, and sessions. Suspicious patterns are for review, not confirmation of an attack.</p>
+          </div>
         </div>
-        <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-xs font-semibold text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50">
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        <button type="button" onClick={() => { void load(); void refreshWebsiteActivity(); }} disabled={loading || websiteActivityRefreshing} className="smc-button smc-button--hero">
+          <RefreshCw className={loading || websiteActivityRefreshing ? 'animate-spin' : ''} /> Refresh
         </button>
-      </div>
-      {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/30 bg-rose-950/25 px-4 py-3 text-xs text-rose-200">
+        <ShieldCheck className="smc-hero-watermark" aria-hidden="true" />
+      </header>
+      {error && <div role="alert" className="smc-inline-error smc-data-error">
         <span>{error}</span>
         <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-rose-300/30 px-2.5 font-semibold hover:bg-rose-900/30 disabled:opacity-50">
           <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> Retry
         </button>
       </div>}
-      {notice && <p role="status" className="rounded-xl border border-emerald-400/25 bg-emerald-950/20 px-4 py-3 text-xs text-emerald-200">{notice}</p>}
+      {notice && <p role="status" className="smc-notice">{notice}</p>}
 
-      <section className={panel} aria-label="Live website activity" aria-live="polite">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-bold text-[#ECF3EE]"><Activity className="h-4 w-4 text-[#83D296]" /> Live website activity</h3>
-            <p className="mt-1 text-[10px] leading-4 text-[#A9B8AD]">Estimated distinct browsers active within the last 5 minutes.</p>
+      <div className="smc-metric-grid" aria-live="polite">
+        {statCards.map(({ label, detail, value, icon: Icon, tone, waiting, unavailable, onClick }) => {
+          const metric = waiting && value === undefined ? '…' : unavailable ? 'Unavailable' : value ?? '—';
+          const content = <>
+            <span className={`smc-metric-icon smc-tone-${tone}`}><Icon aria-hidden="true" /></span>
+            <span className="smc-metric-copy">
+              <span className="smc-metric-label">{label}</span>
+              <span className="smc-metric-value">{metric}</span>
+              <span className="smc-muted smc-metric-detail">{detail}</span>
+            </span>
+          </>;
+          return onClick ? (
+            <button key={label} type="button" onClick={onClick} aria-label={`${label}: ${metric}. Show matching events.`} className="smc-metric-card smc-metric-card--action">
+              {content}
+            </button>
+          ) : (
+            <article key={label} className="smc-metric-card">{content}</article>
+          );
+        })}
+      </div>
+
+      <div className="smc-overview-grid">
+        <section className={`${panel} smc-timeline-panel`}>
+          <div className="smc-section-heading">
+            <div><h3 className="smc-title">Security Event Timeline</h3><p className="smc-muted">Observed security events · last 7 days</p></div>
+            <span className="smc-section-icon"><Activity aria-hidden="true" /></span>
           </div>
-          <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[#33453A] px-3 text-[10px] font-semibold text-[#C8D8CA] hover:bg-white/5 disabled:opacity-50">
-            <RefreshCw className={`h-3 w-3 ${websiteActivityRefreshing ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-        </div>
-        {websiteActivityError && (
-          <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-400/30 bg-rose-950/25 px-3 py-2 text-[10px] text-rose-200">
-            <span>{websiteActivity ? `Stale data — refresh failed: ${websiteActivityError}` : websiteActivityError}</span>
-            <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing} className="font-semibold underline disabled:opacity-50">Retry</button>
+          <div className="smc-timeline-chart" role="img" aria-label={`Daily security event counts for the last seven days: ${timeline.map((day) => `${day.date}, ${day.count}`).join('; ') || 'unavailable'}`}>
+            <div className="smc-timeline-scale" aria-hidden="true">
+              <span>{timelineMaximum}</span>
+              <span>{Math.ceil(timelineMaximum / 2)}</span>
+              <span>0</span>
+            </div>
+            {timeline.map((day) => {
+              const height = day.count ? (day.count / timelineScaleMaximum) * 100 : 0;
+              return <div key={day.date} className="smc-timeline-day">
+                <span className="smc-timeline-count">{day.count}</span>
+                <span title={`${day.date}: ${day.count} events`} className={`smc-timeline-bar${day.count ? ' is-active' : ''}`} style={{ height: `${height}%` }} />
+                <span className="smc-timeline-date">{day.date.slice(5)}</span>
+              </div>;
+            })}
+            {!data && !loading && error && <p className="smc-empty-state">Timeline unavailable. Retry after resolving the data-loading error.</p>}
+            {!data && loading && <p className="smc-empty-state">Loading timeline…</p>}
+            {data && !timelineHasEvents && <p className="smc-empty-state">No security events recorded in the chart window.</p>}
           </div>
-        )}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3">
-            <p className="flex items-center gap-2 text-[10px] font-semibold text-emerald-300"><UsersRound className="h-4 w-4" /> Active website visitors · 5 min</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{websiteActivity ? websiteActivity.activeVisitors : websiteActivityLoading ? '…' : 'Unavailable'}</p>
-            <p className="mt-1 text-[9px] text-[#91A195]">Distinct anonymous browsers, not identified people.</p>
-          </article>
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3 sm:col-span-1 xl:col-span-2">
-            <p className="flex items-center gap-2 text-[10px] font-semibold text-sky-300"><Activity className="h-4 w-4" /> Most-viewed active pages · 5 min</p>
-            {websiteActivity?.pages.length ? (
-              <ol className="mt-2 space-y-1.5">
-                {websiteActivity.pages.slice(0, 5).map((page) => (
-                  <li key={page.path} className="flex items-center justify-between gap-3 text-[10px] text-[#C8D8CA]">
-                    <span className="min-w-0 truncate" title={page.path}>{page.path}</span><span className="shrink-0 font-semibold">{page.count}</span>
+        </section>
+
+        <section className="smc-activity-grid" aria-label="Live website activity" aria-live="polite">
+          <article className={panel}>
+            <div className="smc-section-heading">
+              <div><h3 className="smc-title">Most-Viewed Active Pages</h3><p className="smc-muted">Public pages with activity in the last 5 minutes</p></div>
+              <span className="smc-section-icon"><Activity aria-hidden="true" /></span>
+            </div>
+            {pages.length ? (
+              <ol className="smc-page-list">
+                {pages.map((page, index) => (
+                  <li key={page.path} className="smc-page-row">
+                    <span className="smc-page-rank">{index + 1}</span>
+                    <span className="smc-page-details">
+                      <span className="smc-page-path" title={page.path}>{page.path}</span>
+                      <span className="smc-page-track"><span style={{ width: `${highestPageCount ? (page.count / highestPageCount) * 100 : 0}%` }} /></span>
+                    </span>
+                    <span className="smc-page-count">{page.count}</span>
                   </li>
                 ))}
               </ol>
             ) : websiteActivity ? (
-              <p className="mt-2 text-[10px] text-[#91A195]">No public visitors are active in this window.</p>
+              <p className="smc-empty-state">No public visitors are active in this window.</p>
             ) : (
-              <p className="mt-2 text-[10px] text-[#91A195]">{websiteActivityLoading ? 'Loading active pages…' : 'Active pages unavailable.'}</p>
+              <p className="smc-empty-state">{websiteActivityLoading ? 'Loading active pages…' : 'Active pages unavailable.'}</p>
             )}
           </article>
-          <article className="rounded-xl border border-[#304135] bg-[#121B15] p-3">
-            <p className="text-[10px] font-semibold text-violet-300">Active visitor devices · 5 min</p>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              {([
-                ['Mobile', Smartphone, websiteActivity?.devices.mobile],
-                ['Desktop', Monitor, websiteActivity?.devices.desktop],
-                ['Tablet', Tablet, websiteActivity?.devices.tablet],
-              ] as const).map(([label, Icon, count]) => (
-                <div key={label} className="text-center text-[9px] text-[#A9B8AD]">
-                  <Icon className="mx-auto h-4 w-4 text-[#83D296]" />
-                  <p className="mt-1 font-semibold text-[#ECF3EE]">{count ?? (websiteActivityLoading ? '…' : '—')}</p>
-                  <p>{label}</p>
+
+          <article className={panel}>
+            <div className="smc-section-heading">
+              <div><h3 className="smc-title">Active Visitor Devices</h3><p className="smc-muted">Estimated devices in the last 5 minutes</p></div>
+              <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing} className="smc-button smc-button--subtle" aria-label="Refresh visitor activity">
+                <RefreshCw className={websiteActivityRefreshing ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </div>
+            {websiteActivityError && (
+              <div role="alert" className="smc-inline-error">
+                <span>{websiteActivity ? `Stale data — refresh failed: ${websiteActivityError}` : websiteActivityError}</span>
+                <button type="button" onClick={() => void refreshWebsiteActivity()} disabled={websiteActivityRefreshing}>Retry</button>
+              </div>
+            )}
+            <div className="smc-device-grid">
+              {devices.map(({ label, icon: Icon, count }) => (
+                <div key={label} className="smc-device-card">
+                  <span className="smc-device-icon"><Icon aria-hidden="true" /></span>
+                  <span className="smc-device-name">{label}</span>
+                  <span className="smc-device-count">{count ?? (websiteActivityLoading ? '…' : '—')}</span>
                 </div>
               ))}
             </div>
+            <p className="smc-muted smc-activity-footnote">
+              {websiteActivity
+                ? `Distinct anonymous browsers, not identified people. Last update: ${dateTime(websiteActivity.generatedAt)}${websiteActivity.lastActivityAt ? ` · Latest activity: ${dateTime(websiteActivity.lastActivityAt)}` : ''}.`
+                : websiteActivityLoading ? 'Loading live activity…' : 'Last successful update unavailable.'}
+              {' '}Admin-panel activity is excluded.
+            </p>
           </article>
-        </div>
-        <p className="mt-3 text-[9px] text-[#91A195]">
-          {websiteActivity
-            ? `Last successful update: ${dateTime(websiteActivity.generatedAt)}${websiteActivity.lastActivityAt ? ` · Latest visitor activity: ${dateTime(websiteActivity.lastActivityAt)}` : ''}.`
-            : websiteActivityLoading ? 'Loading live activity…' : 'Last successful update unavailable.'}
-          {' '}Public page activity only; admin-panel activity is excluded.
-        </p>
-      </section>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        {statCards.map(({ label, value, icon: Icon, style, onClick }) => onClick ? (
-          <button key={label} type="button" onClick={onClick} aria-label={`${label}: ${value ?? 'unavailable'}. Show matching events.`} className={`${panel} text-left transition-colors hover:border-orange-300/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-300`}>
-            <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" />{label}</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{loading && value === undefined ? '…' : error && !data ? 'Unavailable' : value ?? '—'}</p>
-          </button>
-        ) : (
-          <article key={label} className={panel}>
-            <p className={`flex items-center gap-2 text-[10px] font-semibold leading-4 ${style}`}><Icon className="h-4 w-4 shrink-0" />{label}</p>
-            <p className="mt-2 text-2xl font-bold text-[#ECF3EE]">{loading && value === undefined ? '…' : error && !data ? 'Unavailable' : value ?? '—'}</p>
-          </article>
-        ))}
+        </section>
       </div>
 
-      <section className={panel}>
-        <div className="flex items-center justify-between gap-3">
-          <div><h3 className="text-sm font-bold text-[#ECF3EE]">Security event timeline</h3><p className="mt-1 text-[10px] text-[#91A195]">Append-only events retained for 180 days; the chart shows observed events from the seven-day window.</p></div>
-          <Activity className="h-4 w-4 text-[#83D296]" />
-        </div>
-        <div className="mt-4 flex h-28 items-end gap-2 border-b border-[#304135] px-1">
-          {(data?.timelineDaily || []).map((day) => {
-            const maximum = Math.max(1, ...(data?.timelineDaily || []).map((item) => item.count));
-            const height = day.count ? Math.max(8, Math.round((day.count / maximum) * 100)) : 3;
-            return <div key={day.date} className="flex h-full flex-1 flex-col justify-end text-center">
-              <span className="mb-1 text-[9px] text-[#A9B8AD]">{day.count || ''}</span>
-              <span title={`${day.date}: ${day.count} events`} className={`mx-auto w-full max-w-10 rounded-t-md ${day.count ? 'bg-[#43A663]' : 'bg-[#304135]'}`} style={{ height: `${height}%` }} />
-              <span className="py-1 text-[9px] text-[#91A195]">{day.date.slice(5)}</span>
-            </div>;
-          })}
-          {!data && !loading && error && <p className="w-full pb-4 text-center text-xs text-rose-200">Timeline unavailable. Retry after resolving the data-loading error.</p>}
-          {data && data.timelineDaily.every((day) => day.count === 0) && <p className="w-full pb-4 text-center text-xs text-[#91A195]">No security events recorded in the chart window.</p>}
-        </div>
-      </section>
-
       {isPrimaryOwner && (
-        <section className={panel}>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h3 className="text-sm font-bold text-[#ECF3EE]">Detection rules</h3><p className="mt-1 text-[10px] text-[#91A195]">Owner-controlled thresholds. Rule matches create review indicators, not confirmed-attack verdicts.</p></div>
-            <button type="button" disabled={!data || savingRules} onClick={() => setRulesDraft(DEFAULT_SECURITY_RULES)} className="text-[10px] font-semibold text-[#A9B8AD] underline disabled:opacity-40">Restore defaults</button>
+        <section className={`${panel} smc-rules-panel`}>
+          <div className="smc-section-heading">
+            <div><h3 className="smc-title">Detection Rules</h3><p className="smc-muted">Owner-controlled thresholds · indicators are for review, not confirmed-attack verdicts</p></div>
+            <button type="button" disabled={!data || savingRules} onClick={() => setRulesDraft(DEFAULT_SECURITY_RULES)} className="smc-button smc-button--subtle">Restore Defaults</button>
           </div>
           {data ? <>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="smc-rules-grid">
               {([
                 ['windowMinutes', 'Detection window (minutes)', 1, 1440],
                 ['failedLogins', 'Failed logins per account', 2, 100],
@@ -386,104 +412,103 @@ export function AdminSecurityMonitoring({
                 ['restrictedDenials', 'Restricted-module denials', 2, 100],
                 ['bulkLeadExportRecords', 'Large export threshold (records)', 10, 100000],
               ] as const).map(([key, label, min, max]) => (
-                <label key={key} className="space-y-1.5 text-[10px] font-semibold text-[#B8C7BC]">{label}
+                <label key={key} className="smc-field">{label}
                   <input type="number" min={min} max={max} disabled={savingRules} value={rulesDraft[key]} onChange={(event) => setRulesDraft((current) => ({ ...current, [key]: Number(event.target.value) }))} className={`${input} w-full disabled:opacity-50`} />
                 </label>
               ))}
-              <label className="flex items-center gap-2 self-end pb-2 text-[10px] text-[#B8C7BC]">
+              <label className="smc-checkbox-field">
                 <input type="checkbox" disabled={savingRules} checked={rulesDraft.alertNonOwnerPrivilegeChanges} onChange={(event) => setRulesDraft((current) => ({ ...current, alertNonOwnerPrivilegeChanges: event.target.checked }))} />
                 Alert on delegated privileged account changes
               </label>
             </div>
-            <button type="button" onClick={() => void saveRules()} disabled={savingRules} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#286D3B] px-4 text-xs font-semibold text-white disabled:opacity-50">
+            <button type="button" onClick={() => void saveRules()} disabled={savingRules} className="smc-button smc-button--primary smc-save-button">
               {savingRules ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Save detection rules
             </button>
-          </> : <p className="mt-4 text-xs text-[#91A195]">{loading ? 'Loading saved detection rules…' : 'Saved detection rules are unavailable. Default values have not been applied.'}</p>}
+          </> : <p className="smc-empty-state">{loading ? 'Loading saved detection rules…' : 'Saved detection rules are unavailable. Default values have not been applied.'}</p>}
         </section>
       )}
 
-      <section className={panel}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div><h3 className="text-sm font-bold text-[#ECF3EE]">Suspicious activity indicators</h3><p className="mt-1 text-[10px] text-[#91A195]">Repeated failures, denied access, bulk exports, and delegated privileged changes.</p></div>
-          <label className="text-[10px] font-semibold text-[#B8C7BC]">Alert status
-            <select value={alertStatus} onChange={(event) => { setAlertPage(1); setAlertStatus(event.target.value as AlertStatus | 'all'); }} className={`${input} ml-2`}>
+      <section className={`${panel} smc-alerts-panel`}>
+        <div className="smc-section-heading">
+          <div><h3 className="smc-title">Suspicious Activity Indicators</h3><p className="smc-muted">Repeated failures, denied access, bulk exports, and delegated privileged changes</p></div>
+          <label className="smc-filter-field">Alert status
+            <select value={alertStatus} onChange={(event) => { setAlertPage(1); setAlertStatus(event.target.value as AlertStatus | 'all'); }} className={input}>
               <option value="all">All history</option><option value="new">New</option><option value="investigating">Investigating</option><option value="resolved">Resolved</option>
             </select>
           </label>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="smc-alert-list">
           {(data?.alerts || []).map((alert) => (
-            <article key={alert.id} className="rounded-xl border border-[#304135] bg-[#131D16] p-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2"><h4 className="text-xs font-bold text-[#ECF3EE]">{alert.title}</h4><span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${severityStyle[alert.severity]}`}>{alert.severity}</span><span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] text-[#B8C7BC]">{alert.status}</span></div>
-                  <p className="mt-2 text-xs leading-5 text-[#B8C7BC]">{alert.summary}</p>
-                  <p className="mt-1 text-[9px] text-[#91A195]">First seen {dateTime(alert.first_seen_at)} · Last seen {dateTime(alert.last_seen_at)} · {alert.event_ids.length} linked event(s)</p>
-                </div>
-                {canManageAlerts && alert.status !== 'resolved' && <div className="flex shrink-0 gap-2">
-                  {alert.status === 'new' && <button type="button" disabled={busyAlert === alert.id} onClick={() => void updateAlert(alert, 'investigating')} className="rounded-lg border border-[#33453A] px-2.5 py-2 text-[10px] font-semibold text-[#C8D8CA] disabled:opacity-50">Acknowledge</button>}
-                  <button type="button" disabled={busyAlert === alert.id} onClick={() => void updateAlert(alert, 'resolved')} className="rounded-lg border border-emerald-400/30 px-2.5 py-2 text-[10px] font-semibold text-emerald-200 disabled:opacity-50">Resolve</button>
-                </div>}
+            <article key={alert.id} className="smc-alert-card">
+              <div className="smc-alert-copy">
+                <div className="smc-alert-heading"><h4 className="smc-title">{alert.title}</h4><span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${severityStyle[alert.severity]}`}>{alert.severity}</span><span className="smc-status-pill">{alert.status}</span></div>
+                <p className="smc-alert-summary">{alert.summary}</p>
+                <p className="smc-muted smc-alert-meta">First seen {dateTime(alert.first_seen_at)} · Last seen {dateTime(alert.last_seen_at)} · {alert.event_ids.length} linked event(s)</p>
               </div>
+              {canManageAlerts && alert.status !== 'resolved' && <div className="smc-alert-actions">
+                {alert.status === 'new' && <button type="button" disabled={busyAlert === alert.id} onClick={() => void updateAlert(alert, 'investigating')} className="smc-button smc-button--subtle">Acknowledge</button>}
+                <button type="button" disabled={busyAlert === alert.id} onClick={() => void updateAlert(alert, 'resolved')} className="smc-button smc-button--resolve">Resolve</button>
+              </div>}
             </article>
           ))}
-          {data && !data.alerts.length && <p className="rounded-xl border border-dashed border-[#304135] p-5 text-center text-xs text-[#91A195]"><CheckCircle2 className="mx-auto mb-2 h-5 w-5 text-emerald-300" />No alert indicators match this filter.</p>}
+          {data && !data.alerts.length && <p className="smc-empty-state"><CheckCircle2 aria-hidden="true" />No alert indicators match this filter.</p>}
+          {!data && !loading && error && <p className="smc-empty-state">Suspicious activity indicators are unavailable. Retry after resolving the data-loading error.</p>}
         </div>
-        <div className="mt-3 flex items-center justify-between text-[10px] text-[#A9B8AD]">
+        <div className="smc-pagination">
           <span>{data ? `${data.alertTotal} alert history records` : loading ? 'Loading alert history…' : 'Alert history unavailable'}</span>
-          <div className="flex gap-2">
-            <button type="button" disabled={alertPage <= 1} onClick={() => setAlertPage((page) => page - 1)} className="rounded-lg border border-[#33453A] px-3 py-1.5 disabled:opacity-40">Previous</button>
-            <button type="button" disabled={!data || alertPage * 50 >= data.alertTotal} onClick={() => setAlertPage((page) => page + 1)} className="rounded-lg border border-[#33453A] px-3 py-1.5 disabled:opacity-40">Next</button>
+          <div>
+            <button type="button" disabled={alertPage <= 1} onClick={() => setAlertPage((page) => page - 1)} className="smc-button smc-button--subtle">Previous</button>
+            <button type="button" disabled={!data || alertPage * 50 >= data.alertTotal} onClick={() => setAlertPage((page) => page + 1)} className="smc-button smc-button--subtle">Next</button>
           </div>
         </div>
       </section>
 
-      <section id="security-event-list" tabIndex={-1} className={`${panel} overflow-hidden scroll-mt-4`}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div><h3 className="text-sm font-bold text-[#ECF3EE]">Security events</h3><p className="mt-1 text-[10px] text-[#91A195]">Sanitized operational events from the 180-day retention period; listing defaults to the last 30 days.</p></div>
-          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
+      <section id="security-event-list" tabIndex={-1} className={`${panel} smc-events-panel`}>
+        <div className="smc-section-heading smc-events-heading">
+          <div><h3 className="smc-title">Security Events</h3><p className="smc-muted">Sanitized operational events · 180-day retention · listing defaults to the last 30 days</p></div>
+          <form className="smc-event-filters" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
             <label className="sr-only" htmlFor="security-event-search">Search event types</label>
-            <span className="relative"><Search className="absolute left-3 top-3 h-3.5 w-3.5 text-[#91A195]" /><input id="security-event-search" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className={`${input} pl-8`} placeholder="Search event types" /></span>
+            <span className="smc-search-field"><Search aria-hidden="true" /><input id="security-event-search" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className={input} placeholder="Search event types" /></span>
             <label className="sr-only" htmlFor="security-event-severity">Filter event severity</label>
             <select id="security-event-severity" value={eventSeverity} onChange={(event) => { setEventPage(1); setEventSeverity(event.target.value as Severity | 'all'); }} className={input}>
               <option value="all">All severities</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option>
             </select>
-            <button type="submit" className="rounded-xl border border-[#33453A] px-3 text-xs font-semibold text-[#C8D8CA]">Filter</button>
+            <button type="submit" className="smc-button smc-button--subtle">Filter</button>
           </form>
         </div>
-        <div className="mt-4 overflow-x-auto rounded-xl border border-[#304135]">
-          <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="bg-[#131D16] text-[9px] uppercase tracking-wide text-[#A9B8AD]"><tr><th className="px-3 py-3">Event</th><th className="px-3 py-3">Severity</th><th className="px-3 py-3">Module / result</th><th className="px-3 py-3">Actor</th><th className="px-3 py-3">Time</th></tr></thead>
-            <tbody className="divide-y divide-[#304135]">
-              {(data?.events || []).map((event) => <tr key={event.id} className="text-[#D5DED7]">
-                <td className="px-3 py-3 font-medium">{event.eventType.replaceAll('.', ' ')}</td>
-                <td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[9px] font-semibold uppercase ${severityStyle[event.severity]}`}>{event.severity}</span></td>
-                <td className="px-3 py-3">{event.route || '—'}{event.statusCode ? ` · HTTP ${event.statusCode}` : ''}</td>
-                <td className="px-3 py-3 font-mono text-[10px]">{event.actorId ? `${event.actorId.slice(0, 8)}…` : 'Unauthenticated'}</td>
-                <td className="whitespace-nowrap px-3 py-3 text-[10px] text-[#A9B8AD]"><Clock3 className="mr-1 inline h-3 w-3" />{dateTime(event.occurredAt)}</td>
+        <div className="smc-table-wrap">
+          <table className="smc-table">
+            <thead><tr><th>Event</th><th>Severity</th><th>Module / result</th><th>Actor</th><th>Time</th></tr></thead>
+            <tbody>
+              {(data?.events || []).map((event) => <tr key={event.id}>
+                <td className="smc-event-name">{event.eventType.replaceAll('.', ' ')}</td>
+                <td><span className={`rounded-full px-2 py-1 text-[9px] font-semibold uppercase ${severityStyle[event.severity]}`}>{event.severity}</span></td>
+                <td>{event.route || '—'}{event.statusCode ? ` · HTTP ${event.statusCode}` : ''}</td>
+                <td className="smc-actor">{event.actorId ? `${event.actorId.slice(0, 8)}…` : 'Unauthenticated'}</td>
+                <td className="smc-event-time"><Clock3 aria-hidden="true" />{dateTime(event.occurredAt)}</td>
               </tr>)}
-              {data && !data.events.length && <tr><td colSpan={5} className="px-4 py-10 text-center text-xs text-[#91A195]">No security events recorded for this period and filter.</td></tr>}
-              {!data && !loading && error && <tr><td colSpan={5} className="px-4 py-10 text-center text-xs text-rose-200">Security events are unavailable. Retry after resolving the data-loading error.</td></tr>}
+              {data && !data.events.length && <tr><td colSpan={5} className="smc-table-empty">No security events recorded for this period and filter.</td></tr>}
+              {!data && !loading && error && <tr><td colSpan={5} className="smc-table-empty">Security events are unavailable. Retry after resolving the data-loading error.</td></tr>}
             </tbody>
           </table>
         </div>
-        <div className="mt-3 flex items-center justify-between text-[10px] text-[#A9B8AD]">
+        <div className="smc-pagination">
           <span>{data ? `${data.eventTotal} events match` : loading ? 'Loading event count…' : 'Event count unavailable'}</span>
-          <div className="flex gap-2">
-            <button type="button" disabled={eventPage <= 1} onClick={() => setEventPage((page) => page - 1)} className="rounded-lg border border-[#33453A] px-3 py-1.5 disabled:opacity-40">Previous</button>
-            <button type="button" disabled={!data || eventPage * data.pageSize >= data.eventTotal} onClick={() => setEventPage((page) => page + 1)} className="rounded-lg border border-[#33453A] px-3 py-1.5 disabled:opacity-40">Next</button>
+          <div>
+            <button type="button" disabled={eventPage <= 1} onClick={() => setEventPage((page) => page - 1)} className="smc-button smc-button--subtle">Previous</button>
+            <button type="button" disabled={!data || eventPage * data.pageSize >= data.eventTotal} onClick={() => setEventPage((page) => page + 1)} className="smc-button smc-button--subtle">Next</button>
           </div>
         </div>
       </section>
 
-      <section className={panel}>
-        <div className="mb-3 flex items-center gap-2"><UsersRound className="h-4 w-4 text-[#83D296]" /><h3 className="text-sm font-bold text-[#ECF3EE]">Recent administrator access changes</h3></div>
-        {data?.recentAccessChanges.length ? <ul className="divide-y divide-[#304135]">
-          {data.recentAccessChanges.map((change) => <li key={change.id} className="flex flex-wrap justify-between gap-2 py-2 text-xs"><span className="text-[#D5DED7]">{change.action.replaceAll('.', ' ')} <span className="text-[#91A195]">· {change.actorIsPrimaryOwner === null ? 'Actor unavailable' : change.actorIsPrimaryOwner ? 'Primary Owner action' : 'Delegated admin action'}</span></span><span className="text-[10px] text-[#91A195]">{dateTime(change.createdAt)}</span></li>)}
-        </ul> : <p className="text-xs text-[#91A195]">{loading ? 'Loading access history…' : error && !data ? 'Access history unavailable.' : 'No administrator access changes are recorded.'}</p>}
+      <section className={`${panel} smc-access-panel`}>
+        <div className="smc-section-heading"><div><h3 className="smc-title">Recent Administrator Access Changes</h3><p className="smc-muted">Recent changes to administrator access and permissions</p></div><span className="smc-section-icon"><UsersRound aria-hidden="true" /></span></div>
+        {data?.recentAccessChanges.length ? <ul className="smc-access-list">
+          {data.recentAccessChanges.map((change) => <li key={change.id}><span>{change.action.replaceAll('.', ' ')} <span className="smc-muted">· {change.actorIsPrimaryOwner === null ? 'Actor unavailable' : change.actorIsPrimaryOwner ? 'Primary Owner action' : 'Delegated admin action'}</span></span><time className="smc-muted">{dateTime(change.createdAt)}</time></li>)}
+        </ul> : <p className="smc-empty-state">{loading ? 'Loading access history…' : error && !data ? 'Access history unavailable.' : 'No administrator access changes are recorded.'}</p>}
       </section>
-      {loading && <p role="status" className="text-center text-[10px] text-[#91A195]"><LoaderCircle className="mr-1 inline h-3 w-3 animate-spin" />Loading security data…</p>}
-      {!isPrimaryOwner && <p className="text-center text-[10px] text-[#91A195]">Detection rules are configured by the Primary Owner. Security events are view-only for this account.</p>}
+      {loading && <p role="status" className="smc-loading"><LoaderCircle aria-hidden="true" />Loading security data…</p>}
+      {!isPrimaryOwner && <p className="smc-muted smc-view-only">Detection rules are configured by the Primary Owner. Security events are view-only for this account.</p>}
     </section>
   );
 }
