@@ -236,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
             {partnersOpen && (
               <div id="partners-navigation-menu" className="absolute right-0 top-full z-50 mt-3 w-64 rounded-2xl border border-[#E5E9E4] bg-white p-2 shadow-xl">
                 <button onClick={() => handleLinkClick('/partners/localdrop')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">NearGrow LocalDrop</button>
-                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Login <span className="block text-xs text-[#626A63]">Portal design preview</span></button>
+                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Portal Preview <span className="block text-xs text-[#626A63]">Design preview · Not live</span></button>
               </div>
             )}
           </div>
@@ -382,7 +382,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <button onClick={() => handleLinkClick('/partners/portal-preview')} className="w-full min-h-11 rounded-lg bg-[#F7F9F6] p-2.5 text-left text-sm text-[#626A63]">
-            Partner Login <span className="text-xs">· Preview</span>
+            Partner Portal Preview <span className="text-xs">· Not live</span>
           </button>
 
           <div>

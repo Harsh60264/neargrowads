@@ -8,10 +8,10 @@ interface PartnerPortalPreviewProps {
 
 const views = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'campaigns', label: 'Campaigns & targets', icon: Megaphone },
-  { id: 'proof', label: 'Proof submissions', icon: Camera },
-  { id: 'earnings', label: 'Earnings & progress', icon: Wallet },
-  { id: 'profile', label: 'Profile & support', icon: UserRound },
+  { id: 'campaigns', label: 'Campaigns & Daily Targets', icon: Megaphone },
+  { id: 'proof', label: 'Proof Submissions', icon: Camera },
+  { id: 'earnings', label: 'Earnings & Progress', icon: Wallet },
+  { id: 'profile', label: 'Profile & Support', icon: UserRound },
 ] as const;
 
 type ViewId = typeof views[number]['id'];

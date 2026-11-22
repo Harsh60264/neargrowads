@@ -25,13 +25,17 @@ const benefits = [
 function InterestForm({ kind }: { kind: InterestKind }) {
   const submissionId = useRef(crypto.randomUUID());
   const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
     const fields = new FormData(form);
-    if (fields.get('website')) return;
+    if (fields.get('website')) {
+      setStatus('success');
+      return;
+    }
     const name = String(fields.get('name') || '').trim();
     const email = String(fields.get('email') || '').trim().toLowerCase();
     const phone = String(fields.get('phone') || '').trim();
@@ -42,6 +46,7 @@ function InterestForm({ kind }: { kind: InterestKind }) {
     const details = String(fields.get('details') || '').trim();
     const message = `${kind === 'partner' ? 'Delivery partner' : 'Local business'} interest. Area: ${area}. Details: ${details || 'Please contact me to discuss LocalDrop.'}`;
     const tracking = getLeadTracking(window.location.pathname, window.location.search);
+    setErrorMessage('');
     setStatus('sending');
     try {
       const response = await fetch('/api/leads', {
@@ -60,10 +65,16 @@ function InterestForm({ kind }: { kind: InterestKind }) {
           ...tracking,
         }),
       });
-      const result = await response.json() as { success?: boolean; leadId?: string };
-      if (!response.ok || !result.success || result.leadId !== submissionId.current) throw new Error('Lead was not confirmed.');
+      const result = await response.json() as { success?: boolean; leadId?: string; message?: string };
+      if (!response.ok) throw new Error(result.message || `Submission failed (${response.status}).`);
+      if (result.success !== true || result.leadId !== submissionId.current) {
+        throw new Error('The server did not confirm that your enquiry was saved. Please retry.');
+      }
       setStatus('success');
-    } catch {
+    } catch (submissionError: unknown) {
+      setErrorMessage(submissionError instanceof Error
+        ? `${submissionError.message} Your details are still here; please retry.`
+        : 'Submission failed. Your details are still here; please retry.');
       setStatus('error');
     }
   };
@@ -84,7 +95,7 @@ function InterestForm({ kind }: { kind: InterestKind }) {
       <label>Anything else we should know?<textarea name="details" rows={3} maxLength={1700} placeholder="Tell us about your route or campaign idea" /></label>
       <input name="website" tabIndex={-1} autoComplete="off" className="localdrop-trap" aria-hidden="true" />
       <label className="localdrop-consent"><input type="checkbox" required /> I agree to be contacted about NearGrow LocalDrop.</label>
-      {status === 'error' && <p className="localdrop-form-error" role="alert">Your enquiry could not be confirmed. Please try again.</p>}
+      {status === 'error' && <p className="localdrop-form-error" role="alert">{errorMessage}</p>}
       <button className="localdrop-button localdrop-button-primary" type="submit" disabled={status === 'sending'}>
         {status === 'sending' ? 'Sending…' : 'Send interest'} <ArrowRight aria-hidden="true" size={18} />
       </button>
