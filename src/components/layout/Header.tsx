@@ -236,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
             {partnersOpen && (
               <div id="partners-navigation-menu" className="absolute right-0 top-full z-50 mt-3 w-64 rounded-2xl border border-[#E5E9E4] bg-white p-2 shadow-xl">
                 <button onClick={() => handleLinkClick('/partners/localdrop')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">NearGrow LocalDrop</button>
-                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Portal Preview <span className="block text-xs text-[#626A63]">Design preview · Not live</span></button>
+                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Login</button>
               </div>
             )}
           </div>
@@ -266,7 +266,7 @@ export const Header: React.FC<HeaderProps> = ({
           </a>
           <button
             onClick={() => handlePublicDestination(getCtaDestination(siteContent, 'header.consultation', '/get-started'))}
-            className="px-4 py-2.5 text-xs font-semibold text-white bg-[#3EA259] hover:bg-[#216F3D] active:scale-[0.98] rounded-xl transition-all shadow-sm whitespace-nowrap shrink-0"
+            className={`px-4 py-2.5 text-xs font-semibold ${theme === 'dark' ? 'text-[#07110A]' : 'text-white'} bg-[#3EA259] hover:bg-[#216F3D] active:scale-[0.98] rounded-xl transition-all shadow-sm whitespace-nowrap shrink-0`}
           >
             {text('header.consultation')}
           </button>
@@ -382,7 +382,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <button onClick={() => handleLinkClick('/partners/portal-preview')} className="w-full min-h-11 rounded-lg bg-[#F7F9F6] p-2.5 text-left text-sm text-[#626A63]">
-            Partner Portal Preview <span className="text-xs">· Not live</span>
+            Partner Login
           </button>
 
           <div>

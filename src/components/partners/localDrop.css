@@ -6,9 +6,12 @@
   --localdrop-muted: var(--brand-text-muted);
   --localdrop-green: var(--brand-green);
   --localdrop-border: var(--brand-border);
+  --localdrop-action-text: #fff;
   color: var(--localdrop-text);
   background: var(--localdrop-bg);
 }
+
+html[data-theme='dark'] .localdrop-page { --localdrop-action-text: #07110A; }
 
 .localdrop-container,
 .localdrop-hero {
@@ -18,12 +21,19 @@
 }
 
 .localdrop-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
   align-items: center;
   gap: clamp(30px, 5vw, 80px);
   padding-block: clamp(64px, 8vw, 110px);
 }
+
+.localdrop-hero > .ng-cosmic-scene { z-index: 0; }
+.localdrop-hero-copy,
+.localdrop-video-wrap { position: relative; z-index: 1; }
 
 .localdrop-eyebrow {
   display: inline-flex;
@@ -92,7 +102,7 @@
 .localdrop-button-primary {
   border: 1px solid var(--localdrop-green);
   background: var(--localdrop-green);
-  color: #fff;
+  color: var(--localdrop-action-text);
   box-shadow: 0 12px 30px color-mix(in srgb, var(--localdrop-green) 20%, transparent);
 }
 
