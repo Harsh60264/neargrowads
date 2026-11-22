@@ -118,7 +118,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
   return (
     <div className="localdrop-page">
       <section className="localdrop-hero" aria-labelledby="localdrop-heading">
-        <div className="localdrop-hero-copy">
+        <div className="localdrop-hero-copy" data-mascot-obstacle>
           <span className="localdrop-eyebrow">NearGrow LocalDrop · By NearGrow Ads</span>
           <h1 id="localdrop-heading">Your Deliveries.<br /><span>More Opportunities.</span></h1>
           <p>Turn everyday local deliveries into opportunities for businesses, delivery partners and communities.</p>
@@ -127,7 +127,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
             <a className="localdrop-button localdrop-button-outline" href="#how-it-works">Explore How It Works</a>
           </div>
         </div>
-        <div className="localdrop-video-wrap">
+        <div className="localdrop-video-wrap" data-mascot-obstacle>
           <video
             ref={videoRef}
             src="/media/localdrop/scooter-and-card.mp4"
@@ -153,7 +153,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
           <h2 id="localdrop-process-heading">A simple start. A local impact.</h2>
           <div className="localdrop-step-grid">
             {steps.map(({ title, description, icon: Icon }, index) => (
-              <article className="localdrop-card" key={title}>
+              <article className="localdrop-card" key={title} data-mascot-obstacle>
                 <div className="localdrop-card-top"><span className="localdrop-icon"><Icon aria-hidden="true" size={24} /></span><span className="localdrop-step-number">0{index + 1}</span></div>
                 <h3>{title}</h3><p>{description}</p>
               </article>
@@ -168,7 +168,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
           <h2 id="localdrop-benefits-heading">More possibilities, on your route.</h2>
           <div className="localdrop-benefit-grid">
             {benefits.map(({ title, description, icon: Icon }) => (
-              <article className="localdrop-card" key={title}><span className="localdrop-icon"><Icon aria-hidden="true" size={24} /></span><h3>{title}</h3><p>{description}</p></article>
+              <article className="localdrop-card" key={title} data-mascot-obstacle><span className="localdrop-icon"><Icon aria-hidden="true" size={24} /></span><h3>{title}</h3><p>{description}</p></article>
             ))}
           </div>
         </div>
@@ -177,14 +177,14 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
       <section id="partner-access" className="localdrop-section localdrop-access" aria-labelledby="localdrop-access-heading">
         <div className="localdrop-container localdrop-access-grid">
           <div><p className="localdrop-kicker">Partner access</p><h2 id="localdrop-access-heading">One place for your delivery campaigns.</h2><p>Campaign assignments, daily targets, photo proof and progress are planned for the partner portal.</p></div>
-          <div className="localdrop-access-card"><CircleHelp aria-hidden="true" size={30} /><h3>Partner Login</h3><p>Partner account access is being developed. Explore the planned dashboard screens or share your interest below.</p><button type="button" onClick={() => onNavigate('/partners/portal-preview')} className="localdrop-text-link">View portal preview <ArrowRight aria-hidden="true" size={16} /></button></div>
+          <div className="localdrop-access-card" data-mascot-obstacle><CircleHelp aria-hidden="true" size={30} /><h3>Partner Login</h3><p>Partner account access is being developed. Explore the planned dashboard screens or share your interest below.</p><button type="button" onClick={() => onNavigate('/partners/portal-preview')} className="localdrop-text-link">View portal preview <ArrowRight aria-hidden="true" size={16} /></button></div>
         </div>
       </section>
 
       <section id="partner-interest" className="localdrop-section localdrop-interest" aria-labelledby="localdrop-interest-heading">
         <div className="localdrop-container localdrop-interest-grid">
           <div><p className="localdrop-kicker">Let's connect</p><h2 id="localdrop-interest-heading">Bring local businesses and deliveries together.</h2><p>Tell us whether you deliver in your area or want to explore promotional cards for your business.</p><button type="button" className="localdrop-text-link" onClick={() => onNavigate('/contact')}>Contact NearGrow Ads <ArrowRight aria-hidden="true" size={16} /></button></div>
-          <div className="localdrop-interest-panel">
+          <div className="localdrop-interest-panel" data-mascot-obstacle>
             <div className="localdrop-form-tabs" aria-label="Enquiry type">
               <button type="button" aria-pressed={interestKind === 'partner'} onClick={() => setInterestKind('partner')}>Delivery partner</button>
               <button type="button" aria-pressed={interestKind === 'business'} onClick={() => setInterestKind('business')}>Local business</button>

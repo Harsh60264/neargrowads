@@ -568,14 +568,22 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       range.selectNodeContents(node);
       Array.from(range.getClientRects()).filter(isVisible).forEach((rect) => rectangles.push(rect));
     });
+    const protectPageContent = pageRoot.hasAttribute('data-mascot-avoid-content');
     const protectedControls = mobile
-      ? [document.activeElement, ...document.body.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel')]
+      ? [
+          document.activeElement,
+          ...document.body.querySelectorAll(protectPageContent
+            ? 'button,a[href],input,textarea,select,[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'
+            : '[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'),
+        ]
       : document.body.querySelectorAll('button,a[href],input,textarea,select,img,iframe,[role="dialog"],[role="alertdialog"]');
-    Array.from(protectedControls).filter((element) => element instanceof Element).forEach((element) => {
+    const pageObstacles = protectPageContent ? pageRoot.querySelectorAll('[data-mascot-obstacle]') : [];
+    Array.from(new Set([...protectedControls, ...pageObstacles])).filter((element) => element instanceof Element).forEach((element) => {
       if (element.closest('[hidden],[aria-hidden="true"],[data-mascot-ignore]')) return;
       const rect = element.getBoundingClientRect();
       const blockingContainer = mobile && element.matches('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel');
-      if (isVisible(rect) && (blockingContainer || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
+      const markedObstacle = element.matches('[data-mascot-obstacle]');
+      if (isVisible(rect) && (blockingContainer || markedObstacle || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
     });
     obstacleCache = rectangles;
     return rectangles;
@@ -792,7 +800,13 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   sceneObserver.observe(svgRenderer?.element ?? canvas);
   if (floating) {
     mutationObserver = new MutationObserver(schedulePointReconcile);
-    mutationObserver.observe(pageRoot, { childList: true, subtree: true, characterData: true });
+    mutationObserver.observe(pageRoot, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-mascot-avoid-content'],
+    });
   } else if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
     resizeObserver = new ResizeObserver(layout);
     resizeObserver.observe(canvas.parentElement);

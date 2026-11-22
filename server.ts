@@ -86,6 +86,7 @@ import {
 } from './server/adminPermanentDeletion';
 import { teamContentRevision, teamRevisionConflictStatus } from './server/teamRevision';
 import { CANONICAL_PRODUCTION_ORIGIN, isProductionDeployment, resolveSiteOrigin } from './server/siteOrigin';
+import { resolveCanonicalPageOrigin } from './src/data/siteCanonical';
 import {
   resolveAdminOwnerConfiguration,
   validateSupabaseProjectConfiguration,
@@ -4804,7 +4805,7 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
 
 async function renderInitialPageHtml(pathname: string, html: string): Promise<{ found: boolean; html: string }> {
   const metadata = await resolvePublicPageMetadata(pathname);
-  const origin = canonicalSiteOrigin();
+  const origin = resolveCanonicalPageOrigin(pathname, canonicalSiteOrigin());
   const canonicalUrl = `${origin}${pathname === '/' ? '/' : pathname.replace(/\/+$/, '')}`;
   const imageUrl = metadata.image
     ? new URL(metadata.image, `${origin}/`).href

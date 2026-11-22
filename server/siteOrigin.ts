@@ -1,4 +1,6 @@
-export const CANONICAL_PRODUCTION_ORIGIN = 'https://www.neargrowads.com';
+import { CANONICAL_PRODUCTION_ORIGIN } from '../src/data/siteCanonical.ts';
+
+export { CANONICAL_PRODUCTION_ORIGIN } from '../src/data/siteCanonical.ts';
 
 export function isProductionDeployment(
   vercelEnvironment = process.env.VERCEL_ENV,

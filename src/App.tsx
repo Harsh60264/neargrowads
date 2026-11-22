@@ -29,6 +29,7 @@ import { BLOG_POSTS, type BlogPost } from './data/blogData';
 import { fetchBlogPosts } from './data/blogApi';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from './data/siteContent';
 import { publicMedia } from './data/publicMedia';
+import { resolveCanonicalPageOrigin } from './data/siteCanonical';
 import { captureFirstTouchCampaign } from './data/leadTracking';
 import { PublicActivityTracker } from './components/PublicActivityTracker';
 import { ArrowLeft } from 'lucide-react';
@@ -276,7 +277,10 @@ export default function App() {
     };
     const previousTitle = document.title;
     document.title = seo.title;
-    const siteOrigin = import.meta.env.VITE_SITE_URL || window.location.origin;
+    const siteOrigin = resolveCanonicalPageOrigin(
+      normalizedPath,
+      import.meta.env.VITE_SITE_URL || window.location.origin,
+    );
     const canonicalUrl = new URL(normalizedPath, `${siteOrigin.replace(/\/+$/, '')}/`).href;
     const socialImage = defaultSeo
       ? publicMedia(siteContent.media, `seo.${page}.ogImage`, defaultSeo.ogImage, theme).url
@@ -638,7 +642,11 @@ export default function App() {
               theme={theme}
               onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
             />
-            <main className="flex-1" tabIndex={-1}>
+            <main
+              className="flex-1"
+              tabIndex={-1}
+              data-mascot-avoid-content={currentPath.startsWith('/partners/') ? 'true' : undefined}
+            >
               <React.Suspense fallback={<div className="min-h-[50vh]" aria-busy="true" />}>
                 <RouteErrorBoundary key={currentPath}>{renderCurrentView()}</RouteErrorBoundary>
               </React.Suspense>
