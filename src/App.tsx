@@ -614,6 +614,7 @@ export default function App() {
   };
 
   const isAdminRoute = currentPath.startsWith('/admin');
+  const isPartnerRoute = currentPath.startsWith('/partners/');
   const publicAssignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
     DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
   const publicThemeMode = getPublicWebsiteThemeDefinition(publicAssignments[theme])?.mode ?? theme;
@@ -643,9 +644,10 @@ export default function App() {
               onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
             />
             <main
-              className="flex-1"
+              className={`flex-1 ${isPartnerRoute ? 'pt-20 min-[700px]:pt-0' : ''}`}
               tabIndex={-1}
-              data-mascot-avoid-content={currentPath.startsWith('/partners/') ? 'true' : undefined}
+              data-mascot-avoid-content={isPartnerRoute ? 'true' : undefined}
+              data-mascot-scroll-with-page={isPartnerRoute ? 'true' : undefined}
             >
               <React.Suspense fallback={<div className="min-h-[50vh]" aria-busy="true" />}>
                 <RouteErrorBoundary key={currentPath}>{renderCurrentView()}</RouteErrorBoundary>
@@ -654,6 +656,7 @@ export default function App() {
             <Footer onNavigate={navigate} siteContent={siteContent} />
             <FloatingAssistant
               sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
+              scrollWithPage={isPartnerRoute}
               chatOpen={chatOpen}
               onOpenChat={() => setChatOpen(true)}
             />

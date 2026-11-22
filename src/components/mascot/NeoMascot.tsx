@@ -20,9 +20,10 @@ declare global {
   }
 }
 
-export function NeoMascot({ onCelebrate, sizeSettings, chatOpen, onOpenChat }: {
+export function NeoMascot({ onCelebrate, sizeSettings, scrollWithPage, chatOpen, onOpenChat }: {
   onCelebrate?: () => void;
   sizeSettings: MascotSettings;
+  scrollWithPage: boolean;
   chatOpen: boolean;
   onOpenChat: () => void;
 }) {
@@ -83,7 +84,7 @@ export function NeoMascot({ onCelebrate, sizeSettings, chatOpen, onOpenChat }: {
 
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-[45]"
+      className={`pointer-events-none fixed inset-0 z-[45] ${scrollWithPage ? 'ng-mascot-scroll-with-page' : ''}`}
       data-mascot-ignore
     >
       <canvas

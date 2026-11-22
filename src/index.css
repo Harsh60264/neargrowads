@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@media (max-width: 699px) {
+  .ng-mascot-scroll-with-page {
+    position: absolute;
+    bottom: auto;
+    height: 100vh;
+  }
+}
+
 /* Orders & Fulfilment redesign. Scoped to this tab so the original CMS
    appearance and every other admin section remain unchanged. */
 .admin-orders {
