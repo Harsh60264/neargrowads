@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, CircleHelp, Layers3, MapPin, Play, RotateCcw, Truck, UploadCloud, Wallet } from 'lucide-react';
 import { getLeadTracking } from '../../data/leadTracking';
+import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
 import './localDrop.css';
 
 interface LocalDropPageProps {
@@ -118,6 +119,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
   return (
     <div className="localdrop-page">
       <section className="localdrop-hero" aria-labelledby="localdrop-heading">
+        <HeroOrbitBackground ambient />
         <div className="localdrop-hero-copy" data-mascot-obstacle>
           <span className="localdrop-eyebrow">NearGrow LocalDrop · By NearGrow Ads</span>
           <h1 id="localdrop-heading">Your Deliveries.<br /><span>More Opportunities.</span></h1>
@@ -177,7 +179,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
       <section id="partner-access" className="localdrop-section localdrop-access" aria-labelledby="localdrop-access-heading">
         <div className="localdrop-container localdrop-access-grid">
           <div><p className="localdrop-kicker">Partner access</p><h2 id="localdrop-access-heading">One place for your delivery campaigns.</h2><p>Campaign assignments, daily targets, photo proof and progress are planned for the partner portal.</p></div>
-          <div className="localdrop-access-card" data-mascot-obstacle><CircleHelp aria-hidden="true" size={30} /><h3>Partner Login</h3><p>Partner account access is being developed. Explore the planned dashboard screens or share your interest below.</p><button type="button" onClick={() => onNavigate('/partners/portal-preview')} className="localdrop-text-link">View portal preview <ArrowRight aria-hidden="true" size={16} /></button></div>
+          <div className="localdrop-access-card" data-mascot-obstacle><CircleHelp aria-hidden="true" size={30} /><h3>Partner Login</h3><p>A dedicated workspace for campaign assignments, daily targets, proof and progress.</p><button type="button" onClick={() => onNavigate('/partners/portal-preview')} className="localdrop-text-link">Partner Login <ArrowRight aria-hidden="true" size={16} /></button></div>
         </div>
       </section>
 
