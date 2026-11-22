@@ -1,6 +1,7 @@
 import {
   calculateMascotGeometry,
   MASCOT_MOBILE_BREAKPOINT,
+  MASCOT_SCALE_MIN,
   resolveMascotMultiplier,
 } from '../../data/mascotSizing.js';
 import {
@@ -448,7 +449,12 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
     if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
     const deviceWidth = previewBaseSize === undefined ? window.innerWidth : previewDevice === 'mobile' ? 390 : 1280;
-    const multiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const configuredMultiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const protectPageContent = floating && width < MASCOT_MOBILE_BREAKPOINT &&
+      pageRoot.hasAttribute('data-mascot-avoid-content');
+    const multiplier = protectPageContent
+      ? Math.min(configuredMultiplier, MASCOT_SCALE_MIN / 100)
+      : configuredMultiplier;
     const baseSize = floating
       ? Math.max(150, Math.min(height * 0.21, 215))
       : previewBaseSize ?? Math.min(width, height) * 0.94;
@@ -773,7 +779,9 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   const reconcilePointTargets = () => {
     mutationFrame = 0;
     if (!pointObserver || destroyed) return;
-    const targets = new Set(pageRoot.querySelectorAll('section'));
+    const targets = pageRoot.hasAttribute('data-mascot-avoid-content')
+      ? new Set()
+      : new Set(pageRoot.querySelectorAll('section'));
     const oldTargets = pointObserver.__targets || new Set();
     oldTargets.forEach((target) => { if (!targets.has(target)) pointObserver.unobserve(target); });
     targets.forEach((target) => { if (!oldTargets.has(target)) pointObserver.observe(target); });
@@ -786,7 +794,8 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
 
   if (floating) {
     pointObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
-      if (entry.isIntersecting && !chatOpen && mode !== 'celebrate' && !entry.target.__neoPointed) {
+      if (entry.isIntersecting && !chatOpen && mode !== 'celebrate' &&
+        !pageRoot.hasAttribute('data-mascot-avoid-content') && !entry.target.__neoPointed) {
         entry.target.__neoPointed = true;
         pointTo(entry.target.querySelector('h2,h3') || entry.target);
       }
@@ -799,7 +808,17 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   }, { threshold: 0 });
   sceneObserver.observe(svgRenderer?.element ?? canvas);
   if (floating) {
-    mutationObserver = new MutationObserver(schedulePointReconcile);
+    mutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.type === 'attributes' &&
+        mutation.attributeName === 'data-mascot-avoid-content')) {
+        if (mode === 'point') {
+          mode = 'idle';
+          selectedPoint = null;
+        }
+        scheduleLayout();
+      }
+      schedulePointReconcile();
+    });
     mutationObserver.observe(pageRoot, {
       childList: true,
       subtree: true,

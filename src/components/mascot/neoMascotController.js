@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   calculateMascotGeometry,
   MASCOT_MOBILE_BREAKPOINT,
+  MASCOT_SCALE_MIN,
   resolveMascotMultiplier,
 } from '../../data/mascotSizing.js';
 import {
@@ -564,7 +565,12 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       : previewBaseSize ?? Math.min(width, height) * 0.94;
     if (floating && width < MASCOT_MOBILE_BREAKPOINT) baseSize = Math.min(baseSize, 140);
     const deviceWidth = previewBaseSize === undefined ? window.innerWidth : previewDevice === 'mobile' ? 390 : 1280;
-    const multiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const configuredMultiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const protectPageContent = floating && width < MASCOT_MOBILE_BREAKPOINT &&
+      pageRoot.hasAttribute('data-mascot-avoid-content');
+    const multiplier = protectPageContent
+      ? Math.min(configuredMultiplier, MASCOT_SCALE_MIN / 100)
+      : configuredMultiplier;
     const geometry = calculateMascotGeometry(
       width,
       height,
@@ -991,7 +997,9 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   const reconcilePointTargets = () => {
     mutationFrame = 0;
     if (!pointObserver || destroyed) return;
-    const currentTargets = new Set(pageRoot.querySelectorAll('section'));
+    const currentTargets = pageRoot.hasAttribute('data-mascot-avoid-content')
+      ? new Set()
+      : new Set(pageRoot.querySelectorAll('section'));
     const previouslyObserved = pointObserver.__targets || new Set();
     previouslyObserved.forEach((target) => {
       if (!currentTargets.has(target)) pointObserver.unobserve(target);
@@ -1010,7 +1018,8 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   if (floating) {
     pointObserver = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (!entry.isIntersecting || chatOpen || mode === 'celebrate' || entry.target.__neoPointed) return;
+        if (!entry.isIntersecting || chatOpen || mode === 'celebrate' ||
+          pageRoot.hasAttribute('data-mascot-avoid-content') || entry.target.__neoPointed) return;
         entry.target.__neoPointed = true;
         pointTo(entry.target.querySelector('h2,h3') || entry.target);
       });
@@ -1023,7 +1032,17 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   }, { threshold: 0 });
   sceneObserver.observe(canvas);
   if (floating) {
-    mainMutationObserver = new MutationObserver(schedulePointReconcile);
+    mainMutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.type === 'attributes' &&
+        mutation.attributeName === 'data-mascot-avoid-content')) {
+        if (mode === 'point') {
+          mode = 'idle';
+          selectedPoint = null;
+        }
+        scheduleLayout();
+      }
+      schedulePointReconcile();
+    });
     mainMutationObserver.observe(pageRoot, {
       childList: true,
       subtree: true,
