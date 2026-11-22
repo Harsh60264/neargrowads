@@ -4741,6 +4741,24 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
     };
     return { found: true, title: titles[normalized], description: 'NearGrow Ads website information.', image: '', noindex: normalized === '/privacy-policy' || normalized === '/terms-and-conditions' };
   }
+  if (normalized === '/partners/localdrop') {
+    return {
+      found: true,
+      title: 'NearGrow LocalDrop | Delivery Partner Opportunities | NearGrow Ads',
+      description: 'Explore NearGrow LocalDrop and share your interest in local promotional card campaigns as a delivery partner or business.',
+      image: '',
+      noindex: false,
+    };
+  }
+  if (normalized === '/partners/portal-preview') {
+    return {
+      found: true,
+      title: 'Partner Portal Preview | NearGrow LocalDrop',
+      description: 'Preview planned delivery partner screens for NearGrow LocalDrop.',
+      image: '',
+      noindex: true,
+    };
+  }
   const serviceMatch = normalized.match(/^\/services\/([a-z0-9-]+)$/);
   if (serviceMatch) {
     const staticService = staticServices.find((item) => item.slug === serviceMatch[1]);

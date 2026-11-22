@@ -34,14 +34,19 @@ export const Header: React.FC<HeaderProps> = ({
       (destinationPath !== '/' && routePath.startsWith(`${destinationPath}/`));
   };
   const [servicesOpen, setServicesOpen] = useState(false);
+  const [partnersOpen, setPartnersOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const partnersDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: PointerEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setServicesOpen(false);
+      }
+      if (partnersDropdownRef.current && !partnersDropdownRef.current.contains(e.target as Node)) {
+        setPartnersOpen(false);
       }
     };
     document.addEventListener('pointerdown', handleClickOutside);
@@ -53,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
       if (event.key === 'Escape') {
         setMobileMenuOpen(false);
         setServicesOpen(false);
+        setPartnersOpen(false);
       }
     };
     document.addEventListener('keydown', handleEscape);
@@ -61,11 +67,17 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     setMobileMenuOpen(false);
+    setPartnersOpen(false);
   }, [currentPath]);
 
   const handleLinkClick = (path: string) => {
     setServicesOpen(false);
+    setPartnersOpen(false);
     setMobileMenuOpen(false);
+    if (path.startsWith(`${currentPath}#`)) {
+      document.getElementById(path.split('#')[1])?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
     onNavigate(path);
   };
   const handlePublicDestination = (destination: string) => {
@@ -89,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Zone 2: Navigation Links (Clean single-line text links with hover underline) */}
-        <nav className="hidden xl:flex items-center gap-7 text-sm font-medium text-[#626A63]">
+        <nav className="hidden xl:flex items-center gap-5 text-sm font-medium text-[#626A63]">
           <button
             style={{ order: navOrder('home') }}
             onClick={() => handlePublicDestination(navItem('home').destination)}
@@ -210,6 +222,24 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {navItem('contact').label}
           </button>
+          <div className="relative" ref={partnersDropdownRef} style={{ order: siteContent.navigation.length }}>
+            <button
+              type="button"
+              onClick={() => setPartnersOpen((open) => !open)}
+              aria-expanded={partnersOpen}
+              aria-controls="partners-navigation-menu"
+              aria-current={currentPath.startsWith('/partners/') ? 'page' : undefined}
+              className={`flex items-center gap-1.5 whitespace-nowrap transition-colors hover:text-[#70bf56] ${currentPath.startsWith('/partners/') ? 'text-[#171A17]' : ''}`}
+            >
+              Partners <ChevronDown className={`h-3.5 w-3.5 transition-transform ${partnersOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </button>
+            {partnersOpen && (
+              <div id="partners-navigation-menu" className="absolute right-0 top-full z-50 mt-3 w-64 rounded-2xl border border-[#E5E9E4] bg-white p-2 shadow-xl">
+                <button onClick={() => handleLinkClick('/partners/localdrop')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">NearGrow LocalDrop</button>
+                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Login <span className="block text-xs text-[#626A63]">Portal design preview</span></button>
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Zone 3: 1 Primary Action (Single CTA button) */}
@@ -341,7 +371,19 @@ export const Header: React.FC<HeaderProps> = ({
             >
               {navItem('contact').label}
             </button>
+            <button
+              style={{ order: siteContent.navigation.length, width: 'calc(50% - 0.25rem)' }}
+              onClick={() => handleLinkClick('/partners/localdrop')}
+              aria-current={currentPath.startsWith('/partners/') ? 'page' : undefined}
+              className={`min-h-11 p-2.5 rounded-lg text-left text-sm font-medium ${currentPath.startsWith('/partners/') ? 'bg-[#EBF7EE] text-[#216F3D] font-semibold' : 'text-[#626A63] bg-[#F7F9F6]'}`}
+            >
+              Partners
+            </button>
           </div>
+
+          <button onClick={() => handleLinkClick('/partners/portal-preview')} className="w-full min-h-11 rounded-lg bg-[#F7F9F6] p-2.5 text-left text-sm text-[#626A63]">
+            Partner Login <span className="text-xs">· Preview</span>
+          </button>
 
           <div>
             <div className="text-xs font-semibold text-[#171A17] uppercase tracking-wider mb-2">{text('header.servicesDropdown')}</div>

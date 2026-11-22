@@ -23,6 +23,7 @@ const PUBLIC_PAGE_PATHS = [
   '/blog',
   '/contact',
   '/get-started',
+  '/partners/localdrop',
 ] as const;
 
 const CONTENT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

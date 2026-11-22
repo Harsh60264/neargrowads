@@ -14,6 +14,8 @@ const BlogIndexPage = React.lazy(() => import('./components/blog/BlogIndexPage')
 const BlogPostPage = React.lazy(() => import('./components/blog/BlogPostPage').then((module) => ({ default: module.BlogPostPage })));
 const ContactPage = React.lazy(() => import('./components/contact/ContactPage').then((module) => ({ default: module.ContactPage })));
 const GetStartedPage = React.lazy(() => import('./components/contact/GetStartedPage').then((module) => ({ default: module.GetStartedPage })));
+const LocalDropPage = React.lazy(() => import('./components/partners/LocalDropPage').then((module) => ({ default: module.LocalDropPage })));
+const PartnerPortalPreview = React.lazy(() => import('./components/partners/PartnerPortalPreview').then((module) => ({ default: module.PartnerPortalPreview })));
 const PrivacyPolicy = React.lazy(() => import('./components/legal/PrivacyPolicy').then((module) => ({ default: module.PrivacyPolicy })));
 const TermsPage = React.lazy(() => import('./components/legal/TermsPage').then((module) => ({ default: module.TermsPage })));
 const ThankYouPage = React.lazy(() => import('./components/legal/ThankYouPage').then((module) => ({ default: module.ThankYouPage })));
@@ -238,6 +240,14 @@ export default function App() {
         title: 'Get Started | NearGrow Ads',
         description: 'Start a conversation with NearGrow Ads about your business goals.',
       },
+      '/partners/localdrop': {
+        title: 'NearGrow LocalDrop | Delivery Partner Opportunities | NearGrow Ads',
+        description: 'Explore NearGrow LocalDrop and share your interest in local promotional card campaigns as a delivery partner or business.',
+      },
+      '/partners/portal-preview': {
+        title: 'Partner Portal Preview | NearGrow LocalDrop',
+        description: 'Preview planned delivery partner screens for NearGrow LocalDrop.',
+      },
       '/privacy-policy': {
         title: 'Privacy Policy | NearGrow Ads',
         description: 'NearGrow Ads website information.',
@@ -283,7 +293,7 @@ export default function App() {
       ['name', 'twitter:title', seo.title],
       ['name', 'twitter:description', seo.description],
       ['name', 'twitter:image', new URL(socialImage, `${siteOrigin.replace(/\/+$/, '')}/`).href],
-      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
+      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || currentPath === '/partners/portal-preview' || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
     ] as const;
     const previousMeta = metaEntries.map(([attribute, name, content]) => {
       const selector = `meta[${attribute}="${name}"]`;
@@ -541,6 +551,12 @@ export default function App() {
     }
     if (currentPath === '/get-started') {
       return <GetStartedPage onNavigate={navigate} siteContent={siteContent} />;
+    }
+    if (currentPath === '/partners/localdrop') {
+      return <LocalDropPage onNavigate={navigate} />;
+    }
+    if (currentPath === '/partners/portal-preview') {
+      return <PartnerPortalPreview onNavigate={navigate} />;
     }
     if (currentPath === '/privacy-policy') {
       return <PrivacyPolicy onNavigate={navigate} siteContent={siteContent} />;

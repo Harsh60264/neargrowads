@@ -1,6 +1,8 @@
 import type { RequestHandler } from 'express';
 
 export const PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS = [
+  '/partners/localdrop',
+  '/partners/portal-preview',
   '/services/*',
   '/catalogue/*',
   '/blog/*',
@@ -12,7 +14,7 @@ export interface RenderedPublicDynamicPage {
 }
 
 export function isPublicDynamicPagePath(pathname: string): boolean {
-  return /^\/(?:services|catalogue|blog)\/.+$/.test(pathname);
+  return pathname === '/partners/localdrop' || pathname === '/partners/portal-preview' || /^\/(?:services|catalogue|blog)\/.+$/.test(pathname);
 }
 
 export function createPublicDynamicPageHandler(

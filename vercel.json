@@ -74,6 +74,14 @@
       "destination": "/index.html"
     },
     {
+      "source": "/partners/localdrop",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/localdrop"
+    },
+    {
+      "source": "/partners/portal-preview",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/portal-preview"
+    },
+    {
       "source": "/services/:path*",
       "destination": "/api/handler?__vercel_original_api_path=/services/:path*"
     },

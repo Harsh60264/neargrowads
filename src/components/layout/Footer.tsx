@@ -159,6 +159,11 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, siteContent = DEFAUL
                 </button>
               </li>
               <li>
+                <button onClick={() => navigateTo('/partners/localdrop')} className="hover:text-white transition-colors">
+                  NearGrow LocalDrop
+                </button>
+              </li>
+              <li>
                 <button onClick={() => navigateTo(getCtaDestination(siteContent, 'header.consultation', '/get-started'))} className="hover:text-white transition-colors">
                   {text('footer.consultation')}
                 </button>
