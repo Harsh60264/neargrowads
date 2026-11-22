@@ -33,6 +33,7 @@ test('includes indexable core pages and published content using the canonical ho
   assert.match(xml, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
   assert.ok(locs.includes(`${canonicalOrigin}/`));
   assert.ok(locs.includes(`${canonicalOrigin}/get-started`));
+  assert.ok(locs.includes(`${canonicalOrigin}/partners/localdrop`));
   assert.ok(locs.includes(`${canonicalOrigin}/services/local-seo`));
   assert.ok(locs.includes(`${canonicalOrigin}/blog/published-article`));
   assert.ok(locs.includes(`${canonicalOrigin}/catalogue/published-package`));
@@ -44,6 +45,7 @@ test('includes indexable core pages and published content using the canonical ho
   assert.ok(!xml.includes('hidden-package'));
   assert.ok(!xml.includes('/catalogue/checkout'));
   assert.ok(!xml.includes('/admin'));
+  assert.ok(!xml.includes('/partners/portal-preview'));
   assert.ok(!xml.includes('/thank-you'));
   assert.ok(!xml.includes('/privacy-policy'));
   assert.ok(xml.includes(`<lastmod>${modifiedAt}</lastmod>`));

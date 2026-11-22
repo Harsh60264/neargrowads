@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   calculateMascotGeometry,
   MASCOT_MOBILE_BREAKPOINT,
+  MASCOT_SCALE_MIN,
   resolveMascotMultiplier,
 } from '../../data/mascotSizing.js';
 import {
@@ -395,6 +396,8 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   let chatOpen = false;
   let dockPanel = null;
   let dockResizeObserver = null;
+  let contentAvoidanceTimer = 0;
+  let wasScrollWithPage = false;
   let baseSize = 300;
   let hitWidth = 150;
   let hitHeight = 230;
@@ -498,6 +501,12 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     -(currentY - height / 2) * worldPerPixel,
     0,
   );
+  const scrollWithPage = () => floating && width < MASCOT_MOBILE_BREAKPOINT &&
+    pageRoot.hasAttribute('data-mascot-scroll-with-page');
+  const getScrollAnchor = () => ({
+    x: width / 2,
+    y: (document.querySelector('header')?.getBoundingClientRect().height ?? 72) + 40,
+  });
   const getHeadScreenPosition = () => {
     head.getWorldPosition(projectedHead).project(camera);
     return {
@@ -564,7 +573,15 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       : previewBaseSize ?? Math.min(width, height) * 0.94;
     if (floating && width < MASCOT_MOBILE_BREAKPOINT) baseSize = Math.min(baseSize, 140);
     const deviceWidth = previewBaseSize === undefined ? window.innerWidth : previewDevice === 'mobile' ? 390 : 1280;
-    const multiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const configuredMultiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const protectPageContent = floating && width < MASCOT_MOBILE_BREAKPOINT &&
+      pageRoot.hasAttribute('data-mascot-avoid-content');
+    const scrollsWithPage = scrollWithPage();
+    const multiplier = scrollsWithPage
+      ? Math.min(configuredMultiplier, 0.3)
+      : protectPageContent
+        ? Math.min(configuredMultiplier, MASCOT_SCALE_MIN / 100)
+        : configuredMultiplier;
     const geometry = calculateMascotGeometry(
       width,
       height,
@@ -585,15 +602,26 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     maxX = geometry.maxX;
     minY = geometry.minY;
     maxY = geometry.maxY;
-    currentX = Math.min(Math.max(currentX, minX), maxX);
-    currentY = Math.min(Math.max(currentY, minY), maxY);
-    const horizontalInset = chatOpen ? size * 0.34 + 8 : 0;
-    const positionMinX = chatOpen ? horizontalInset : minX;
-    const positionMaxX = chatOpen ? Math.max(positionMinX, width - horizontalInset) : maxX;
-    const positionMinY = chatOpen
+    if (scrollsWithPage) {
+      const anchor = getScrollAnchor();
+      currentX = targetX = anchor.x;
+      currentY = targetY = anchor.y;
+    } else if (wasScrollWithPage) {
+      currentX = targetX = maxX;
+      currentY = targetY = maxY;
+    } else {
+      currentX = Math.min(Math.max(currentX, minX), maxX);
+      currentY = Math.min(Math.max(currentY, minY), maxY);
+    }
+    wasScrollWithPage = scrollsWithPage;
+    const useDockPosition = chatOpen && !scrollsWithPage;
+    const horizontalInset = useDockPosition ? size * 0.34 + 8 : 0;
+    const positionMinX = useDockPosition ? horizontalInset : minX;
+    const positionMaxX = useDockPosition ? Math.max(positionMinX, width - horizontalInset) : maxX;
+    const positionMinY = useDockPosition
       ? (window.visualViewport?.offsetTop || 0) + size * 0.32 + 8
       : minY;
-    const positionMaxY = chatOpen
+    const positionMaxY = useDockPosition
       ? Math.max(positionMinY, (window.visualViewport?.offsetTop || 0) +
         (window.visualViewport?.height || height) - size * 0.68 - 8)
       : maxY;
@@ -615,6 +643,7 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       obstaclesDirty = true;
     }
     updateDockTarget();
+    scheduleContentAvoidance();
   };
   const scheduleLayout = () => {
     if (layoutFrame) return;
@@ -662,26 +691,38 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
         }
       }
     }
+    const protectPageContent = pageRoot.hasAttribute('data-mascot-avoid-content');
     const protectedControls = mobile
-      ? [document.activeElement, ...document.body.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel')]
+      ? [
+          document.activeElement,
+          ...document.body.querySelectorAll(protectPageContent
+            ? 'button,a[href],input,textarea,select,[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'
+            : '[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'),
+        ]
       : document.body.querySelectorAll('button,a[href],input,textarea,select,img,iframe,[role="dialog"],[role="alertdialog"]');
-    Array.from(protectedControls)
+    const pageObstacles = protectPageContent ? pageRoot.querySelectorAll('[data-mascot-obstacle]') : [];
+    Array.from(new Set([...protectedControls, ...pageObstacles]))
       .filter((element) => element instanceof Element)
       .forEach((element) => {
         if (element.closest('[hidden],[aria-hidden="true"],[data-mascot-ignore]')) return;
         const rect = element.getBoundingClientRect();
         const blockingContainer = mobile && element.matches('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel');
-        if (isVisibleRect(rect) && (blockingContainer || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
+        const markedObstacle = element.matches('[data-mascot-obstacle]');
+        if (isVisibleRect(rect) && (blockingContainer || markedObstacle || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
       });
     obstacleCache = rectangles;
     return obstacleCache;
   };
   const overlapArea = (x, y, obstacles) => {
     const unit = size / 6;
-    const left = x - 1.6 * unit - 8;
-    const right = x + 1.6 * unit + 8;
-    const top = y - 2.3 * unit - 8;
-    const bottom = y + 2.4 * unit + 8;
+    const contentAware = pageRoot.hasAttribute('data-mascot-avoid-content');
+    const horizontalExtent = contentAware ? 2.8 : 1.6;
+    const topExtent = contentAware ? 2.9 : 2.3;
+    const bottomExtent = contentAware ? 4.2 : 2.4;
+    const left = x - horizontalExtent * unit - 8;
+    const right = x + horizontalExtent * unit + 8;
+    const top = y - topExtent * unit - 8;
+    const bottom = y + bottomExtent * unit + 8;
     let area = 0;
     obstacles.forEach((rect) => {
       const overlapWidth = Math.min(right, rect.right) - Math.max(left, rect.left);
@@ -693,6 +734,21 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   const pickPosition = () => {
     const obstacles = measureObstacles();
     const mobile = isMobileMascotViewport(width);
+    if (pageRoot.hasAttribute('data-mascot-avoid-content') && !mobile) {
+      const step = Math.max(12, Math.min(24, size / 4));
+      let best = { x: currentX, y: currentY, score: Infinity };
+      for (let y = minY; y <= maxY; y += step) {
+        for (let x = minX; x <= maxX; x += step) {
+          const overlap = overlapArea(x, y, obstacles);
+          const distance = Math.hypot(x - currentX, y - currentY);
+          const score = overlap === 0 ? distance : 1_000_000 + overlap;
+          if (score < best.score) best = { x, y, score };
+        }
+      }
+      targetX = best.x;
+      targetY = best.y;
+      return;
+    }
     let bestX = currentX;
     let bestY = currentY;
     let bestScore = Infinity;
@@ -712,6 +768,24 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     }
     targetX = bestX;
     targetY = bestY;
+  };
+  const scheduleContentAvoidance = () => {
+    window.clearTimeout(contentAvoidanceTimer);
+    if (!floating || !pageRoot.hasAttribute('data-mascot-avoid-content') || scrollWithPage()) {
+      contentAvoidanceTimer = 0;
+      return;
+    }
+    contentAvoidanceTimer = window.setTimeout(() => {
+      contentAvoidanceTimer = 0;
+      if (destroyed || !pageRoot.hasAttribute('data-mascot-avoid-content')) return;
+      obstaclesDirty = true;
+      lastObstacleRead = -Infinity;
+      pickPosition();
+      currentX = targetX;
+      currentY = targetY;
+      positionModel();
+      setHitTarget();
+    }, 180);
   };
   const lerpRotation = (object, axis, value) => {
     object.rotation[axis] += (value - object.rotation[axis]) * easing;
@@ -741,10 +815,10 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     elapsed += delta;
     modeTime += delta;
     easing = 1 - Math.exp(-delta * 9);
-    const desiredSize = chatOpen ? dockSize : normalSize;
+    const desiredSize = chatOpen && !scrollWithPage() ? dockSize : normalSize;
     size += (desiredSize - size) * (1 - Math.exp(-delta * 5));
     root.scale.setScalar(worldPerPixel * size / 6);
-    if (chatOpen) {
+    if (chatOpen && !scrollWithPage()) {
       targetX = dockX;
       targetY = dockY;
     }
@@ -757,7 +831,11 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     const blocksInteractionRoaming = interactionTarget &&
       !interactionTarget.closest('#ng-chat-panel,.ng-chat-launcher');
     const blocksRoaming = chatOpen || (blocksInteractionRoaming && !isMobileMascotViewport(width)) || activeMode;
-    if (floating && chatOpen) {
+    if (scrollWithPage()) {
+      const anchor = getScrollAnchor();
+      targetX = anchor.x;
+      targetY = anchor.y;
+    } else if (floating && chatOpen) {
       targetX = dockX;
       targetY = dockY;
     } else if (floating && !blocksRoaming) {
@@ -780,13 +858,14 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       targetX = currentX;
       targetY = currentY;
     }
-    const horizontalInset = chatOpen ? size * 0.34 + 8 : 0;
-    const positionMinX = chatOpen ? horizontalInset : minX;
-    const positionMaxX = chatOpen ? Math.max(positionMinX, width - horizontalInset) : maxX;
-    const positionMinY = chatOpen
+    const useDockPosition = chatOpen && !scrollWithPage();
+    const horizontalInset = useDockPosition ? size * 0.34 + 8 : 0;
+    const positionMinX = useDockPosition ? horizontalInset : minX;
+    const positionMaxX = useDockPosition ? Math.max(positionMinX, width - horizontalInset) : maxX;
+    const positionMinY = useDockPosition
       ? (window.visualViewport?.offsetTop || 0) + size * 0.32 + 8
       : minY;
-    const positionMaxY = chatOpen
+    const positionMaxY = useDockPosition
       ? Math.max(positionMinY, (window.visualViewport?.offsetTop || 0) +
         (window.visualViewport?.height || height) - size * 0.68 - 8)
       : maxY;
@@ -978,12 +1057,15 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     scrollTimer = window.setTimeout(() => {
       isScrolling = false;
       obstaclesDirty = true;
+      scheduleContentAvoidance();
     }, 160);
   };
   const reconcilePointTargets = () => {
     mutationFrame = 0;
     if (!pointObserver || destroyed) return;
-    const currentTargets = new Set(pageRoot.querySelectorAll('section'));
+    const currentTargets = pageRoot.hasAttribute('data-mascot-avoid-content')
+      ? new Set()
+      : new Set(pageRoot.querySelectorAll('section'));
     const previouslyObserved = pointObserver.__targets || new Set();
     previouslyObserved.forEach((target) => {
       if (!currentTargets.has(target)) pointObserver.unobserve(target);
@@ -993,6 +1075,7 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
     });
     pointObserver.__targets = currentTargets;
     obstaclesDirty = true;
+    scheduleContentAvoidance();
   };
   const schedulePointReconcile = () => {
     if (mutationFrame) return;
@@ -1002,7 +1085,8 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   if (floating) {
     pointObserver = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (!entry.isIntersecting || chatOpen || mode === 'celebrate' || entry.target.__neoPointed) return;
+        if (!entry.isIntersecting || chatOpen || mode === 'celebrate' ||
+          pageRoot.hasAttribute('data-mascot-avoid-content') || entry.target.__neoPointed) return;
         entry.target.__neoPointed = true;
         pointTo(entry.target.querySelector('h2,h3') || entry.target);
       });
@@ -1015,16 +1099,36 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
   }, { threshold: 0 });
   sceneObserver.observe(canvas);
   if (floating) {
-    mainMutationObserver = new MutationObserver(schedulePointReconcile);
-    mainMutationObserver.observe(pageRoot, { childList: true, subtree: true, characterData: true });
+    mainMutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.type === 'attributes' &&
+        (mutation.attributeName === 'data-mascot-avoid-content' ||
+          mutation.attributeName === 'data-mascot-scroll-with-page'))) {
+        if (mode === 'point') {
+          mode = 'idle';
+          selectedPoint = null;
+        }
+        scheduleLayout();
+      }
+      schedulePointReconcile();
+    });
+    mainMutationObserver.observe(pageRoot, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-mascot-avoid-content', 'data-mascot-scroll-with-page'],
+    });
   } else if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
     resizeObserver = new ResizeObserver(layout);
     resizeObserver.observe(canvas.parentElement);
   }
 
   layout();
-  currentX = targetX = floating ? maxX : width / 2;
-  currentY = targetY = floating ? maxY : height / 2;
+  if (!scrollWithPage()) {
+    currentX = targetX = floating ? maxX : width / 2;
+    currentY = targetY = floating ? maxY : height / 2;
+  }
+  positionModel();
   setExpression('happy');
   setHitTarget();
   registerSceneResources();
@@ -1082,6 +1186,7 @@ function mountNeoMascot3d(canvas, hitTarget, pageRoot, onCelebrate, {
       destroyed = true;
       stop();
       window.clearTimeout(scrollTimer);
+      window.clearTimeout(contentAvoidanceTimer);
       if (layoutFrame) cancelAnimationFrame(layoutFrame);
       if (mutationFrame) cancelAnimationFrame(mutationFrame);
       window.removeEventListener('resize', scheduleLayout);

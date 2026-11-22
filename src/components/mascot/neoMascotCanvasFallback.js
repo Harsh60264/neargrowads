@@ -1,6 +1,7 @@
 import {
   calculateMascotGeometry,
   MASCOT_MOBILE_BREAKPOINT,
+  MASCOT_SCALE_MIN,
   resolveMascotMultiplier,
 } from '../../data/mascotSizing.js';
 import {
@@ -364,6 +365,8 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   let resizeObserver;
   let mutationFrame = 0;
   let scrollTimer = 0;
+  let contentAvoidanceTimer = 0;
+  let wasScrollWithPage = false;
   let isScrolling = false;
   let layoutFrame = 0;
   let textNodes = [];
@@ -432,6 +435,12 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     dockY = dock.y;
     dockSize = Math.min(normalSize, dock.size);
   };
+  const scrollWithPage = () => floating && width < MASCOT_MOBILE_BREAKPOINT &&
+    pageRoot.hasAttribute('data-mascot-scroll-with-page');
+  const getScrollAnchor = () => ({
+    x: width / 2,
+    y: (document.querySelector('header')?.getBoundingClientRect().height ?? 72) + 40,
+  });
   const layout = () => {
     const previousWidth = width;
     const previousHeight = height;
@@ -448,7 +457,15 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     if (canvas.style.width !== `${width}px`) canvas.style.width = `${width}px`;
     if (canvas.style.height !== `${height}px`) canvas.style.height = `${height}px`;
     const deviceWidth = previewBaseSize === undefined ? window.innerWidth : previewDevice === 'mobile' ? 390 : 1280;
-    const multiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const configuredMultiplier = resolveMascotMultiplier(sizeSettings, deviceWidth);
+    const protectPageContent = floating && width < MASCOT_MOBILE_BREAKPOINT &&
+      pageRoot.hasAttribute('data-mascot-avoid-content');
+    const scrollsWithPage = scrollWithPage();
+    const multiplier = scrollsWithPage
+      ? Math.min(configuredMultiplier, 0.3)
+      : protectPageContent
+        ? Math.min(configuredMultiplier, MASCOT_SCALE_MIN / 100)
+        : configuredMultiplier;
     const baseSize = floating
       ? Math.max(150, Math.min(height * 0.21, 215))
       : previewBaseSize ?? Math.min(width, height) * 0.94;
@@ -466,10 +483,20 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     maxY = geometry.maxY;
     hitWidth = geometry.hitWidth;
     hitHeight = geometry.hitHeight;
-    currentX = Math.min(Math.max(currentX || (floating ? maxX : width / 2), minX), maxX);
-    currentY = Math.min(Math.max(currentY || (floating ? maxY : height / 2), minY), maxY);
-    targetX = Math.min(Math.max(targetX || currentX, minX), maxX);
-    targetY = Math.min(Math.max(targetY || currentY, minY), maxY);
+    if (scrollsWithPage) {
+      const anchor = getScrollAnchor();
+      currentX = targetX = anchor.x;
+      currentY = targetY = anchor.y;
+    } else if (wasScrollWithPage) {
+      currentX = targetX = maxX;
+      currentY = targetY = maxY;
+    } else {
+      currentX = Math.min(Math.max(currentX || (floating ? maxX : width / 2), minX), maxX);
+      currentY = Math.min(Math.max(currentY || (floating ? maxY : height / 2), minY), maxY);
+      targetX = Math.min(Math.max(targetX || currentX, minX), maxX);
+      targetY = Math.min(Math.max(targetY || currentY, minY), maxY);
+    }
+    wasScrollWithPage = scrollsWithPage;
     positionHitTarget();
     positionSvgRenderer();
     if (
@@ -485,6 +512,7 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       obstaclesDirty = true;
     }
     updateDockTarget();
+    scheduleContentAvoidance();
   };
   const scheduleLayout = () => {
     if (layoutFrame) return;
@@ -568,24 +596,36 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       range.selectNodeContents(node);
       Array.from(range.getClientRects()).filter(isVisible).forEach((rect) => rectangles.push(rect));
     });
+    const protectPageContent = pageRoot.hasAttribute('data-mascot-avoid-content');
     const protectedControls = mobile
-      ? [document.activeElement, ...document.body.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel')]
+      ? [
+          document.activeElement,
+          ...document.body.querySelectorAll(protectPageContent
+            ? 'button,a[href],input,textarea,select,[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'
+            : '[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel'),
+        ]
       : document.body.querySelectorAll('button,a[href],input,textarea,select,img,iframe,[role="dialog"],[role="alertdialog"]');
-    Array.from(protectedControls).filter((element) => element instanceof Element).forEach((element) => {
+    const pageObstacles = protectPageContent ? pageRoot.querySelectorAll('[data-mascot-obstacle]') : [];
+    Array.from(new Set([...protectedControls, ...pageObstacles])).filter((element) => element instanceof Element).forEach((element) => {
       if (element.closest('[hidden],[aria-hidden="true"],[data-mascot-ignore]')) return;
       const rect = element.getBoundingClientRect();
       const blockingContainer = mobile && element.matches('[role="dialog"],[role="alertdialog"],[aria-modal="true"],#ng-chat-panel');
-      if (isVisible(rect) && (blockingContainer || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
+      const markedObstacle = element.matches('[data-mascot-obstacle]');
+      if (isVisible(rect) && (blockingContainer || markedObstacle || rect.width * rect.height < width * height * 0.5)) rectangles.push(rect);
     });
     obstacleCache = rectangles;
     return rectangles;
   };
   const overlapArea = (x, y, obstacles) => {
     const unit = size / 6;
-    const left = x - 1.6 * unit - 8;
-    const right = x + 1.6 * unit + 8;
-    const top = y - 2.3 * unit - 8;
-    const bottom = y + 2.4 * unit + 8;
+    const contentAware = pageRoot.hasAttribute('data-mascot-avoid-content');
+    const horizontalExtent = contentAware ? 2.8 : 1.6;
+    const topExtent = contentAware ? 2.9 : 2.3;
+    const bottomExtent = contentAware ? 4.2 : 2.4;
+    const left = x - horizontalExtent * unit - 8;
+    const right = x + horizontalExtent * unit + 8;
+    const top = y - topExtent * unit - 8;
+    const bottom = y + bottomExtent * unit + 8;
     let area = 0;
     obstacles.forEach((rect) => {
       const overlapWidth = Math.min(right, rect.right) - Math.max(left, rect.left);
@@ -596,6 +636,21 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   };
   const pickPosition = () => {
     const obstacles = measureObstacles();
+    if (pageRoot.hasAttribute('data-mascot-avoid-content') && !isMobileMascotViewport(width)) {
+      const step = Math.max(12, Math.min(24, size / 4));
+      let best = { x: currentX, y: currentY, score: Infinity };
+      for (let y = minY; y <= maxY; y += step) {
+        for (let x = minX; x <= maxX; x += step) {
+          const overlap = overlapArea(x, y, obstacles);
+          const distance = Math.hypot(x - currentX, y - currentY);
+          const score = overlap === 0 ? distance : 1_000_000 + overlap;
+          if (score < best.score) best = { x, y, score };
+        }
+      }
+      targetX = best.x;
+      targetY = best.y;
+      return;
+    }
     let best = { x: currentX, y: currentY, score: Infinity };
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const x = minX + Math.random() * (maxX - minX);
@@ -610,6 +665,24 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     targetX = best.x;
     targetY = best.y;
   };
+  const scheduleContentAvoidance = () => {
+    window.clearTimeout(contentAvoidanceTimer);
+    if (!floating || !pageRoot.hasAttribute('data-mascot-avoid-content') || scrollWithPage()) {
+      contentAvoidanceTimer = 0;
+      return;
+    }
+    contentAvoidanceTimer = window.setTimeout(() => {
+      contentAvoidanceTimer = 0;
+      if (destroyed || !pageRoot.hasAttribute('data-mascot-avoid-content')) return;
+      obstaclesDirty = true;
+      lastObstacleRead = -Infinity;
+      pickPosition();
+      currentX = targetX;
+      currentY = targetY;
+      positionHitTarget();
+      positionSvgRenderer();
+    }, 180);
+  };
   const setHitTarget = () => {
     positionHitTarget();
   };
@@ -621,13 +694,17 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     lastFrame = now;
     elapsed += delta;
     modeTime += delta;
-    const desiredSize = chatOpen ? dockSize : normalSize;
+    const desiredSize = chatOpen && !scrollWithPage() ? dockSize : normalSize;
     size += (desiredSize - size) * (1 - Math.exp(-delta * 5));
     const activeMode = mode === 'celebrate' || mode === 'point';
     const interactionTarget = interactionTracker?.target;
     const blocksInteractionRoaming = interactionTarget &&
       !interactionTarget.closest('#ng-chat-panel,.ng-chat-launcher');
-    if (floating && chatOpen) {
+    if (scrollWithPage()) {
+      const anchor = getScrollAnchor();
+      targetX = anchor.x;
+      targetY = anchor.y;
+    } else if (floating && chatOpen) {
       targetX = dockX;
       targetY = dockY;
     } else if (floating && (!blocksInteractionRoaming || isMobileMascotViewport(width)) && !activeMode) {
@@ -650,13 +727,14 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       targetX = currentX;
       targetY = currentY;
     }
-    const horizontalInset = chatOpen ? size * 0.34 + 8 : 0;
-    const positionMinX = chatOpen ? horizontalInset : minX;
-    const positionMaxX = chatOpen ? Math.max(positionMinX, width - horizontalInset) : maxX;
-    const positionMinY = chatOpen
+    const useDockPosition = chatOpen && !scrollWithPage();
+    const horizontalInset = useDockPosition ? size * 0.34 + 8 : 0;
+    const positionMinX = useDockPosition ? horizontalInset : minX;
+    const positionMaxX = useDockPosition ? Math.max(positionMinX, width - horizontalInset) : maxX;
+    const positionMinY = useDockPosition
       ? (window.visualViewport?.offsetTop || 0) + size * 0.32 + 8
       : minY;
-    const positionMaxY = chatOpen
+    const positionMaxY = useDockPosition
       ? Math.max(positionMinY, (window.visualViewport?.offsetTop || 0) +
         (window.visualViewport?.height || height) - size * 0.68 - 8)
       : maxY;
@@ -760,17 +838,21 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
     scrollTimer = window.setTimeout(() => {
       isScrolling = false;
       obstaclesDirty = true;
+      scheduleContentAvoidance();
     }, 160);
   };
   const reconcilePointTargets = () => {
     mutationFrame = 0;
     if (!pointObserver || destroyed) return;
-    const targets = new Set(pageRoot.querySelectorAll('section'));
+    const targets = pageRoot.hasAttribute('data-mascot-avoid-content')
+      ? new Set()
+      : new Set(pageRoot.querySelectorAll('section'));
     const oldTargets = pointObserver.__targets || new Set();
     oldTargets.forEach((target) => { if (!targets.has(target)) pointObserver.unobserve(target); });
     targets.forEach((target) => { if (!oldTargets.has(target)) pointObserver.observe(target); });
     pointObserver.__targets = targets;
     obstaclesDirty = true;
+    scheduleContentAvoidance();
   };
   const schedulePointReconcile = () => {
     if (!mutationFrame) mutationFrame = requestAnimationFrame(reconcilePointTargets);
@@ -778,7 +860,8 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
 
   if (floating) {
     pointObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
-      if (entry.isIntersecting && !chatOpen && mode !== 'celebrate' && !entry.target.__neoPointed) {
+      if (entry.isIntersecting && !chatOpen && mode !== 'celebrate' &&
+        !pageRoot.hasAttribute('data-mascot-avoid-content') && !entry.target.__neoPointed) {
         entry.target.__neoPointed = true;
         pointTo(entry.target.querySelector('h2,h3') || entry.target);
       }
@@ -791,16 +874,35 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
   }, { threshold: 0 });
   sceneObserver.observe(svgRenderer?.element ?? canvas);
   if (floating) {
-    mutationObserver = new MutationObserver(schedulePointReconcile);
-    mutationObserver.observe(pageRoot, { childList: true, subtree: true, characterData: true });
+    mutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.type === 'attributes' &&
+        (mutation.attributeName === 'data-mascot-avoid-content' ||
+          mutation.attributeName === 'data-mascot-scroll-with-page'))) {
+        if (mode === 'point') {
+          mode = 'idle';
+          selectedPoint = null;
+        }
+        scheduleLayout();
+      }
+      schedulePointReconcile();
+    });
+    mutationObserver.observe(pageRoot, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['data-mascot-avoid-content', 'data-mascot-scroll-with-page'],
+    });
   } else if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
     resizeObserver = new ResizeObserver(layout);
     resizeObserver.observe(canvas.parentElement);
   }
 
   layout();
-  currentX = targetX = floating ? maxX : width / 2;
-  currentY = targetY = floating ? maxY : height / 2;
+  if (!scrollWithPage()) {
+    currentX = targetX = floating ? maxX : width / 2;
+    currentY = targetY = floating ? maxY : height / 2;
+  }
   setExpression('happy');
   positionHitTarget();
   if (floating || !resizeObserver) window.addEventListener('resize', scheduleLayout, { passive: true });
@@ -855,6 +957,7 @@ export function mountNeoMascotCanvasFallback(canvas, hitTarget, pageRoot, onCele
       stop();
       svgRenderer?.destroy();
       window.clearTimeout(scrollTimer);
+      window.clearTimeout(contentAvoidanceTimer);
       if (layoutFrame) cancelAnimationFrame(layoutFrame);
       if (mutationFrame) cancelAnimationFrame(mutationFrame);
       window.removeEventListener('resize', scheduleLayout);

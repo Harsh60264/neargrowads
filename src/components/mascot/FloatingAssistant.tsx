@@ -5,9 +5,10 @@ import type { MascotSettings } from '../../data/siteContent';
 
 export const FloatingAssistant: React.FC<{
   sizeSettings: MascotSettings;
+  scrollWithPage: boolean;
   chatOpen: boolean;
   onOpenChat: () => void;
-}> = ({ sizeSettings, chatOpen, onOpenChat }) => {
+}> = ({ sizeSettings, scrollWithPage, chatOpen, onOpenChat }) => {
   const [isHidden, setIsHidden] = useState(() => {
     try {
       return window.localStorage.getItem('neargrow-neo-hidden') === 'true';
@@ -31,7 +32,12 @@ export const FloatingAssistant: React.FC<{
 
   return (
     <>
-      {!isHidden && <NeoMascot sizeSettings={sizeSettings} chatOpen={chatOpen} onOpenChat={onOpenChat} />}
+      {!isHidden && <NeoMascot
+        sizeSettings={sizeSettings}
+        scrollWithPage={scrollWithPage}
+        chatOpen={chatOpen}
+        onOpenChat={onOpenChat}
+      />}
 
       <button
         type="button"

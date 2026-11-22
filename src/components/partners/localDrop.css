@@ -1,0 +1,194 @@
+.localdrop-page {
+  --localdrop-bg: var(--brand-bg);
+  --localdrop-surface: var(--brand-surface);
+  --localdrop-soft: var(--brand-bg-soft);
+  --localdrop-text: var(--brand-text);
+  --localdrop-muted: var(--brand-text-muted);
+  --localdrop-green: var(--brand-green);
+  --localdrop-border: var(--brand-border);
+  color: var(--localdrop-text);
+  background: var(--localdrop-bg);
+}
+
+.localdrop-container,
+.localdrop-hero {
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: clamp(20px, 4vw, 48px);
+}
+
+.localdrop-hero {
+  display: grid;
+  grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+  align-items: center;
+  gap: clamp(30px, 5vw, 80px);
+  padding-block: clamp(64px, 8vw, 110px);
+}
+
+.localdrop-eyebrow {
+  display: inline-flex;
+  border: 1px solid var(--localdrop-border);
+  border-radius: 100px;
+  background: var(--localdrop-soft);
+  padding: 8px 16px;
+  color: var(--localdrop-green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.localdrop-hero h1 {
+  margin: 26px 0 20px;
+  max-width: 690px;
+  font-size: clamp(40px, 4.5vw, 68px);
+  font-weight: 800;
+  letter-spacing: -.065em;
+  line-height: 1.07;
+}
+
+.localdrop-hero h1 span {
+  color: var(--localdrop-green);
+  text-decoration: underline;
+  text-decoration-color: var(--brand-orange);
+  text-decoration-thickness: 4px;
+  text-underline-offset: 8px;
+}
+
+.localdrop-hero-copy > p,
+.localdrop-access-grid > div:first-child > p:last-child,
+.localdrop-interest-grid > div:first-child > p:last-of-type {
+  max-width: 520px;
+  color: var(--localdrop-muted);
+  font-size: clamp(16px, 1.5vw, 19px);
+  line-height: 1.65;
+}
+
+.localdrop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.localdrop-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: 999px;
+  padding: 12px 22px;
+  font-size: 14px;
+  font-weight: 750;
+  text-align: center;
+  transition: transform .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+.localdrop-button:hover { transform: translateY(-2px); }
+.localdrop-button:focus-visible,
+.localdrop-replay:focus-visible,
+.localdrop-text-link:focus-visible,
+.localdrop-form-tabs button:focus-visible { outline: 3px solid var(--brand-orange); outline-offset: 3px; }
+
+.localdrop-button-primary {
+  border: 1px solid var(--localdrop-green);
+  background: var(--localdrop-green);
+  color: #fff;
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--localdrop-green) 20%, transparent);
+}
+
+.localdrop-button-primary:hover { background: var(--brand-green-hover); }
+.localdrop-button-primary:disabled { cursor: wait; opacity: .65; transform: none; }
+.localdrop-button-outline { border: 1px solid var(--localdrop-border); background: var(--localdrop-surface); color: var(--localdrop-text); }
+
+.localdrop-video-wrap {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--localdrop-border);
+  border-radius: 28px;
+  background: #071426;
+  box-shadow: 0 28px 70px rgba(7, 20, 38, .14);
+  aspect-ratio: 16 / 9;
+}
+
+.localdrop-video-wrap video { width: 100%; height: 100%; display: block; object-fit: cover; }
+.localdrop-replay {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255,255,255,.7);
+  border-radius: 100px;
+  background: rgba(7, 20, 38, .75);
+  padding: 9px 14px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.localdrop-section { padding-block: clamp(70px, 8vw, 112px); scroll-margin-top: 84px; }
+.localdrop-section h2 { margin: 0 0 32px; max-width: 760px; font-size: clamp(34px, 3.7vw, 54px); font-weight: 800; letter-spacing: -.055em; line-height: 1.12; }
+.localdrop-kicker { margin: 0 0 14px; color: var(--localdrop-green); font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.localdrop-process { background: var(--localdrop-surface); }
+.localdrop-benefits { background: var(--localdrop-soft); }
+.localdrop-step-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.localdrop-benefit-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.localdrop-card { min-width: 0; border: 1px solid var(--localdrop-border); border-radius: 22px; background: var(--localdrop-surface); padding: 26px; box-shadow: 0 10px 36px rgba(7, 20, 38, .035); }
+.localdrop-card-top { display: flex; justify-content: space-between; align-items: start; }
+.localdrop-icon { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 14px; background: var(--localdrop-soft); color: var(--localdrop-green); }
+.localdrop-step-number { color: var(--brand-orange); font-size: 22px; font-weight: 800; }
+.localdrop-card h3 { margin: 22px 0 10px; font-size: 20px; font-weight: 800; line-height: 1.25; letter-spacing: -.025em; }
+.localdrop-card p { margin: 0; color: var(--localdrop-muted); font-size: 14px; line-height: 1.6; }
+.localdrop-access-grid,
+.localdrop-interest-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(28px, 6vw, 100px); }
+.localdrop-access-card,
+.localdrop-interest-panel { border: 1px solid var(--localdrop-border); border-radius: 26px; background: var(--localdrop-surface); padding: clamp(24px, 4vw, 42px); box-shadow: 0 20px 55px rgba(7, 20, 38, .07); }
+.localdrop-access-card > svg { color: var(--localdrop-green); }
+.localdrop-access-card h3,
+.localdrop-interest-panel h3 { margin: 18px 0 12px; font-size: 28px; font-weight: 800; letter-spacing: -.04em; }
+.localdrop-access-card p { color: var(--localdrop-muted); line-height: 1.7; }
+.localdrop-text-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; color: var(--localdrop-green); font-weight: 750; }
+.localdrop-interest { background: var(--localdrop-soft); }
+.localdrop-form-tabs { display: flex; gap: 8px; border-radius: 14px; padding: 5px; background: var(--localdrop-soft); }
+.localdrop-form-tabs button { flex: 1; min-height: 40px; border-radius: 10px; color: var(--localdrop-muted); font-size: 13px; font-weight: 700; }
+.localdrop-form-tabs button[aria-pressed='true'] { background: var(--localdrop-surface); color: var(--localdrop-text); box-shadow: 0 2px 10px rgba(7,20,38,.08); }
+.localdrop-form { display: grid; gap: 16px; margin-top: 22px; }
+.localdrop-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.localdrop-form label { display: grid; gap: 7px; color: var(--localdrop-text); font-size: 13px; font-weight: 700; }
+.localdrop-form input:not([type='checkbox']),
+.localdrop-form textarea { width: 100%; min-width: 0; border: 1px solid var(--localdrop-border); border-radius: 11px; background: var(--localdrop-bg); padding: 11px 13px; color: var(--localdrop-text); font-size: 14px; font-weight: 400; }
+.localdrop-form input:focus,
+.localdrop-form textarea:focus { outline: 2px solid var(--localdrop-green); outline-offset: 1px; }
+.localdrop-form .localdrop-trap { position: absolute; left: -9999px; width: 1px; height: 1px; }
+.localdrop-form .localdrop-consent { display: flex; align-items: start; gap: 10px; color: var(--localdrop-muted); font-weight: 500; line-height: 1.45; }
+.localdrop-consent input { margin-top: 3px; }
+.localdrop-form .localdrop-button { justify-self: start; }
+.localdrop-form-error { color: #b42318; font-size: 13px; }
+.localdrop-form-success { display: flex; align-items: center; gap: 12px; margin-top: 22px; border-radius: 14px; background: var(--localdrop-soft); padding: 18px; color: var(--localdrop-text); line-height: 1.5; }
+.localdrop-form-success svg { flex: none; color: var(--localdrop-green); }
+
+@media (max-width: 1000px) {
+  .localdrop-hero { grid-template-columns: 1fr; }
+  .localdrop-hero-copy { max-width: 700px; }
+  .localdrop-benefit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .localdrop-hero { padding-top: 48px; }
+  .localdrop-hero h1 { font-size: clamp(36px, 10vw, 52px); }
+  .localdrop-step-grid,
+  .localdrop-benefit-grid,
+  .localdrop-access-grid,
+  .localdrop-interest-grid,
+  .localdrop-form-grid { grid-template-columns: 1fr; }
+  .localdrop-actions .localdrop-button { width: 100%; }
+  .localdrop-card { padding: 22px; }
+  .localdrop-video-wrap { border-radius: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .localdrop-button { transition: none; }
+  .localdrop-button:hover { transform: none; }
+}

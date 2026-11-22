@@ -5,6 +5,15 @@ import {
   isProductionDeployment,
   resolveSiteOrigin,
 } from './siteOrigin';
+import { resolveCanonicalPageOrigin } from '../src/data/siteCanonical';
+
+test('LocalDrop canonical pages always use the production host', () => {
+  const previewOrigin = 'https://staging.neargrowads.com';
+  assert.equal(resolveCanonicalPageOrigin('/partners/localdrop', previewOrigin), CANONICAL_PRODUCTION_ORIGIN);
+  assert.equal(resolveCanonicalPageOrigin('/partners/localdrop/', previewOrigin), CANONICAL_PRODUCTION_ORIGIN);
+  assert.equal(resolveCanonicalPageOrigin('/partners/portal-preview', previewOrigin), CANONICAL_PRODUCTION_ORIGIN);
+  assert.equal(resolveCanonicalPageOrigin('/about', previewOrigin), previewOrigin);
+});
 
 test('production SITE_URL must use the canonical www origin', () => {
   assert.throws(() => resolveSiteOrigin(undefined, true), /SITE_URL/);
