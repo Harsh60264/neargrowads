@@ -22,6 +22,8 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   const [recoveryAccessToken, setRecoveryAccessToken] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [recoveryCodeVerifier, setRecoveryCodeVerifier] = useState('');
+  const [recoveryTokenHash, setRecoveryTokenHash] = useState('');
+  const [recoveryTokenType, setRecoveryTokenType] = useState('');
   const [signupConfirming, setSignupConfirming] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', mobileNumber: '', password: '', confirmPassword: '' });
 
@@ -79,6 +81,15 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
       return;
     }
     const searchQuery = new URLSearchParams(window.location.search);
+    const recoveryHash = searchQuery.get('token_hash');
+    const recoveryType = searchQuery.get('type');
+    if (recoveryHash && recoveryType === 'recovery') {
+      setRecoveryTokenHash(recoveryHash);
+      setRecoveryTokenType(recoveryType);
+      setMode('recovery');
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      return;
+    }
     const code = searchQuery.get('code');
     if (!code) return;
     const verifiers: string[] = [];
@@ -112,6 +123,14 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
           endpoint = '/api/partners/auth/complete';
           body = {
             accessToken: recoveryAccessToken,
+            password: form.password,
+            confirmPassword: form.confirmPassword,
+          };
+        } else if (recoveryTokenHash && recoveryTokenType === 'recovery') {
+          endpoint = '/api/partners/auth/complete';
+          body = {
+            tokenHash: recoveryTokenHash,
+            tokenType: recoveryTokenType,
             password: form.password,
             confirmPassword: form.confirmPassword,
           };
@@ -189,7 +208,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
 
   const passwordStrength = form.password.length >= 12 &&
     [/[a-z]/.test(form.password), /[A-Z]/.test(form.password), /\d/.test(form.password), /[^A-Za-z0-9]/.test(form.password)].filter(Boolean).length >= 3;
-  const recoveryReady = Boolean(recoveryAccessToken || (recoveryCode && recoveryCodeVerifier));
+  const recoveryReady = Boolean(recoveryAccessToken || (recoveryCode && recoveryCodeVerifier) || (recoveryTokenHash && recoveryTokenType === 'recovery'));
 
   return (
     <section className="grid min-h-[70vh] place-items-center px-4 py-10">

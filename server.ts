@@ -5803,8 +5803,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     let accessToken = typeof req.body?.accessToken === 'string' ? req.body.accessToken : '';
     const authorizationCode = typeof req.body?.authorizationCode === 'string' ? req.body.authorizationCode : '';
     const codeVerifier = typeof req.body?.codeVerifier === 'string' ? req.body.codeVerifier : '';
+    const tokenHash = typeof req.body?.tokenHash === 'string' ? req.body.tokenHash : '';
+    const tokenType = typeof req.body?.tokenType === 'string' ? req.body.tokenType : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     const confirmPassword = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+    if (tokenHash && (!/^[A-Za-z0-9_-]{20,512}$/.test(tokenHash) || tokenType !== 'recovery')) {
+      res.status(400).json({ message: 'This password-reset link is invalid or expired.' });
+      return;
+    }
     if (authorizationCode && (!/^[A-Za-z0-9_-]{1,512}$/.test(authorizationCode) ||
       !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier))) {
       res.status(400).json({ message: 'This password-reset link is invalid or expired.' });
@@ -5817,11 +5823,24 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     if (!partnerPasswordIsStrong(password) || password !== confirmPassword ||
       ((accessToken.length < 1 || accessToken.length > 10000) &&
-        (!authorizationCode || !codeVerifier))) {
+        (!authorizationCode || !codeVerifier) &&
+        (!tokenHash || tokenType !== 'recovery'))) {
       res.status(400).json({ message: 'Use a valid recovery link and a strong matching password.' });
       return;
     }
     try {
+      if (!accessToken && tokenHash && tokenType === 'recovery') {
+        const verifyResponse = await supabaseAuthRequest('verify', {
+          method: 'POST',
+          body: JSON.stringify({ token_hash: tokenHash, type: 'recovery' }),
+        });
+        const verified = await readSupabaseJson<{ access_token?: string }>(verifyResponse);
+        if (!verified.access_token) {
+          res.status(401).json({ message: 'This password-reset link is missing or expired.' });
+          return;
+        }
+        accessToken = verified.access_token;
+      }
       if (!accessToken && authorizationCode && codeVerifier) {
         const exchangeResponse = await supabaseAuthRequest('token?grant_type=pkce', {
           method: 'POST',

@@ -96,6 +96,9 @@ test('partner routes and authorization keep partner sessions separate from CMS a
   assert.match(server, /app_metadata\?\.account_type !== 'partner'/);
   assert.match(server, /banned_until/);
   assert.match(server, /A-Za-z0-9\._~-.*43,128/);
+  assert.match(server, /tokenHash = typeof req\.body\?\.tokenHash/);
+  assert.match(server, /tokenType !== 'recovery'/);
+  assert.match(server, /supabaseAuthRequest\('verify'/);
   assert.doesNotMatch(server, /res\.locals\.partnerIdentity\s*=\s*res\.locals\.adminIdentity/);
   assert.match(app, /currentPath === '\/partners\/dashboard'/);
   assert.match(app, /currentPath === '\/partners\/recovery'/);
