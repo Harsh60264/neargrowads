@@ -82,6 +82,14 @@
       "destination": "/api/handler?__vercel_original_api_path=/partners/portal-preview"
     },
     {
+      "source": "/partners/dashboard",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/dashboard"
+    },
+    {
+      "source": "/partners/recovery",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/recovery"
+    },
+    {
       "source": "/services/:path*",
       "destination": "/api/handler?__vercel_original_api_path=/services/:path*"
     },

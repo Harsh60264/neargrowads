@@ -92,6 +92,11 @@ import {
   validateSupabaseProjectConfiguration,
 } from './server/adminOwnerConfig';
 import { isSameOriginHost } from './server/adminAuthOrigin';
+import {
+  normalizePartnerEmail,
+  partnerPasswordIsStrong,
+  validatePartnerRegistration,
+} from './server/partnerAuth';
 import { createPublicSitemapHandler } from './server/publicSitemap';
 import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
@@ -171,6 +176,7 @@ const MAX_REQUESTS_PER_WINDOW = 10;
 const DEFAULT_PORT = 3000;
 const DEFAULT_HMR_PORT = 24678;
 const ADMIN_SESSION_COOKIE = 'neargrow_admin_session';
+const PARTNER_SESSION_COOKIE = 'neargrow_partner_session';
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
 const adminLoginAttempts = new Map<string, number[]>();
@@ -178,6 +184,8 @@ const adminReauthAttempts = new Map<string, number[]>();
 const adminRecoveryAttempts = new Map<string, number[]>();
 const adminAccountCreateAttempts = new Map<string, number[]>();
 const adminManagedRecoveryAttempts = new Map<string, number[]>();
+const partnerLoginAttempts = new Map<string, number[]>();
+const partnerRecoveryAttempts = new Map<string, number[]>();
 const serviceEnquiryAttempts = new Map<string, number[]>();
 const serviceOrderAttempts = new Map<string, number[]>();
 const securityEventWriteAttempts = new Map<string, number[]>();
@@ -3445,6 +3453,77 @@ function readAdminSession(req: Request): AdminSessionToken | undefined {
   }
 }
 
+interface PartnerProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  mobileNumber: string;
+  status: 'pending' | 'active' | 'disabled';
+}
+
+interface PartnerSessionToken {
+  sessionId: string;
+  userId: string;
+  expiresAt: number;
+}
+
+function partnerConfigIsReady(): boolean {
+  return Boolean(
+    process.env.SUPABASE_URL &&
+    process.env.SUPABASE_ANON_KEY &&
+    process.env.SUPABASE_SERVICE_ROLE_KEY &&
+    process.env.ADMIN_SESSION_SECRET &&
+    process.env.ADMIN_SESSION_SECRET.length >= 32,
+  );
+}
+
+function partnerSignature(payload: string): string {
+  return createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '').update(payload).digest('base64url');
+}
+
+function setPartnerSessionCookie(
+  req: Request,
+  res: Response,
+  sessionId: string,
+  userId: string,
+  expiresAt: string,
+): void {
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) throw new Error('The partner session expiry returned by Supabase is invalid.');
+  const payload = Buffer.from(JSON.stringify({ sessionId, userId, expiresAt: expiresAtMs })).toString('base64url');
+  res.cookie(PARTNER_SESSION_COOKIE, `${payload}.${partnerSignature(payload)}`, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || req.secure,
+    sameSite: 'strict',
+    path: '/api/partners',
+    expires: new Date(expiresAtMs),
+  });
+}
+
+function readPartnerSession(req: Request): PartnerSessionToken | undefined {
+  const cookie = req.headers.cookie
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${PARTNER_SESSION_COOKIE}=`))
+    ?.slice(PARTNER_SESSION_COOKIE.length + 1);
+  if (!cookie) return undefined;
+  const [payload, signature] = cookie.split('.');
+  if (!payload || !signature || !safeStringEqual(signature, partnerSignature(payload))) return undefined;
+  try {
+    const token = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Partial<PartnerSessionToken>;
+    if (
+      typeof token.sessionId !== 'string' ||
+      typeof token.userId !== 'string' ||
+      typeof token.expiresAt !== 'number' ||
+      !Number.isFinite(token.expiresAt)
+    ) return undefined;
+    if (token.expiresAt <= Date.now()) return undefined;
+    return token as PartnerSessionToken;
+  } catch {
+    return undefined;
+  }
+}
+
 async function supabaseAdminRequest(pathname: string, init: RequestInit = {}): Promise<globalThis.Response> {
   validateSupabaseProjectConfiguration(process.env);
   const baseUrl = process.env.SUPABASE_URL;
@@ -3656,6 +3735,47 @@ async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefi
     warnAdminAccountMigrationMissing(error);
   }
   return identity;
+}
+
+async function readPartnerProfile(userId: string): Promise<PartnerProfile | undefined> {
+  const query = new URLSearchParams({
+    id: `eq.${userId}`,
+    select: 'id,email,full_name,mobile_number,status',
+    limit: '1',
+  });
+  const rows = await readSupabaseJson<Array<Record<string, unknown>>>(
+    await supabaseAdminRequest(`rest/v1/partner_profiles?${query}`),
+  );
+  const row = rows[0];
+  if (!row || typeof row.id !== 'string' || typeof row.email !== 'string' ||
+    typeof row.full_name !== 'string' || typeof row.mobile_number !== 'string' ||
+    !['pending', 'active', 'disabled'].includes(String(row.status))) return undefined;
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.full_name,
+    mobileNumber: row.mobile_number,
+    status: row.status as PartnerProfile['status'],
+  };
+}
+
+async function authenticatePartnerSession(req: Request): Promise<PartnerProfile | undefined> {
+  const token = readPartnerSession(req);
+  if (!token) return undefined;
+  const sessionQuery = new URLSearchParams({
+    id: `eq.${token.sessionId}`,
+    user_id: `eq.${token.userId}`,
+    select: 'id,user_id,expires_at,revoked_at',
+    limit: '1',
+  });
+  const sessions = await readSupabaseJson<Array<{ expires_at?: string; revoked_at?: string | null }>>(
+    await supabaseAdminRequest(`rest/v1/partner_sessions?${sessionQuery}`),
+  );
+  const session = sessions[0];
+  if (!session || session.revoked_at || !session.expires_at || Date.parse(session.expires_at) <= Date.now()) return undefined;
+  const profile = await readPartnerProfile(token.userId);
+  if (!profile || profile.status !== 'active') return undefined;
+  return profile;
 }
 
 async function authenticateAdminSession(req: Request): Promise<AdminIdentity | undefined> {
@@ -5219,6 +5339,434 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
       res.status(503).json({ message: 'The uploaded file could not be verified.' });
+    }
+  });
+
+  app.post('/api/partners/register', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Partner registration must be submitted from this website.' });
+      return;
+    }
+    if (!partnerConfigIsReady()) {
+      res.status(503).json({ message: 'Partner accounts are not configured on this server.' });
+      return;
+    }
+    const validation = validatePartnerRegistration(req.body);
+    if (!validation.valid || !validation.email || !validation.password ||
+      !validation.mobileNumber || !validation.fullName) {
+      res.status(400).json({ message: validation.message || 'Enter valid partner registration details.' });
+      return;
+    }
+
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempts = (partnerLoginAttempts.get(clientIp) || []).filter((time) => now - time < ADMIN_LOGIN_WINDOW_MS);
+    if (attempts.length >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+      res.status(429).json({ message: 'Too many partner account requests. Please wait 15 minutes and try again.' });
+      return;
+    }
+    attempts.push(now);
+    partnerLoginAttempts.set(clientIp, attempts);
+
+    let authUserId: string | undefined;
+    let profileCreated = false;
+    try {
+      const adminQuery = new URLSearchParams({
+        email: `eq.${validation.email}`,
+        select: 'id',
+        limit: '1',
+      });
+      const adminRows = await readSupabaseJson<Array<{ id: string }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
+      );
+      if (adminRows.length) {
+        res.status(409).json({ message: 'This email is assigned to an administrator account.' });
+        return;
+      }
+
+      const signupResponse = await supabaseAuthRequest('signup', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: validation.email,
+          password: validation.password,
+          data: {
+            account_type: 'partner',
+            full_name: validation.fullName,
+            mobile_number: validation.mobileNumber,
+          },
+        }),
+      });
+      const signup = await signupResponse.json() as {
+        id?: string;
+        user?: { id?: string; email?: string; email_confirmed_at?: string };
+        access_token?: string;
+        msg?: string;
+        message?: string;
+        code?: string;
+      };
+      if (!signupResponse.ok) {
+        if (signup.code === 'user_already_exists' || /already registered|already exists/i.test(signup.msg || signup.message || '')) {
+          res.status(409).json({ message: 'This email is already registered.' });
+          return;
+        }
+        if (signupResponse.status === 429) {
+          res.status(429).json({ message: 'Email sign-up is temporarily rate-limited. Please try again later.' });
+          return;
+        }
+        res.status(400).json({ message: 'Supabase Auth rejected this registration. Check the email and password and try again.' });
+        return;
+      }
+      authUserId = signup.user?.id || signup.id;
+      if (!authUserId || signup.user?.email?.toLowerCase() !== validation.email) {
+        res.status(503).json({ message: 'Registration could not be confirmed. Please try again.' });
+        return;
+      }
+
+      await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          app_metadata: { account_type: 'partner' },
+          user_metadata: {
+            account_type: 'partner',
+            full_name: validation.fullName,
+            mobile_number: validation.mobileNumber,
+          },
+        }),
+      }).then((response) => readSupabaseJson<unknown>(response));
+
+      const status = signup.user?.email_confirmed_at ? 'active' : 'pending';
+      await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest('rest/v1/partner_profiles', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          id: authUserId,
+          email: validation.email,
+          full_name: validation.fullName,
+          mobile_number: validation.mobileNumber,
+          status,
+        }),
+      }));
+      profileCreated = true;
+      partnerLoginAttempts.delete(clientIp);
+      res.status(201).json({
+        registered: true,
+        message: status === 'active'
+          ? 'Partner account created. You can sign in now.'
+          : 'Partner account created. Verify the email sent by Supabase Auth before signing in.',
+      });
+    } catch (error) {
+      if (authUserId && !profileCreated) {
+        try {
+          await deleteSupabaseUser(authUserId);
+        } catch (cleanupError) {
+          console.error('[NearGrow Ads] Partner registration cleanup failed.', cleanupError);
+        }
+      }
+      if (error instanceof SupabaseRequestError && ['23505', 'PGRST205', '42P01'].includes(error.code || '') ||
+        error instanceof SupabaseRequestError && /partner_profiles/i.test(error.providerMessage)) {
+        res.status(error.code === '23505' ? 409 : 503).json({
+          message: error.code === '23505'
+            ? 'This email or partner account is already registered.'
+            : 'Partner account registration is not available until the partner SQL migration is applied.',
+        });
+        return;
+      }
+      console.error('[NearGrow Ads] Partner registration failed:', error);
+      res.status(503).json({ message: 'Partner registration is temporarily unavailable. Please try again.' });
+    }
+  });
+
+  app.post('/api/partners/login', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Partner sign-in must be submitted from this website.' });
+      return;
+    }
+    if (!partnerConfigIsReady()) {
+      res.status(503).json({ message: 'Partner accounts are not configured on this server.' });
+      return;
+    }
+    const email = normalizePartnerEmail(req.body?.email);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempts = (partnerLoginAttempts.get(clientIp) || []).filter((time) => now - time < ADMIN_LOGIN_WINDOW_MS);
+    if (attempts.length >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+      res.status(429).json({ message: 'Too many sign-in attempts. Please wait 15 minutes and try again.' });
+      return;
+    }
+    attempts.push(now);
+    partnerLoginAttempts.set(clientIp, attempts);
+    if (!email || password.length < 1 || password.length > 200) {
+      res.status(401).json({ message: 'The email or password is incorrect.' });
+      return;
+    }
+
+    try {
+      const authResponse = await supabaseAuthRequest('token?grant_type=password', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+      if (!authResponse.ok) {
+        res.status(401).json({ message: 'The email or password is incorrect.' });
+        return;
+      }
+      const authData = await authResponse.json() as {
+        access_token?: string;
+        user?: { id?: string; email?: string; email_confirmed_at?: string; app_metadata?: { account_type?: string } };
+      };
+      if (!authData.access_token || !authData.user?.id || !authData.user.email_confirmed_at) {
+        res.status(403).json({ message: 'Verify your email address before signing in.' });
+        return;
+      }
+      const userId = authData.user.id;
+
+      const adminQuery = new URLSearchParams({
+        id: `eq.${userId}`,
+        select: 'id',
+        limit: '1',
+      });
+      const adminRows = await readSupabaseJson<Array<{ id: string }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
+      );
+      if (adminRows.length || authData.user.app_metadata?.account_type !== 'partner') {
+        res.status(403).json({ message: 'This account is not authorized for the partner workspace.' });
+        return;
+      }
+
+      let profile = await readPartnerProfile(userId);
+      if (!profile || profile.email !== email) {
+        res.status(403).json({ message: 'This account is not registered as a delivery partner.' });
+        return;
+      }
+      if (profile.status === 'disabled') {
+        res.status(403).json({ message: 'This partner account is disabled.' });
+        return;
+      }
+      if (profile.status === 'pending') {
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/partner_profiles?id=eq.${profile.id}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ status: 'active', last_login_at: new Date().toISOString() }),
+        }));
+        profile = { ...profile, status: 'active' };
+      } else {
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(`rest/v1/partner_profiles?id=eq.${profile.id}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ last_login_at: new Date().toISOString() }),
+        }));
+      }
+
+      const sessionId = randomUUID();
+      const sessionResponse = await supabaseAdminRequest('rest/v1/partner_sessions', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          id: sessionId,
+          user_id: userId,
+          user_agent: (req.get('user-agent') || '').slice(0, 500),
+        }),
+      });
+      const sessions = await readSupabaseJson<Array<{ expires_at: string }>>(sessionResponse);
+      if (!sessions[0]?.expires_at) throw new Error('Supabase did not return the partner session expiry.');
+      setPartnerSessionCookie(req, res, sessionId, userId, sessions[0].expires_at);
+      partnerLoginAttempts.delete(clientIp);
+      res.json({ authenticated: true, user: profile });
+    } catch (error) {
+      if (error instanceof SupabaseRequestError && ['PGRST205', '42P01', '42703'].includes(error.code || '')) {
+        res.status(503).json({ message: 'Partner account access is not available until the partner SQL migration is applied.' });
+        return;
+      }
+      console.error('[NearGrow Ads] Partner login failed:', error);
+      res.status(503).json({ message: 'Sign-in could not be completed. Please try again.' });
+    }
+  });
+
+  app.get('/api/partners/session', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const profile = await authenticatePartnerSession(req);
+      res.json({ authenticated: Boolean(profile), ...(profile ? { user: profile } : {}) });
+    } catch (error) {
+      if (error instanceof SupabaseRequestError && ['PGRST205', '42P01', '42703'].includes(error.code || '')) {
+        res.status(503).json({ authenticated: false, message: 'Partner account access is not available until the partner SQL migration is applied.' });
+        return;
+      }
+      res.status(503).json({ authenticated: false, message: 'Could not verify the partner session.' });
+    }
+  });
+
+  app.get('/api/partners/dashboard', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const profile = await authenticatePartnerSession(req);
+      if (!profile) {
+        res.status(401).json({ message: 'Your partner session has expired. Please sign in again.' });
+        return;
+      }
+      res.json({
+        authenticated: true,
+        user: profile,
+        campaigns: [],
+        earnings: [],
+      });
+    } catch (error) {
+      res.status(503).json({ authenticated: false, message: 'The partner dashboard could not be loaded.' });
+    }
+  });
+
+  app.post('/api/partners/logout', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Partner sign-out must be requested from this website.' });
+      return;
+    }
+    const session = readPartnerSession(req);
+    if (session) {
+      try {
+        await readSupabaseJson<unknown>(await supabaseAdminRequest(
+          `rest/v1/partner_sessions?id=eq.${encodeURIComponent(session.sessionId)}&user_id=eq.${encodeURIComponent(session.userId)}`,
+          {
+            method: 'PATCH',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+          },
+        ));
+      } catch (error) {
+        console.error('[NearGrow Ads] Partner logout revocation failed:', error);
+      }
+    }
+    res.clearCookie(PARTNER_SESSION_COOKIE, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production' || req.secure,
+      sameSite: 'strict',
+      path: '/api/partners',
+    });
+    res.json({ authenticated: false });
+  });
+
+  app.post('/api/partners/auth/recovery', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Password recovery must be requested from this website.' });
+      return;
+    }
+    const email = normalizePartnerEmail(req.body?.email);
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const attempts = (partnerRecoveryAttempts.get(clientIp) || []).filter((time) => now - time < ADMIN_LOGIN_WINDOW_MS);
+    if (attempts.length >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+      res.status(429).json({ message: 'Too many recovery requests. Please wait 15 minutes and try again.' });
+      return;
+    }
+    attempts.push(now);
+    partnerRecoveryAttempts.set(clientIp, attempts);
+    if (!email) {
+      res.json({ requested: true, message: 'If this is a registered partner account, a recovery email has been sent.' });
+      return;
+    }
+    try {
+      if (partnerConfigIsReady()) {
+        const partnerQuery = new URLSearchParams({
+          email: `eq.${email}`,
+          select: 'id',
+          limit: '1',
+        });
+        const partners = await readSupabaseJson<Array<{ id: string }>>(
+          await supabaseAdminRequest(`rest/v1/partner_profiles?${partnerQuery}`),
+        );
+        if (partners.length) {
+          const redirectTo = `${adminAuthRedirectOrigin(req).replace(/\/+$/, '')}/partners/recovery`;
+          const query = new URLSearchParams({ redirect_to: redirectTo });
+          await supabaseAuthRequest(`recover?${query}`, {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+          });
+        }
+      }
+      partnerRecoveryAttempts.delete(clientIp);
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner password recovery request failed:', error);
+    }
+    res.json({ requested: true, message: 'If this is a registered partner account, a recovery email has been sent.' });
+  });
+
+  app.post('/api/partners/auth/complete', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Password recovery must be completed from this website.' });
+      return;
+    }
+    let accessToken = typeof req.body?.accessToken === 'string' ? req.body.accessToken : '';
+    const authorizationCode = typeof req.body?.authorizationCode === 'string' ? req.body.authorizationCode : '';
+    const codeVerifier = typeof req.body?.codeVerifier === 'string' ? req.body.codeVerifier : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const confirmPassword = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+    if (!partnerPasswordIsStrong(password) || password !== confirmPassword ||
+      ((accessToken.length < 1 || accessToken.length > 10000) &&
+        (!authorizationCode || !codeVerifier))) {
+      res.status(400).json({ message: 'Use a valid recovery link and a strong matching password.' });
+      return;
+    }
+    try {
+      if (!accessToken && authorizationCode && codeVerifier) {
+        const exchangeResponse = await supabaseAuthRequest('token?grant_type=pkce', {
+          method: 'POST',
+          body: JSON.stringify({ auth_code: authorizationCode, code_verifier: codeVerifier }),
+        });
+        const exchange = await readSupabaseJson<{ access_token?: string }>(exchangeResponse);
+        if (!exchange.access_token) {
+          res.status(401).json({ message: 'This password-reset link is missing or expired.' });
+          return;
+        }
+        accessToken = exchange.access_token;
+      }
+      const userResponse = await supabaseAuthRequest('user', { method: 'GET' }, accessToken);
+      const user = await readSupabaseJson<{ id?: string; email?: string; email_confirmed_at?: string }>(userResponse);
+      if (!user.id || !user.email_confirmed_at) {
+        res.status(401).json({ message: 'This password-reset link is missing or expired.' });
+        return;
+      }
+      const profile = await readPartnerProfile(user.id);
+      if (!profile || profile.email !== user.email?.toLowerCase()) {
+        res.status(403).json({ message: 'This recovery link is not authorized for a partner account.' });
+        return;
+      }
+      const adminQuery = new URLSearchParams({ id: `eq.${user.id}`, select: 'id', limit: '1' });
+      const adminRows = await readSupabaseJson<Array<{ id: string }>>(
+        await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
+      );
+      if (adminRows.length) {
+        res.status(403).json({ message: 'This recovery link is not authorized for a partner account.' });
+        return;
+      }
+      await readSupabaseJson<unknown>(await supabaseAuthRequest('user', {
+        method: 'PUT',
+        body: JSON.stringify({ password }),
+      }, accessToken));
+      await readSupabaseJson<unknown>(await supabaseAuthRequest('logout?scope=global', {
+        method: 'POST',
+      }, accessToken));
+      await readSupabaseJson<unknown>(await supabaseAdminRequest(
+        `rest/v1/partner_sessions?user_id=eq.${encodeURIComponent(user.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+        },
+      ));
+      res.clearCookie(PARTNER_SESSION_COOKIE, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production' || req.secure,
+        sameSite: 'strict',
+        path: '/api/partners',
+      });
+      res.json({ updated: true, message: 'Password updated. Sign in with your new password.' });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner password recovery completion failed:', error);
+      res.status(503).json({ message: 'Password recovery could not be completed. Request a new recovery email.' });
     }
   });
 
