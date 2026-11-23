@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  buildPartnerAuthRedirect,
   normalizePartnerEmail,
   normalizePartnerMobile,
   normalizePartnerName,
@@ -28,6 +29,15 @@ test('partner registration validation requires isolated profile fields and a str
     mobileNumber: '+919876543210',
     fullName: 'Delivery Partner',
   });
+});
+
+test('partner email redirects preserve an existing query separator for Auth templates', () => {
+  const signup = buildPartnerAuthRedirect('https://www.neargrowads.com', 'signup');
+  const recovery = buildPartnerAuthRedirect('https://www.neargrowads.com', 'recovery');
+  assert.equal(signup, 'https://www.neargrowads.com/partners/portal-preview?mode=signup&confirmed=1');
+  assert.equal(recovery, 'https://www.neargrowads.com/partners/recovery?mode=recovery');
+  assert.match(signup, /\?[^#]+&[^#]+/);
+  assert.match(recovery, /\?[^#]+$/);
 });
 
 test('partner registration rejects malformed email, mobile, name and weak passwords', () => {
@@ -75,6 +85,7 @@ test('partner routes and authorization keep partner sessions separate from CMS a
   assert.match(server, /app\.post\('\/api\/partners\/login'/);
   assert.match(server, /app\.post\('\/api\/partners\/logout'/);
   assert.match(server, /app\.post\('\/api\/partners\/auth\/recovery'/);
+  assert.match(server, /app\.post\('\/api\/partners\/auth\/confirm-signup'/);
   assert.match(server, /app\.post\('\/api\/partners\/auth\/complete'/);
   assert.match(server, /app\.get\('\/api\/partners\/dashboard'/);
   assert.match(server, /app_metadata: \{ account_type: 'partner' \}/);

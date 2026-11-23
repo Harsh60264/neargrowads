@@ -50,6 +50,16 @@ export function partnerPasswordIsStrong(value: unknown): value is string {
   return types >= 3;
 }
 
+export function buildPartnerAuthRedirect(siteUrl: string, mode: 'signup' | 'recovery'): string {
+  const url = new URL(
+    mode === 'signup' ? '/partners/portal-preview' : '/partners/recovery',
+    siteUrl,
+  );
+  url.searchParams.set('mode', mode);
+  if (mode === 'signup') url.searchParams.set('confirmed', '1');
+  return url.toString();
+}
+
 export function validatePartnerRegistration(value: unknown): PartnerRegistrationValidation {
   if (!value || typeof value !== 'object') {
     return { valid: false, message: 'Enter a valid partner registration.' };

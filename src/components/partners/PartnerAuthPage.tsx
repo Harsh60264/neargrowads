@@ -22,6 +22,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   const [recoveryAccessToken, setRecoveryAccessToken] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [recoveryCodeVerifier, setRecoveryCodeVerifier] = useState('');
+  const [signupConfirming, setSignupConfirming] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', mobileNumber: '', password: '', confirmPassword: '' });
 
   useEffect(() => {
@@ -42,6 +43,33 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   }, []);
 
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('mode') === 'signup' && query.get('confirmed') === '1') {
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      const tokenHash = query.get('token_hash');
+      const tokenType = query.get('type');
+      if (tokenHash && tokenType === 'signup') {
+        setSignupConfirming(true);
+        void fetch('/api/partners/auth/confirm-signup', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenHash, tokenType }),
+        })
+          .then(async (response) => {
+            const data = await response.json() as { message?: string };
+            if (!response.ok) throw new Error(data.message || 'Email confirmation could not be completed.');
+            setNotice(data.message || 'Email confirmed. You can now sign in.');
+          })
+          .catch((reason) => {
+            setError(reason instanceof Error ? reason.message : 'Email confirmation could not be completed.');
+          })
+          .finally(() => setSignupConfirming(false));
+      } else {
+        setNotice('Email confirmed. You can now sign in to your LocalDrop partner account.');
+      }
+      return;
+    }
     const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const accessToken = fragment.get('access_token');
     if (accessToken) {
@@ -50,8 +78,8 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
       setMode('recovery');
       return;
     }
-    const query = new URLSearchParams(window.location.search);
-    const code = query.get('code');
+    const searchQuery = new URLSearchParams(window.location.search);
+    const code = searchQuery.get('code');
     if (!code) return;
     const verifiers: string[] = [];
     for (let index = 0; index < window.localStorage.length; index += 1) {

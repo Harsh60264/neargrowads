@@ -96,6 +96,7 @@ import {
   normalizePartnerEmail,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
+  buildPartnerAuthRedirect,
 } from './server/partnerAuth';
 import { createPublicSitemapHandler } from './server/publicSitemap';
 import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
@@ -5429,7 +5430,12 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
 
-      const signupResponse = await supabaseAuthRequest('signup', {
+      const signupRedirectTo = buildPartnerAuthRedirect(
+        adminAuthRedirectOrigin(req),
+        'signup',
+      );
+      const signupQuery = new URLSearchParams({ redirect_to: signupRedirectTo });
+      const signupResponse = await supabaseAuthRequest(`signup?${signupQuery}`, {
         method: 'POST',
         body: JSON.stringify({
           email: validation.email,
@@ -5683,6 +5689,62 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     res.json({ authenticated: false });
   });
 
+  app.post('/api/partners/auth/confirm-signup', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Email confirmation must be completed from this website.' });
+      return;
+    }
+    const tokenHash = typeof req.body?.tokenHash === 'string' ? req.body.tokenHash : '';
+    const tokenType = typeof req.body?.tokenType === 'string' ? req.body.tokenType : '';
+    if (!/^[A-Za-z0-9_-]{20,512}$/.test(tokenHash) || tokenType !== 'signup') {
+      res.status(400).json({ message: 'This confirmation link is missing or invalid.' });
+      return;
+    }
+    try {
+      const verifyResponse = await supabaseAuthRequest('verify', {
+        method: 'POST',
+        body: JSON.stringify({ token_hash: tokenHash, type: 'signup' }),
+      });
+      const verified = await readSupabaseJson<{ access_token?: string }>(verifyResponse);
+      if (!verified.access_token) {
+        res.status(401).json({ message: 'This confirmation link is missing, expired, or already used.' });
+        return;
+      }
+      const userResponse = await supabaseAuthRequest('user', { method: 'GET' }, verified.access_token);
+      const user = await readSupabaseJson<{
+        id?: string;
+        email?: string;
+        email_confirmed_at?: string;
+        app_metadata?: { account_type?: string };
+      }>(userResponse);
+      if (!user.id || !user.email || !user.email_confirmed_at ||
+        user.app_metadata?.account_type !== 'partner') {
+        res.status(403).json({ message: 'This confirmation link is not authorized for a partner account.' });
+        return;
+      }
+      if (!await isPartnerIdentity(user.id, user.email.toLowerCase())) {
+        res.status(403).json({ message: 'This confirmation link is not authorized for a partner account.' });
+        return;
+      }
+      await readSupabaseJson<unknown>(await supabaseAdminRequest(
+        `rest/v1/partner_profiles?id=eq.${encodeURIComponent(user.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ status: 'active', updated_at: new Date().toISOString() }),
+        },
+      ));
+      await readSupabaseJson<unknown>(await supabaseAuthRequest('logout?scope=global', {
+        method: 'POST',
+      }, verified.access_token));
+      res.json({ confirmed: true, message: 'Email confirmed. You can now sign in to your partner account.' });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner signup confirmation failed:', error);
+      res.status(503).json({ message: 'Email confirmation could not be completed. Request a new confirmation email.' });
+    }
+  });
+
   app.post('/api/partners/auth/recovery', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
     if (!isSameOriginRequest(req)) {
@@ -5714,7 +5776,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           await supabaseAdminRequest(`rest/v1/partner_profiles?${partnerQuery}`),
         );
         if (partners.length) {
-          const redirectTo = `${adminAuthRedirectOrigin(req).replace(/\/+$/, '')}/partners/recovery`;
+          const redirectTo = buildPartnerAuthRedirect(
+            adminAuthRedirectOrigin(req),
+            'recovery',
+          );
           const query = new URLSearchParams({ redirect_to: redirectTo });
           await supabaseAuthRequest(`recover?${query}`, {
             method: 'POST',
