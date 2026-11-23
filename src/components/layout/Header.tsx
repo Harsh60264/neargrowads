@@ -25,6 +25,11 @@ export const Header: React.FC<HeaderProps> = ({
   const navItem = (id: SiteContent['navigation'][number]['id']) =>
     siteContent.navigation.find((item) => item.id === id) ?? DEFAULT_SITE_CONTENT.navigation.find((item) => item.id === id)!;
   const navOrder = (id: SiteContent['navigation'][number]['id']) => siteContent.navigation.findIndex((item) => item.id === id);
+  const partnersMenuItemClass = `block w-full rounded-xl px-4 py-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset ${
+    theme === 'dark'
+      ? 'text-[#F5F6FA] hover:bg-[#19291F] focus-visible:bg-[#19291F] active:bg-[#19291F] focus-visible:ring-[#70BE55]'
+      : 'text-[#171A17] hover:bg-[#EBF7EE] focus-visible:bg-[#EBF7EE] active:bg-[#EBF7EE] focus-visible:ring-[#23734B]'
+  }`;
   const navIsActive = (id: SiteContent['navigation'][number]['id']) => {
     const destination = navItem(id).destination;
     if (!destination.startsWith('/')) return false;
@@ -235,8 +240,8 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             {partnersOpen && (
               <div id="partners-navigation-menu" className="absolute right-0 top-full z-50 mt-3 w-64 rounded-2xl border border-[#E5E9E4] bg-white p-2 shadow-xl">
-                <button onClick={() => handleLinkClick('/partners/localdrop')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">NearGrow LocalDrop</button>
-                <button onClick={() => handleLinkClick('/partners/portal-preview')} className="block w-full rounded-xl px-4 py-3 text-left text-sm text-[#171A17] hover:bg-[#EBF7EE]">Partner Login</button>
+                <button onClick={() => handleLinkClick('/partners/localdrop')} className={partnersMenuItemClass}>NearGrow LocalDrop</button>
+                <button onClick={() => handleLinkClick('/partners/portal-preview')} className={partnersMenuItemClass}>Partner Login</button>
               </div>
             )}
           </div>
