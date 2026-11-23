@@ -60,7 +60,11 @@ test('partner SQL migration is isolated by separate tables, RLS and service-role
   assert.match(migration, /alter table public\.partner_sessions enable row level security/i);
   assert.match(migration, /revoke all on public\.partner_profiles, public\.partner_sessions\s+from public, anon, authenticated/i);
   assert.match(migration, /grant all on public\.partner_profiles, public\.partner_sessions\s+to service_role/i);
-  assert.doesNotMatch(migration, /grant .*to authenticated|create policy/i);
+  assert.match(migration, /partner_profiles_no_direct_access/i);
+  assert.match(migration, /partner_sessions_no_direct_access/i);
+  assert.match(migration, /to anon, authenticated[\s\S]*using \(false\)/i);
+  assert.match(migration, /prevent_admin_partner_profile/i);
+  assert.match(migration, /from public\.admin_users/i);
 });
 
 test('partner routes and authorization keep partner sessions separate from CMS admin middleware', () => {
@@ -77,6 +81,10 @@ test('partner routes and authorization keep partner sessions separate from CMS a
   assert.match(server, /adminRows\.length/);
   assert.match(server, /readPartnerProfile\(userId\)/);
   assert.match(server, /partner_sessions/);
+  assert.match(server, /isPartnerIdentity\(token\.userId, profile\.email\)/);
+  assert.match(server, /app_metadata\?\.account_type !== 'partner'/);
+  assert.match(server, /banned_until/);
+  assert.match(server, /A-Za-z0-9\._~-.*43,128/);
   assert.doesNotMatch(server, /res\.locals\.partnerIdentity\s*=\s*res\.locals\.adminIdentity/);
   assert.match(app, /currentPath === '\/partners\/dashboard'/);
   assert.match(app, /currentPath === '\/partners\/recovery'/);

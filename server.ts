@@ -3759,6 +3759,49 @@ async function readPartnerProfile(userId: string): Promise<PartnerProfile | unde
   };
 }
 
+async function readPartnerAuthStatus(userId: string): Promise<{
+  id: string;
+  email?: string;
+  email_confirmed_at?: string;
+  banned_until?: string;
+  app_metadata?: { account_type?: string };
+} | undefined> {
+  try {
+    const status = await readSupabaseJson<{
+      id: string;
+      email?: string;
+      email_confirmed_at?: string;
+      banned_until?: string;
+      app_metadata?: { account_type?: string };
+    }>(await supabaseAdminRequest(`auth/v1/admin/users/${encodeURIComponent(userId)}`));
+    if (status.id !== userId) return undefined;
+    return status;
+  } catch (error) {
+    if (error instanceof SupabaseRequestError && error.status === 404) return undefined;
+    throw error;
+  }
+}
+
+async function isPartnerIdentity(userId: string, email?: string): Promise<boolean> {
+  const adminQuery = new URLSearchParams({
+    id: `eq.${userId}`,
+    select: 'id',
+    limit: '1',
+  });
+  const adminRows = await readSupabaseJson<Array<{ id: string }>>(
+    await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
+  );
+  if (adminRows.length) return false;
+
+  const authStatus = await readPartnerAuthStatus(userId);
+  if (!authStatus ||
+    authStatus.app_metadata?.account_type !== 'partner' ||
+    !authStatus.email_confirmed_at ||
+    (authStatus.banned_until && Date.parse(authStatus.banned_until) > Date.now())) return false;
+  if (email && authStatus.email?.toLowerCase() !== email.toLowerCase()) return false;
+  return true;
+}
+
 async function authenticatePartnerSession(req: Request): Promise<PartnerProfile | undefined> {
   const token = readPartnerSession(req);
   if (!token) return undefined;
@@ -3775,6 +3818,7 @@ async function authenticatePartnerSession(req: Request): Promise<PartnerProfile 
   if (!session || session.revoked_at || !session.expires_at || Date.parse(session.expires_at) <= Date.now()) return undefined;
   const profile = await readPartnerProfile(token.userId);
   if (!profile || profile.status !== 'active') return undefined;
+  if (!await isPartnerIdentity(token.userId, profile.email)) return undefined;
   return profile;
 }
 
@@ -5522,15 +5566,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       }
       const userId = authData.user.id;
 
-      const adminQuery = new URLSearchParams({
-        id: `eq.${userId}`,
-        select: 'id',
-        limit: '1',
-      });
-      const adminRows = await readSupabaseJson<Array<{ id: string }>>(
-        await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
-      );
-      if (adminRows.length || authData.user.app_metadata?.account_type !== 'partner') {
+      if (!await isPartnerIdentity(userId, email)) {
         res.status(403).json({ message: 'This account is not authorized for the partner workspace.' });
         return;
       }
@@ -5704,6 +5740,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const codeVerifier = typeof req.body?.codeVerifier === 'string' ? req.body.codeVerifier : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     const confirmPassword = typeof req.body?.confirmPassword === 'string' ? req.body.confirmPassword : '';
+    if (authorizationCode && (!/^[A-Za-z0-9_-]{1,512}$/.test(authorizationCode) ||
+      !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier))) {
+      res.status(400).json({ message: 'This password-reset link is invalid or expired.' });
+      return;
+    }
+    if (accessToken && (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(accessToken) ||
+      accessToken.length > 10000)) {
+      res.status(400).json({ message: 'This password-reset link is invalid or expired.' });
+      return;
+    }
     if (!partnerPasswordIsStrong(password) || password !== confirmPassword ||
       ((accessToken.length < 1 || accessToken.length > 10000) &&
         (!authorizationCode || !codeVerifier))) {
@@ -5734,11 +5780,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(403).json({ message: 'This recovery link is not authorized for a partner account.' });
         return;
       }
-      const adminQuery = new URLSearchParams({ id: `eq.${user.id}`, select: 'id', limit: '1' });
-      const adminRows = await readSupabaseJson<Array<{ id: string }>>(
-        await supabaseAdminRequest(`rest/v1/admin_users?${adminQuery}`),
-      );
-      if (adminRows.length) {
+      if (!await isPartnerIdentity(user.id, profile.email)) {
         res.status(403).json({ message: 'This recovery link is not authorized for a partner account.' });
         return;
       }

@@ -35,3 +35,45 @@ revoke all on public.partner_profiles, public.partner_sessions
 
 grant all on public.partner_profiles, public.partner_sessions
   to service_role;
+
+create policy partner_profiles_no_direct_access
+  on public.partner_profiles
+  for all
+  to anon, authenticated
+  using (false)
+  with check (false);
+
+create policy partner_sessions_no_direct_access
+  on public.partner_sessions
+  for all
+  to anon, authenticated
+  using (false)
+  with check (false);
+
+create or replace function public.prevent_admin_partner_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (
+    select 1
+    from public.admin_users
+    where id = new.id
+  ) then
+    raise exception 'An administrator identity cannot also be a delivery partner';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.prevent_admin_partner_profile()
+  from public, anon, authenticated;
+
+drop trigger if exists prevent_admin_partner_profile on public.partner_profiles;
+create trigger prevent_admin_partner_profile
+  before insert or update of id
+  on public.partner_profiles
+  for each row
+  execute function public.prevent_admin_partner_profile();
