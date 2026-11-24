@@ -246,8 +246,24 @@ export default function App() {
         description: 'Explore NearGrow LocalDrop and share your interest in local promotional card campaigns as a delivery partner or business.',
       },
       '/partners/portal-preview': {
-        title: 'Partner Portal Preview | NearGrow LocalDrop',
-        description: 'Preview planned delivery partner screens for NearGrow LocalDrop.',
+        title: 'Partner Login | NearGrow LocalDrop',
+        description: 'Sign in or create a NearGrow LocalDrop delivery partner account.',
+      },
+      '/partners/dashboard': {
+        title: 'Partner Dashboard | NearGrow LocalDrop',
+        description: 'Your NearGrow LocalDrop delivery partner workspace.',
+      },
+      '/partners/recovery': {
+        title: 'Partner Password Recovery | NearGrow LocalDrop',
+        description: 'Recover access to your NearGrow LocalDrop partner account.',
+      },
+      '/partners/register': {
+        title: 'Partner Registration | NearGrow LocalDrop',
+        description: 'Register for a NearGrow LocalDrop delivery partner account.',
+      },
+      '/partners/login': {
+        title: 'Partner Login | NearGrow LocalDrop',
+        description: 'Sign in to your NearGrow LocalDrop partner account.',
       },
       '/privacy-policy': {
         title: 'Privacy Policy | NearGrow Ads',
@@ -297,7 +313,7 @@ export default function App() {
       ['name', 'twitter:title', seo.title],
       ['name', 'twitter:description', seo.description],
       ['name', 'twitter:image', new URL(socialImage, `${siteOrigin.replace(/\/+$/, '')}/`).href],
-      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || currentPath === '/partners/portal-preview' || currentPath === '/partners/dashboard' || currentPath === '/partners/recovery' || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
+      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || (normalizedPath.startsWith('/partners/') && normalizedPath !== '/partners/localdrop') || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
     ] as const;
     const previousMeta = metaEntries.map(([attribute, name, content]) => {
       const selector = `meta[${attribute}="${name}"]`;
@@ -559,7 +575,7 @@ export default function App() {
     if (currentPath === '/partners/localdrop') {
       return <LocalDropPage onNavigate={navigate} />;
     }
-    if (currentPath === '/partners/portal-preview' || currentPath === '/partners/dashboard' || currentPath === '/partners/recovery') {
+    if (['/partners/portal-preview', '/partners/dashboard', '/partners/recovery', '/partners/register', '/partners/login'].includes(currentPath)) {
       return <PartnerAuthPage onNavigate={navigate} />;
     }
     if (currentPath === '/privacy-policy') {

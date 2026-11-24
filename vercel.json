@@ -90,6 +90,14 @@
       "destination": "/api/handler?__vercel_original_api_path=/partners/recovery"
     },
     {
+      "source": "/partners/register",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/register"
+    },
+    {
+      "source": "/partners/login",
+      "destination": "/api/handler?__vercel_original_api_path=/partners/login"
+    },
+    {
       "source": "/services/:path*",
       "destination": "/api/handler?__vercel_original_api_path=/services/:path*"
     },
