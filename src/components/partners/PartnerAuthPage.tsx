@@ -1,13 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, Eye, EyeOff, LoaderCircle, LogOut, Mail, Phone, ShieldCheck, UserRound } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
+import { ArrowLeft, Eye, EyeOff, LoaderCircle, Mail } from 'lucide-react';
+import type { PartnerProfile } from './partnerTypes';
 
-interface PartnerProfile {
-  id: string;
-  email: string;
-  fullName: string;
-  mobileNumber: string;
-  status: 'pending' | 'active' | 'disabled';
-}
+const PartnerWorkspace = lazy(() => import('./PartnerWorkspace').then((module) => ({ default: module.PartnerWorkspace })));
 
 type AuthMode = 'login' | 'register' | 'recovery';
 
@@ -199,17 +194,9 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
 
   if (profile) {
     return (
-      <section className="mx-auto min-h-[70vh] max-w-6xl px-4 py-10 sm:px-6">
-        <div className="flex items-center justify-between gap-4">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#23734B]">NearGrow LocalDrop</p><h1 className="mt-1 text-2xl font-bold">Partner dashboard</h1></div>
-          <button type="button" onClick={() => void logout()} disabled={busy} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#DCE3DA] px-3 text-xs font-semibold hover:bg-[#F7F9F6] disabled:opacity-50"><LogOut className="h-4 w-4" />Log out</button>
-        </div>
-        <section className="mt-8 grid gap-4 md:grid-cols-3">
-          <article className="rounded-2xl border border-[#DCE3DA] bg-white p-5"><ShieldCheck className="h-5 w-5 text-[#23734B]" /><h2 className="mt-3 font-semibold">Campaigns</h2><p className="mt-2 text-sm text-[#626A63]">No campaigns assigned yet.</p></article>
-          <article className="rounded-2xl border border-[#DCE3DA] bg-white p-5"><UserRound className="h-5 w-5 text-[#23734B]" /><h2 className="mt-3 font-semibold">Profile</h2><p className="mt-2 text-sm text-[#626A63]">{profile.fullName}<br />{profile.mobileNumber}</p></article>
-          <article className="rounded-2xl border border-[#DCE3DA] bg-white p-5"><Phone className="h-5 w-5 text-[#23734B]" /><h2 className="mt-3 font-semibold">Earnings</h2><p className="mt-2 text-sm text-[#626A63]">No earnings recorded yet.</p></article>
-        </section>
-      </section>
+      <Suspense fallback={<section className="grid min-h-[60vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin" aria-label="Loading partner workspace" /></section>}>
+        <PartnerWorkspace profile={profile} logoutError={error} onLogout={() => void logout()} busy={busy} />
+      </Suspense>
     );
   }
 
