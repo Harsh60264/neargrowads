@@ -634,12 +634,14 @@ export default function App() {
   const publicAssignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
     DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
   const publicThemeMode = getPublicWebsiteThemeDefinition(publicAssignments[theme])?.mode ?? theme;
+  const normalizedCurrentPath = currentPath.replace(/\/+$/, '') || '/';
   const isPartnerAuthRoute = [
     '/partners/portal-preview',
     '/partners/login',
     '/partners/register',
     '/partners/recovery',
-  ].includes(currentPath.replace(/\/+$/, '') || '/');
+  ].includes(normalizedCurrentPath);
+  const hidePartnerAuthAssistants = ['/partners/login', '/partners/register'].includes(normalizedCurrentPath);
 
   return (
     <>
@@ -671,13 +673,15 @@ export default function App() {
               </React.Suspense>
             </main>
             {!isPartnerAuthRoute && <Footer onNavigate={navigate} siteContent={siteContent} />}
-            <FloatingAssistant
-              sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
-              scrollWithPage={false}
-              chatOpen={chatOpen}
-              onOpenChat={() => setChatOpen(true)}
-            />
-            {!isCmsPreview && (
+            {!hidePartnerAuthAssistants && (
+              <FloatingAssistant
+                sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
+                scrollWithPage={false}
+                chatOpen={chatOpen}
+                onOpenChat={() => setChatOpen(true)}
+              />
+            )}
+            {!isCmsPreview && !hidePartnerAuthAssistants && (
               <ChatbotWidget
                 siteContent={siteContent}
                 siteContentLoaded={siteContentLoaded}
