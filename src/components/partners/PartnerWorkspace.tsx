@@ -55,7 +55,7 @@ function DashboardSection({ fullName }: { fullName: string }) {
       <PageHeading
         eyebrow="Dashboard"
         title={`Welcome, ${fullName.split(/\s+/)[0] || 'Partner'}`}
-        description="Your LocalDrop workspace. Campaign, proof and earnings data will appear here when those workflows are available."
+        description="Your NearGrow WildCard workspace. Campaign, proof and earnings data will appear here when those workflows are available."
       />
       <div className="partner-workspace-empty-grid">
         <EmptyCard Icon={Megaphone} title="Campaigns" description="Campaign assignments are not connected yet." />
@@ -168,7 +168,7 @@ export function PartnerWorkspace({
     <div className="partner-preview partner-workspace">
       <div className="partner-preview-layout">
         <aside className="partner-preview-sidebar" aria-label="Partner workspace">
-          <p className="partner-preview-brand">NearGrow <span>LocalDrop</span></p>
+          <p className="partner-preview-brand">NearGrow <span>WildCard</span></p>
           <nav aria-label="Partner workspace navigation">
             {sections.map(({ id, label, icon: Icon }) => (
               <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>
@@ -181,7 +181,7 @@ export function PartnerWorkspace({
         <div className="partner-preview-content">
           <header className="partner-preview-topline">
             <div>
-              <span className="partner-preview-app-name">NearGrow <strong>LocalDrop</strong></span>
+              <span className="partner-preview-app-name">NearGrow <strong>WildCard</strong></span>
               <span className="partner-preview-app-caption">Partner workspace</span>
             </div>
             <button type="button" onClick={onLogout} disabled={busy} className="partner-workspace-logout">

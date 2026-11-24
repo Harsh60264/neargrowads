@@ -85,8 +85,8 @@ function LoginView({ onExplore }: { onExplore: () => void }) {
   return (
     <section className="partner-preview-view partner-preview-login" aria-labelledby="partner-login-title">
       <div className="partner-preview-login-copy" data-mascot-obstacle>
-        <p className="partner-preview-eyebrow">LocalDrop partner access</p>
-        <h1 id="partner-login-title">Welcome to your LocalDrop workspace.</h1>
+        <p className="partner-preview-eyebrow">NearGrow WildCard partner access</p>
+        <h1 id="partner-login-title">Welcome to your NearGrow WildCard workspace.</h1>
         <p className="partner-preview-description">
           A proposed home for campaign assignments, daily targets, proof submissions and progress.
         </p>
@@ -109,7 +109,7 @@ function LoginView({ onExplore }: { onExplore: () => void }) {
           <button type="button" className="partner-preview-text-button" disabled>Forgot password?</button>
         </div>
         <button type="button" className="partner-preview-primary-button" disabled>Login</button>
-        <p className="partner-preview-register">New to LocalDrop? <button type="button" disabled>Register now</button></p>
+        <p className="partner-preview-register">New to NearGrow WildCard? <button type="button" disabled>Register now</button></p>
         <button type="button" className="partner-preview-secondary-button" onClick={onExplore}>
           Explore portal screens <ArrowRight aria-hidden="true" size={16} />
         </button>
@@ -121,7 +121,7 @@ function LoginView({ onExplore }: { onExplore: () => void }) {
 function DashboardView() {
   return (
     <section className="partner-preview-view" aria-labelledby="partner-preview-screen-title">
-      <ScreenHeader eyebrow="Dashboard" title="Welcome, Partner" description="Your LocalDrop workspace at a glance." />
+      <ScreenHeader eyebrow="Dashboard" title="Welcome, Partner" description="Your NearGrow WildCard workspace at a glance." />
       <div className="partner-preview-stat-grid">
         <MetricCard Icon={Megaphone} label="Assigned campaigns" detail="Campaign overview" />
         <MetricCard Icon={CalendarDays} label="Today's target" detail="Daily distribution" />
@@ -308,7 +308,7 @@ function ProfileView() {
 
         <section className="partner-preview-card partner-preview-support-card" data-mascot-obstacle>
           <div className="partner-preview-card-title"><CircleHelp aria-hidden="true" size={19} /><h2>Help & support</h2></div>
-          <p className="partner-preview-muted">Common questions for LocalDrop partners.</p>
+          <p className="partner-preview-muted">Common questions for NearGrow WildCard partners.</p>
           <div className="partner-preview-faq-list">
             <button type="button" disabled>How do campaign assignments work?<ChevronDown aria-hidden="true" size={16} /></button>
             <button type="button" disabled>How do I submit distribution proof?<ChevronDown aria-hidden="true" size={16} /></button>
@@ -344,7 +344,7 @@ export const PartnerPortalPreview: React.FC<PartnerPortalPreviewProps> = ({ onNa
       </div>
       <div className="partner-preview-layout">
         <aside className="partner-preview-sidebar" aria-label="Partner preview navigation">
-          <p className="partner-preview-brand">NearGrow <span>LocalDrop</span></p>
+          <p className="partner-preview-brand">NearGrow <span>WildCard</span></p>
           <nav aria-label="Preview screens">
             {views.map(({ id, label, icon: Icon }) => (
               <button key={id} type="button" aria-current={view === id ? 'page' : undefined} onClick={() => setView(id)}>
@@ -353,13 +353,13 @@ export const PartnerPortalPreview: React.FC<PartnerPortalPreviewProps> = ({ onNa
             ))}
           </nav>
           <button className="partner-preview-back" type="button" onClick={() => onNavigate('/partners/localdrop')}>
-            <ArrowLeft aria-hidden="true" size={16} /> Back to LocalDrop
+            <ArrowLeft aria-hidden="true" size={16} /> Back to NearGrow WildCard
           </button>
         </aside>
 
         <div className="partner-preview-content">
           <header className="partner-preview-topline">
-            <div><span className="partner-preview-app-name">NearGrow <strong>LocalDrop</strong></span><span className="partner-preview-app-caption">Partner workspace</span></div>
+            <div><span className="partner-preview-app-name">NearGrow <strong>WildCard</strong></span><span className="partner-preview-app-caption">Partner workspace</span></div>
             <span className="partner-preview-app-badge">Design preview</span>
           </header>
           <nav className="partner-preview-mobile-tabs" aria-label="Preview screens">

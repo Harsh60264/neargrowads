@@ -70,7 +70,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
           })
           .finally(() => setSignupConfirming(false));
       } else {
-        setNotice('Email confirmed. You can now sign in to your LocalDrop partner account.');
+        setNotice('Email confirmed. You can now sign in to your NearGrow WildCard partner account.');
       }
       return;
     }
@@ -207,9 +207,9 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   return (
     <section className="grid min-h-[70vh] place-items-center px-4 py-10">
       <section className="w-full max-w-md rounded-3xl border border-[#DCE3DA] bg-white p-6 shadow-xl sm:p-8">
-        <button type="button" onClick={() => onNavigate('/partners/localdrop')} className="inline-flex items-center gap-2 text-xs font-semibold text-[#23734B]"><ArrowLeft className="h-4 w-4" />Back to LocalDrop</button>
+        <button type="button" onClick={() => onNavigate('/partners/localdrop')} className="inline-flex items-center gap-2 text-xs font-semibold text-[#23734B]"><ArrowLeft className="h-4 w-4" />Back to NearGrow WildCard</button>
         <h1 className="mt-6 text-2xl font-bold">{mode === 'register' ? 'Register as a delivery partner' : mode === 'recovery' ? 'Recover partner password' : 'Partner Login'}</h1>
-        <p className="mt-2 text-sm leading-6 text-[#626A63]">{mode === 'register' ? 'Create an email/password partner account.' : mode === 'recovery' ? 'Request a password-reset email.' : 'Sign in to your LocalDrop partner workspace.'}</p>
+        <p className="mt-2 text-sm leading-6 text-[#626A63]">{mode === 'register' ? 'Create an email/password partner account.' : mode === 'recovery' ? 'Request a password-reset email.' : 'Sign in to your NearGrow WildCard partner workspace.'}</p>
         {error && <div role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
         {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
         <form onSubmit={(event) => void submit(event)} className="mt-6 space-y-4">
