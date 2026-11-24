@@ -241,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
             {partnersOpen && (
               <div id="partners-navigation-menu" className="absolute right-0 top-full z-50 mt-3 w-64 rounded-2xl border border-[#E5E9E4] bg-white p-2 shadow-xl">
                 <button onClick={() => handleLinkClick('/partners/localdrop')} className={partnersMenuItemClass}>NearGrow WildCard</button>
-                <button onClick={() => handleLinkClick('/partners/portal-preview')} className={partnersMenuItemClass}>Partner Login</button>
+                <button onClick={() => handleLinkClick('/partners/login')} className={partnersMenuItemClass}>Partner Login</button>
               </div>
             )}
           </div>
@@ -386,7 +386,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          <button onClick={() => handleLinkClick('/partners/portal-preview')} className="w-full min-h-11 rounded-lg bg-[#F7F9F6] p-2.5 text-left text-sm text-[#626A63]">
+          <button onClick={() => handleLinkClick('/partners/login')} className="w-full min-h-11 rounded-lg bg-[#F7F9F6] p-2.5 text-left text-sm text-[#626A63]">
             Partner Login
           </button>
 

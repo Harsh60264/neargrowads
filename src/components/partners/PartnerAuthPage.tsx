@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, Eye, EyeOff, LoaderCircle, Mail } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Headset, LoaderCircle, Megaphone, UserRound } from 'lucide-react';
+import { NearGrowLogo } from '../brand/NearGrowLogo';
 import type { PartnerProfile } from './partnerTypes';
 
 const PartnerWorkspace = lazy(() => import('./PartnerWorkspace').then((module) => ({ default: module.PartnerWorkspace })));
@@ -159,6 +160,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
       if (!response.ok) throw new Error(data.message || 'The request could not be completed.');
       if (mode === 'login' && data.authenticated) {
         setProfile(data.user ?? null);
+        onNavigate('/partners/dashboard');
       } else if (mode === 'register') {
         setNotice(data.message || 'Account registered. Verify your email before signing in.');
         setMode('login');
@@ -192,7 +194,9 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
     return <section className="grid min-h-[60vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin" aria-label="Checking partner session" /></section>;
   }
 
-  if (profile) {
+  const isLoginRoute = (window.location.pathname.replace(/\/+$/, '') || '/') === '/partners/login';
+
+  if (profile && !isLoginRoute) {
     return (
       <Suspense fallback={<section className="grid min-h-[60vh] place-items-center"><LoaderCircle className="h-6 w-6 animate-spin" aria-label="Loading partner workspace" /></section>}>
         <PartnerWorkspace profile={profile} logoutError={error} onLogout={() => void logout()} busy={busy} />
@@ -205,47 +209,116 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   const recoveryReady = Boolean(recoveryAccessToken || (recoveryCode && recoveryCodeVerifier) || (recoveryTokenHash && recoveryTokenType === 'recovery'));
 
   return (
-    <section className="grid min-h-[70vh] place-items-center px-4 py-10">
-      <section className="w-full max-w-md rounded-3xl border border-[#DCE3DA] bg-white p-6 shadow-xl sm:p-8">
-        <button type="button" onClick={() => onNavigate('/partners/localdrop')} className="inline-flex items-center gap-2 text-xs font-semibold text-[#23734B]"><ArrowLeft className="h-4 w-4" />Back to NearGrow WildCard</button>
-        <h1 className="mt-6 text-2xl font-bold">{mode === 'register' ? 'Register as a delivery partner' : mode === 'recovery' ? 'Recover partner password' : 'Partner Login'}</h1>
-        <p className="mt-2 text-sm leading-6 text-[#626A63]">{mode === 'register' ? 'Create an email/password partner account.' : mode === 'recovery' ? 'Request a password-reset email.' : 'Sign in to your NearGrow WildCard partner workspace.'}</p>
-        {error && <div role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
-        {notice && <div role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
-        <form onSubmit={(event) => void submit(event)} className="mt-6 space-y-4">
-          {mode === 'register' && (
-            <>
-              <label className="block text-xs font-semibold text-[#626A63]" htmlFor="partner-full-name">Full name</label>
-              <input id="partner-full-name" autoComplete="name" required maxLength={80} value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} className="min-h-11 w-full rounded-lg border border-[#DCE3DA] px-3 text-sm" />
-              <label className="block text-xs font-semibold text-[#626A63]" htmlFor="partner-mobile">Mobile number</label>
-              <input id="partner-mobile" type="tel" autoComplete="tel" required maxLength={24} value={form.mobileNumber} onChange={(event) => setForm((current) => ({ ...current, mobileNumber: event.target.value }))} className="min-h-11 w-full rounded-lg border border-[#DCE3DA] px-3 text-sm" placeholder="+91 98765 43210" />
-            </>
+    <section className="partner-auth-page">
+      <div className="partner-auth-layout">
+        <section className="partner-auth-intro" aria-labelledby="partner-login-title">
+          <div className="partner-auth-illustration" aria-hidden="true">
+            <svg viewBox="0 0 520 250" role="presentation">
+              <ellipse cx="260" cy="214" rx="165" ry="15" fill="currentColor" opacity=".09" />
+              <path d="M92 207C69 169 73 120 103 83M420 212c22-37 18-88-12-123" fill="none" stroke="#7BAA68" strokeWidth="3" strokeLinecap="round" />
+              <g fill="#78A95E">
+                <ellipse cx="85" cy="155" rx="22" ry="10" transform="rotate(-38 85 155)" />
+                <ellipse cx="108" cy="126" rx="23" ry="10" transform="rotate(24 108 126)" />
+                <ellipse cx="105" cy="91" rx="22" ry="10" transform="rotate(-35 105 91)" />
+                <ellipse cx="434" cy="164" rx="22" ry="10" transform="rotate(38 434 164)" />
+                <ellipse cx="411" cy="135" rx="23" ry="10" transform="rotate(-24 411 135)" />
+                <ellipse cx="414" cy="100" rx="22" ry="10" transform="rotate(35 414 100)" />
+              </g>
+              <g transform="rotate(-7 260 143)">
+                <rect x="142" y="91" width="236" height="117" rx="17" fill="#FCFFF8" stroke="#BDD0B6" strokeWidth="3" />
+                <path d="M143 174c61-6 97 12 141 31 30 13 61 10 94-7v-17H143z" fill="#1C7048" />
+                <path d="M142 188c49-13 81-2 111 14H158c-8-2-13-7-16-14z" fill="#378A50" />
+                <g transform="translate(220 110)">
+                  <path d="M15 24C5 12 8 4 15 1c7 5 7 15 0 23zm8-1c0-14 8-20 15-17 1 9-5 16-15 17zm-12 2C-1 25-4 18 0 12c8 2 12 7 11 13z" fill="#57A947" />
+                  <text x="19" y="43" textAnchor="middle" fill="#163A2A" fontSize="12" fontWeight="700">NearGrow</text>
+                  <text x="19" y="61" textAnchor="middle" fill="#163A2A" fontSize="19" fontWeight="800">WildCard</text>
+                </g>
+              </g>
+              <path d="m193 57 7-20m13 24 11-17m4 27 16-10" fill="none" stroke="#73A35F" strokeWidth="4" strokeLinecap="round" />
+            </svg>
+          </div>
+          <p className="partner-auth-eyebrow">NearGrow WildCard</p>
+          <h1 id="partner-login-title">Welcome to<br />NearGrow <span>WildCard</span></h1>
+          <p className="partner-auth-subtitle">Your partner workspace starts here.</p>
+          <ul className="partner-auth-benefits">
+            <li><UserRound aria-hidden="true" /><span>View your<br />profile</span></li>
+            <li><Megaphone aria-hidden="true" /><span>Check campaign<br />updates</span></li>
+            <li><Headset aria-hidden="true" /><span>Get<br />support</span></li>
+          </ul>
+        </section>
+
+        <section className="partner-auth-card" aria-label="Partner account">
+          <NearGrowLogo size="md" className="partner-auth-card-logo" />
+          <h2>{mode === 'register' ? 'Create account' : mode === 'recovery' ? (recoveryReady ? 'Set new password' : 'Forgot password?') : 'Partner login'}</h2>
+          <p className="partner-auth-card-description">
+            {mode === 'register' ? 'Create your NearGrow WildCard partner account.' : mode === 'recovery' ? 'Recover access to your partner account.' : 'Sign in to your NearGrow WildCard partner workspace.'}
+          </p>
+
+          {mode !== 'recovery' && (
+            <div className="partner-auth-tabs" role="tablist" aria-label="Partner account options">
+              <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'is-active' : ''} onClick={() => { setMode('login'); setError(''); setNotice(''); }}>Sign in</button>
+              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'is-active' : ''} onClick={() => { setMode('register'); setError(''); setNotice(''); }}>Create account</button>
+            </div>
           )}
-          {!recoveryReady && (
-            <>
-              <label className="block text-xs font-semibold text-[#626A63]" htmlFor="partner-email">Email address</label>
-              <div className="flex items-center gap-2 rounded-lg border border-[#DCE3DA] px-3 focus-within:border-[#23734B]"><Mail className="h-4 w-4 text-[#626A63]" /><input id="partner-email" type="email" autoComplete="email" required maxLength={254} value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} className="min-h-11 min-w-0 flex-1 text-sm outline-none" /></div>
-            </>
+
+          {profile && isLoginRoute && (
+            <div className="partner-auth-signed-in" role="status">
+              You’re already signed in.
+              <a href="/partners/dashboard" onClick={(event) => { event.preventDefault(); onNavigate('/partners/dashboard'); }}>Go to dashboard <ArrowRight aria-hidden="true" /></a>
+            </div>
           )}
-          {(mode !== 'recovery' || recoveryReady) && (
-            <>
-              <label className="block text-xs font-semibold text-[#626A63]" htmlFor="partner-password">{recoveryReady ? 'New password' : 'Password'}</label>
-              <div className="flex items-center gap-2 rounded-lg border border-[#DCE3DA] px-3 focus-within:border-[#23734B]"><input id="partner-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={12} maxLength={200} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} className="min-h-11 min-w-0 flex-1 text-sm outline-none" /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)} className="rounded p-1 text-[#626A63]">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
-              {(mode === 'register' || recoveryReady) && <>
-                <label className="block text-xs font-semibold text-[#626A63]" htmlFor="partner-confirm-password">Confirm password</label>
-                <input id="partner-confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={12} maxLength={200} value={form.confirmPassword} onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))} className="min-h-11 w-full rounded-lg border border-[#DCE3DA] px-3 text-sm" />
-                {form.confirmPassword && form.confirmPassword !== form.password && <p role="alert" className="text-xs text-rose-700">Passwords do not match.</p>}
-                <p className="text-[10px] leading-5 text-[#626A63]">Minimum 12 characters with at least three of lowercase, uppercase, number, and symbol.</p>
-              </>}
-            </>
-          )}
-          <button type="submit" disabled={busy || ((mode === 'register' || recoveryReady) && (!passwordStrength || form.password !== form.confirmPassword))} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-[#23734B] text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Please wait…' : mode === 'register' ? 'Create partner account' : recoveryReady ? 'Update password' : mode === 'recovery' ? 'Send recovery email' : 'Sign in'}</button>
-        </form>
-        <div className="mt-5 flex flex-wrap justify-between gap-3 text-xs">
-          {mode === 'login' ? <button type="button" onClick={() => setMode('register')} className="font-semibold text-[#23734B]">Register</button> : <button type="button" onClick={() => setMode('login')} className="font-semibold text-[#23734B]">Back to login</button>}
-          {mode !== 'recovery' && <button type="button" onClick={() => setMode('recovery')} className="text-[#626A63] underline">Forgot password?</button>}
-        </div>
-      </section>
+          {error && <div role="alert" className="partner-auth-message is-error">{error}</div>}
+          {notice && <div role="status" className="partner-auth-message is-success">{notice}</div>}
+
+          <form onSubmit={(event) => void submit(event)} className="partner-auth-form">
+            {mode === 'register' && (
+              <>
+                <label htmlFor="partner-full-name">Full name</label>
+                <input id="partner-full-name" autoComplete="name" required maxLength={80} value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
+                <label htmlFor="partner-mobile">Mobile number</label>
+                <input id="partner-mobile" type="tel" autoComplete="tel" required maxLength={24} value={form.mobileNumber} onChange={(event) => setForm((current) => ({ ...current, mobileNumber: event.target.value }))} />
+              </>
+            )}
+            {!recoveryReady && (
+              <>
+                <label htmlFor="partner-email">Email address</label>
+                <input id="partner-email" type="email" autoComplete="email" required maxLength={254} value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+              </>
+            )}
+            {(mode !== 'recovery' || recoveryReady) && (
+              <>
+                <label htmlFor="partner-password">{recoveryReady ? 'New password' : 'Password'}</label>
+                <div className="partner-auth-password">
+                  <input id="partner-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'register' || recoveryReady ? 'new-password' : 'current-password'} required minLength={12} maxLength={200} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+                  <button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}</button>
+                </div>
+                {(mode === 'register' || recoveryReady) && (
+                  <>
+                    <label htmlFor="partner-confirm-password">Confirm password</label>
+                    <input id="partner-confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required minLength={12} maxLength={200} value={form.confirmPassword} onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))} />
+                    {form.confirmPassword && form.confirmPassword !== form.password && <p role="alert" className="partner-auth-inline-error">Passwords do not match.</p>}
+                    <p className="partner-auth-password-hint">Minimum 12 characters with at least three of lowercase, uppercase, number, and symbol.</p>
+                  </>
+                )}
+              </>
+            )}
+            {mode === 'login' && (
+              <button type="button" className="partner-auth-forgot" onClick={() => { setMode('recovery'); setError(''); setNotice(''); }}>Forgot password?</button>
+            )}
+            <button type="submit" disabled={busy || ((mode === 'register' || recoveryReady) && (!passwordStrength || form.password !== form.confirmPassword))}>
+              {busy ? 'Please wait…' : mode === 'register' ? 'Create account' : recoveryReady ? 'Update password' : mode === 'recovery' ? 'Send recovery email' : 'Sign in'}
+            </button>
+          </form>
+          <p className="partner-auth-card-footer">
+            {mode === 'recovery'
+              ? <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}>Back to sign in</button>
+              : mode === 'register'
+                ? <>Already a partner? <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}>Sign in</button></>
+                : <>New partner? <button type="button" onClick={() => { setMode('register'); setError(''); setNotice(''); }}>Create an account</button></>}
+          </p>
+        </section>
+      </div>
+      <footer className="partner-auth-footer">NearGrow Ads <span aria-hidden="true">·</span> <a href="mailto:info@neargrowads.in">Partner support</a></footer>
     </section>
   );
 }

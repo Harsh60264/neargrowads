@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { Header } from './components/layout/Header';
 import { Footer } from './components/layout/Footer';
+import './components/partners/partnerAuthPage.css';
 import { HomePage } from './components/home/HomePage';
 const AdminPage = React.lazy(() => import('./components/admin/AdminPage').then((module) => ({ default: module.AdminPage })));
 const AdminAuthAction = React.lazy(() => import('./components/admin/AdminAuthAction').then((module) => ({ default: module.AdminAuthAction })));
@@ -633,6 +634,12 @@ export default function App() {
   const publicAssignments = parsePublicWebsiteThemeAssignments(siteContent.websiteThemeAssignments) ??
     DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
   const publicThemeMode = getPublicWebsiteThemeDefinition(publicAssignments[theme])?.mode ?? theme;
+  const isPartnerAuthRoute = [
+    '/partners/portal-preview',
+    '/partners/login',
+    '/partners/register',
+    '/partners/recovery',
+  ].includes(currentPath.replace(/\/+$/, '') || '/');
 
   return (
     <>
@@ -663,7 +670,7 @@ export default function App() {
                 <RouteErrorBoundary key={currentPath}>{renderCurrentView()}</RouteErrorBoundary>
               </React.Suspense>
             </main>
-            <Footer onNavigate={navigate} siteContent={siteContent} />
+            {!isPartnerAuthRoute && <Footer onNavigate={navigate} siteContent={siteContent} />}
             <FloatingAssistant
               sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
               scrollWithPage={false}
