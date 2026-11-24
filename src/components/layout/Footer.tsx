@@ -160,7 +160,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, siteContent = DEFAUL
               </li>
               <li>
                 <button onClick={() => navigateTo('/partners/localdrop')} className="hover:text-white transition-colors">
-                  NearGrow LocalDrop
+                  NearGrow WildCard
                 </button>
               </li>
               <li>

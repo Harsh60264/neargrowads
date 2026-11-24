@@ -321,6 +321,7 @@ html[data-theme='dark'] .partner-preview {
 .partner-workspace-error { margin: 14px 28px 0; color: #b42318; font-size: 12px; }
 html[data-theme='dark'] .partner-workspace-error { color: #fecaca; }
 .partner-workspace-page-title { margin: 0; color: var(--preview-text); font-size: clamp(28px, 3.2vw, 38px); font-weight: 800; letter-spacing: -.045em; line-height: 1.15; }
+.partner-workspace .partner-preview-screen-header { border: 0; background: transparent; box-shadow: none; color: var(--preview-text); }
 .partner-workspace-empty-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .partner-workspace-empty-grid .partner-preview-empty { min-height: 125px; }
 .partner-workspace-empty-grid .partner-preview-empty h3 { font-size: 13px; }

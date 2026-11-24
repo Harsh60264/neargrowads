@@ -45,7 +45,7 @@ function InterestForm({ kind }: { kind: InterestKind }) {
       : 'Delivery Partner Interest';
     const area = String(fields.get('area') || '').trim();
     const details = String(fields.get('details') || '').trim();
-    const message = `${kind === 'partner' ? 'Delivery partner' : 'Local business'} interest. Area: ${area}. Details: ${details || 'Please contact me to discuss LocalDrop.'}`;
+    const message = `${kind === 'partner' ? 'Delivery partner' : 'Local business'} interest. Area: ${area}. Details: ${details || 'Please contact me to discuss NearGrow WildCard.'}`;
     const tracking = getLeadTracking(window.location.pathname, window.location.search);
     setErrorMessage('');
     setStatus('sending');
@@ -95,7 +95,7 @@ function InterestForm({ kind }: { kind: InterestKind }) {
       </div>
       <label>Anything else we should know?<textarea name="details" rows={3} maxLength={1700} placeholder="Tell us about your route or campaign idea" /></label>
       <input name="website" tabIndex={-1} autoComplete="off" className="localdrop-trap" aria-hidden="true" />
-      <label className="localdrop-consent"><input type="checkbox" required /> I agree to be contacted about NearGrow LocalDrop.</label>
+      <label className="localdrop-consent"><input type="checkbox" required /> I agree to be contacted about NearGrow WildCard.</label>
       {status === 'error' && <p className="localdrop-form-error" role="alert">{errorMessage}</p>}
       <button className="localdrop-button localdrop-button-primary" type="submit" disabled={status === 'sending'}>
         {status === 'sending' ? 'Sending…' : 'Send interest'} <ArrowRight aria-hidden="true" size={18} />
@@ -121,7 +121,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
       <section className="localdrop-hero" aria-labelledby="localdrop-heading">
         <HeroOrbitBackground ambient />
         <div className="localdrop-hero-copy" data-mascot-obstacle>
-          <span className="localdrop-eyebrow">NearGrow LocalDrop · By NearGrow Ads</span>
+          <span className="localdrop-eyebrow">NearGrow WildCard · By NearGrow Ads</span>
           <h1 id="localdrop-heading">Your Deliveries.<br /><span>More Opportunities.</span></h1>
           <p>Turn everyday local deliveries into opportunities for businesses, delivery partners and communities.</p>
           <div className="localdrop-actions">
@@ -143,7 +143,7 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
             onEnded={() => setVideoPlaying(false)}
             aria-label="Delivery partner arrives on a scooter and shows the NearGrow Ads promotional card"
           />
-          <button type="button" className="localdrop-replay" onClick={replay} aria-label="Replay LocalDrop video">
+          <button type="button" className="localdrop-replay" onClick={replay} aria-label="Replay NearGrow WildCard video">
             {videoPlaying ? <RotateCcw aria-hidden="true" size={17} /> : <Play aria-hidden="true" size={17} />} Replay
           </button>
         </div>

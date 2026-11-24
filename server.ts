@@ -4911,25 +4911,25 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
   if (normalized === '/partners/localdrop') {
     return {
       found: true,
-      title: 'NearGrow LocalDrop | Delivery Partner Opportunities | NearGrow Ads',
-      description: 'Explore NearGrow LocalDrop and share your interest in local promotional card campaigns as a delivery partner or business.',
+      title: 'NearGrow WildCard | Delivery Partner Opportunities | NearGrow Ads',
+      description: 'Explore NearGrow WildCard and share your interest in local promotional card campaigns as a delivery partner or business.',
       image: '',
       noindex: false,
     };
   }
   const partnerAuthPageTitles: Record<string, string> = {
-    '/partners/portal-preview': 'Partner Login | NearGrow LocalDrop',
-    '/partners/dashboard': 'Partner Dashboard | NearGrow LocalDrop',
-    '/partners/recovery': 'Partner Password Recovery | NearGrow LocalDrop',
-    '/partners/register': 'Partner Registration | NearGrow LocalDrop',
-    '/partners/login': 'Partner Login | NearGrow LocalDrop',
+    '/partners/portal-preview': 'Partner Login | NearGrow WildCard',
+    '/partners/dashboard': 'Partner Dashboard | NearGrow WildCard',
+    '/partners/recovery': 'Partner Password Recovery | NearGrow WildCard',
+    '/partners/register': 'Partner Registration | NearGrow WildCard',
+    '/partners/login': 'Partner Login | NearGrow WildCard',
   };
   const partnerAuthPageTitle = partnerAuthPageTitles[normalized];
   if (partnerAuthPageTitle) {
     return {
       found: true,
       title: partnerAuthPageTitle,
-      description: 'Sign in or create a NearGrow LocalDrop delivery partner account.',
+      description: 'Sign in or create a NearGrow WildCard delivery partner account.',
       image: '',
       noindex: true,
     };

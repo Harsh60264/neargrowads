@@ -242,28 +242,28 @@ export default function App() {
         description: 'Start a conversation with NearGrow Ads about your business goals.',
       },
       '/partners/localdrop': {
-        title: 'NearGrow LocalDrop | Delivery Partner Opportunities | NearGrow Ads',
-        description: 'Explore NearGrow LocalDrop and share your interest in local promotional card campaigns as a delivery partner or business.',
+        title: 'NearGrow WildCard | Delivery Partner Opportunities | NearGrow Ads',
+        description: 'Explore NearGrow WildCard and share your interest in local promotional card campaigns as a delivery partner or business.',
       },
       '/partners/portal-preview': {
-        title: 'Partner Login | NearGrow LocalDrop',
-        description: 'Sign in or create a NearGrow LocalDrop delivery partner account.',
+        title: 'Partner Login | NearGrow WildCard',
+        description: 'Sign in or create a NearGrow WildCard delivery partner account.',
       },
       '/partners/dashboard': {
-        title: 'Partner Dashboard | NearGrow LocalDrop',
-        description: 'Your NearGrow LocalDrop delivery partner workspace.',
+        title: 'Partner Dashboard | NearGrow WildCard',
+        description: 'Your NearGrow WildCard delivery partner workspace.',
       },
       '/partners/recovery': {
-        title: 'Partner Password Recovery | NearGrow LocalDrop',
-        description: 'Recover access to your NearGrow LocalDrop partner account.',
+        title: 'Partner Password Recovery | NearGrow WildCard',
+        description: 'Recover access to your NearGrow WildCard partner account.',
       },
       '/partners/register': {
-        title: 'Partner Registration | NearGrow LocalDrop',
-        description: 'Register for a NearGrow LocalDrop delivery partner account.',
+        title: 'Partner Registration | NearGrow WildCard',
+        description: 'Register for a NearGrow WildCard delivery partner account.',
       },
       '/partners/login': {
-        title: 'Partner Login | NearGrow LocalDrop',
-        description: 'Sign in to your NearGrow LocalDrop partner account.',
+        title: 'Partner Login | NearGrow WildCard',
+        description: 'Sign in to your NearGrow WildCard partner account.',
       },
       '/privacy-policy': {
         title: 'Privacy Policy | NearGrow Ads',
