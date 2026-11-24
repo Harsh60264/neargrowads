@@ -6,6 +6,7 @@ import {
   normalizePartnerEmail,
   normalizePartnerMobile,
   normalizePartnerName,
+  parsePartnerAuthSignupUser,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
 } from './partnerAuth';
@@ -59,6 +60,33 @@ test('partner registration rejects malformed email, mobile, name and weak passwo
     mobileNumber: '12',
     fullName: 'Delivery Partner',
   }).valid, false);
+});
+
+test('partner signup accepts Supabase Auth user objects with top-level fields', () => {
+  assert.deepEqual(parsePartnerAuthSignupUser({
+    id: 'auth-user-id',
+    email: 'partner@example.com',
+    email_confirmed_at: null,
+  }), {
+    id: 'auth-user-id',
+    email: 'partner@example.com',
+    email_confirmed_at: null,
+  });
+});
+
+test('partner signup continues to accept token responses with a nested user', () => {
+  assert.deepEqual(parsePartnerAuthSignupUser({
+    access_token: 'redacted',
+    user: {
+      id: 'auth-user-id',
+      email: 'partner@example.com',
+      email_confirmed_at: '2026-11-24T00:00:00Z',
+    },
+  }), {
+    id: 'auth-user-id',
+    email: 'partner@example.com',
+    email_confirmed_at: '2026-11-24T00:00:00Z',
+  });
 });
 
 test('partner SQL migration is isolated by separate tables, RLS and service-role-only grants', () => {

@@ -14,6 +14,30 @@ export interface PartnerRegistrationValidation {
   message?: string;
 }
 
+export interface PartnerAuthSignupUser {
+  id?: string;
+  email?: string;
+  email_confirmed_at?: string | null;
+}
+
+export function parsePartnerAuthSignupUser(value: unknown): PartnerAuthSignupUser | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const response = value as Record<string, unknown>;
+  const user = response.user && typeof response.user === 'object' && !Array.isArray(response.user)
+    ? response.user as Record<string, unknown>
+    : response;
+  const emailConfirmedAt = user.email_confirmed_at !== undefined
+    ? user.email_confirmed_at
+    : response.email_confirmed_at;
+  return {
+    id: typeof user.id === 'string' ? user.id : typeof response.id === 'string' ? response.id : undefined,
+    email: typeof user.email === 'string' ? user.email : typeof response.email === 'string' ? response.email : undefined,
+    email_confirmed_at: typeof emailConfirmedAt === 'string' || emailConfirmedAt === null
+      ? emailConfirmedAt
+      : undefined,
+  };
+}
+
 export function normalizePartnerEmail(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const email = value.trim().toLowerCase();
