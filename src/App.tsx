@@ -15,7 +15,7 @@ const BlogPostPage = React.lazy(() => import('./components/blog/BlogPostPage').t
 const ContactPage = React.lazy(() => import('./components/contact/ContactPage').then((module) => ({ default: module.ContactPage })));
 const GetStartedPage = React.lazy(() => import('./components/contact/GetStartedPage').then((module) => ({ default: module.GetStartedPage })));
 const LocalDropPage = React.lazy(() => import('./components/partners/LocalDropPage').then((module) => ({ default: module.LocalDropPage })));
-const PartnerPortalPreview = React.lazy(() => import('./components/partners/PartnerPortalPreview').then((module) => ({ default: module.PartnerPortalPreview })));
+const PartnerAuthPage = React.lazy(() => import('./components/partners/PartnerAuthPage').then((module) => ({ default: module.PartnerAuthPage })));
 const PrivacyPolicy = React.lazy(() => import('./components/legal/PrivacyPolicy').then((module) => ({ default: module.PrivacyPolicy })));
 const TermsPage = React.lazy(() => import('./components/legal/TermsPage').then((module) => ({ default: module.TermsPage })));
 const ThankYouPage = React.lazy(() => import('./components/legal/ThankYouPage').then((module) => ({ default: module.ThankYouPage })));
@@ -297,7 +297,7 @@ export default function App() {
       ['name', 'twitter:title', seo.title],
       ['name', 'twitter:description', seo.description],
       ['name', 'twitter:image', new URL(socialImage, `${siteOrigin.replace(/\/+$/, '')}/`).href],
-      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || currentPath === '/partners/portal-preview' || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
+      ['name', 'robots', currentPath.startsWith('/admin') || currentPath === '/thank-you' || currentPath === '/partners/portal-preview' || currentPath === '/partners/dashboard' || currentPath === '/partners/recovery' || isCmsPreview ? 'noindex, nofollow' : 'index, follow'],
     ] as const;
     const previousMeta = metaEntries.map(([attribute, name, content]) => {
       const selector = `meta[${attribute}="${name}"]`;
@@ -559,8 +559,8 @@ export default function App() {
     if (currentPath === '/partners/localdrop') {
       return <LocalDropPage onNavigate={navigate} />;
     }
-    if (currentPath === '/partners/portal-preview') {
-      return <PartnerPortalPreview onNavigate={navigate} />;
+    if (currentPath === '/partners/portal-preview' || currentPath === '/partners/dashboard' || currentPath === '/partners/recovery') {
+      return <PartnerAuthPage onNavigate={navigate} />;
     }
     if (currentPath === '/privacy-policy') {
       return <PrivacyPolicy onNavigate={navigate} siteContent={siteContent} />;
