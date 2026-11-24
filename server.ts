@@ -4916,11 +4916,19 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
       noindex: false,
     };
   }
-  if (normalized === '/partners/portal-preview') {
+  const partnerAuthPageTitles: Record<string, string> = {
+    '/partners/portal-preview': 'Partner Login | NearGrow LocalDrop',
+    '/partners/dashboard': 'Partner Dashboard | NearGrow LocalDrop',
+    '/partners/recovery': 'Partner Password Recovery | NearGrow LocalDrop',
+    '/partners/register': 'Partner Registration | NearGrow LocalDrop',
+    '/partners/login': 'Partner Login | NearGrow LocalDrop',
+  };
+  const partnerAuthPageTitle = partnerAuthPageTitles[normalized];
+  if (partnerAuthPageTitle) {
     return {
       found: true,
-      title: 'Partner Portal Preview | NearGrow LocalDrop',
-      description: 'Preview planned delivery partner screens for NearGrow LocalDrop.',
+      title: partnerAuthPageTitle,
+      description: 'Sign in or create a NearGrow LocalDrop delivery partner account.',
       image: '',
       noindex: true,
     };

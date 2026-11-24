@@ -1,8 +1,18 @@
 import type { RequestHandler } from 'express';
 
+export const PARTNER_AUTH_PAGE_PATHS = [
+  '/partners/portal-preview',
+  '/partners/dashboard',
+  '/partners/recovery',
+  '/partners/register',
+  '/partners/login',
+] as const;
+
+const partnerAuthPagePaths = new Set<string>(PARTNER_AUTH_PAGE_PATHS);
+
 export const PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS = [
   '/partners/localdrop',
-  '/partners/portal-preview',
+  ...PARTNER_AUTH_PAGE_PATHS,
   '/services/*',
   '/catalogue/*',
   '/blog/*',
@@ -14,7 +24,8 @@ export interface RenderedPublicDynamicPage {
 }
 
 export function isPublicDynamicPagePath(pathname: string): boolean {
-  return pathname === '/partners/localdrop' || pathname === '/partners/portal-preview' || /^\/(?:services|catalogue|blog)\/.+$/.test(pathname);
+  return pathname === '/partners/localdrop' || partnerAuthPagePaths.has(pathname) ||
+    /^\/(?:services|catalogue|blog)\/.+$/.test(pathname);
 }
 
 export function createPublicDynamicPageHandler(

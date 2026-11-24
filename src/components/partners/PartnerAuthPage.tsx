@@ -11,8 +11,15 @@ interface PartnerProfile {
 
 type AuthMode = 'login' | 'register' | 'recovery';
 
+export function getPartnerAuthInitialMode(pathname: string): AuthMode {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPath === '/partners/register') return 'register';
+  if (normalizedPath === '/partners/recovery') return 'recovery';
+  return 'login';
+}
+
 export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>(() => getPartnerAuthInitialMode(window.location.pathname));
   const [profile, setProfile] = useState<PartnerProfile | null>(null);
   const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);

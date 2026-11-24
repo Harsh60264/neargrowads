@@ -25,6 +25,10 @@ test('configures exact 301 redirects and validates dynamic routes before SPA fal
   assert.equal(routes.get('/services')?.destination, '/index.html');
   assert.equal(routes.get('/catalogue')?.destination, '/index.html');
   assert.equal(routes.get('/blog')?.destination, '/index.html');
+  assert.equal(routes.get('/api/:path*')?.destination,
+    '/api/handler?__vercel_original_api_path=/api/:path*');
+  assert.equal(routes.get('/admin')?.destination, '/index.html');
+  assert.equal(routes.get('/admin/:path*')?.destination, '/index.html');
 
   for (const prefix of ['/services', '/catalogue', '/blog']) {
     const rootRoute = routes.get(prefix);
@@ -37,12 +41,35 @@ test('configures exact 301 redirects and validates dynamic routes before SPA fal
     '/api/handler?__vercel_original_api_path=/sitemap.xml');
   assert.deepEqual(routes.get('/partners/localdrop')?.destination,
     '/api/handler?__vercel_original_api_path=/partners/localdrop');
-  assert.deepEqual(routes.get('/partners/portal-preview')?.destination,
-    '/api/handler?__vercel_original_api_path=/partners/portal-preview');
+  const serviceCatchAll = routes.get('/services/:path*');
+  assert.ok(serviceCatchAll);
+  for (const pathname of [
+    '/partners/portal-preview',
+    '/partners/dashboard',
+    '/partners/recovery',
+    '/partners/register',
+    '/partners/login',
+  ]) {
+    const route = routes.get(pathname);
+    assert.ok(route);
+    assert.equal(route.destination, `/api/handler?__vercel_original_api_path=${pathname}`);
+    assert.ok(route.index < serviceCatchAll.index);
+  }
 });
 
 test('matches only routes inside the public dynamic page families', () => {
-  for (const pathname of ['/partners/localdrop', '/partners/portal-preview', '/services/slug', '/services/slug/child', '/catalogue/slug', '/blog/slug']) {
+  for (const pathname of [
+    '/partners/localdrop',
+    '/partners/portal-preview',
+    '/partners/dashboard',
+    '/partners/recovery',
+    '/partners/register',
+    '/partners/login',
+    '/services/slug',
+    '/services/slug/child',
+    '/catalogue/slug',
+    '/blog/slug',
+  ]) {
     assert.equal(isPublicDynamicPagePath(pathname), true);
   }
   for (const pathname of ['/partners', '/partners/other', '/services', '/services/', '/hi', '/admin/slug', '/sitemap.xml']) {
@@ -68,12 +95,32 @@ test('routes all public dynamic families through a status-aware page handler', a
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
 
-  for (const pathname of ['/partners/localdrop', '/partners/portal-preview', '/services/service-slug', '/catalogue/package-slug', '/blog/article-slug']) {
+  for (const pathname of [
+    '/partners/localdrop',
+    '/partners/portal-preview',
+    '/partners/dashboard',
+    '/partners/recovery',
+    '/partners/register',
+    '/partners/login',
+    '/services/service-slug',
+    '/catalogue/package-slug',
+    '/blog/article-slug',
+  ]) {
     const response: globalThis.Response = await fetch(`http://127.0.0.1:${address.port}${pathname}`);
     assert.equal(response.status, 200);
     assert.match(await response.text(), /id="root"/);
   }
-  assert.deepEqual(renderedPaths, ['/partners/localdrop', '/partners/portal-preview', '/services/service-slug', '/catalogue/package-slug', '/blog/article-slug']);
+  assert.deepEqual(renderedPaths, [
+    '/partners/localdrop',
+    '/partners/portal-preview',
+    '/partners/dashboard',
+    '/partners/recovery',
+    '/partners/register',
+    '/partners/login',
+    '/services/service-slug',
+    '/catalogue/package-slug',
+    '/blog/article-slug',
+  ]);
 });
 
 test('returns 404 only when content resolution succeeds and finds no page', async (context) => {
