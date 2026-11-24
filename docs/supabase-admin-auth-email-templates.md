@@ -71,7 +71,7 @@ The current delegated-admin flow uses this template when sending a verification/
             <p style="font-size:16px;line-height:1.6;">Your administrator access will allow you to manage the sections and permissions assigned by the account owner.</p>
             <p style="font-size:16px;line-height:1.6;">To get started, verify your email address using the button below. If you also received a separate NearGrow Ads onboarding email with a temporary password, use it for your first sign-in and replace it immediately. If you did not receive a temporary-password email, follow the password setup instructions from the Primary Owner; existing Auth passwords are never replaced as part of this verification.</p>
             <p style="margin:28px 0;text-align:center;">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Verify Email &amp; Continue</a>
+              <a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=signup" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Verify Email &amp; Continue</a>
             </p>
             <h2 style="margin:28px 0 8px;font-size:16px;color:#173c26;">For your security</h2>
             <ul style="padding-left:22px;font-size:14px;line-height:1.7;color:#405047;">
@@ -110,7 +110,7 @@ Keep recovery visually branded but clearly distinct from an invitation.
             <p style="font-size:16px;line-height:1.6;">A secure password setup or reset was requested for your NearGrow Ads CMS identity.</p>
             <p style="font-size:16px;line-height:1.6;">Use the button below to continue. If you are completing an administrator invitation, your CMS access remains pending until secure setup is complete.</p>
             <p style="margin:28px 0;text-align:center;">
-              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Set or Reset Password</a>
+              <a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=recovery" style="display:inline-block;padding:14px 22px;border-radius:8px;background:#286d3b;color:#ffffff;text-decoration:none;font-weight:bold;">Set or Reset Password</a>
             </p>
             <p style="font-size:14px;line-height:1.7;color:#405047;">For your security, create your own password and never share your password or this link. If you did not request this, you can safely ignore this email.</p>
             <p style="margin-top:28px;font-size:14px;line-height:1.6;">Regards,<br><strong>NearGrow Ads Team</strong><br><a href="https://www.neargrowads.com" style="color:#286d3b;">www.neargrowads.com</a></p>
