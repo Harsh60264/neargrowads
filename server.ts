@@ -94,6 +94,7 @@ import {
 import { isSameOriginHost } from './server/adminAuthOrigin';
 import {
   normalizePartnerEmail,
+  parsePartnerAuthSignupUser,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
   buildPartnerAuthRedirect,
@@ -5457,7 +5458,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       });
       const signup = await signupResponse.json() as {
         id?: string;
-        user?: { id?: string; email?: string; email_confirmed_at?: string };
+        email?: string;
+        email_confirmed_at?: string | null;
+        user?: { id?: string; email?: string; email_confirmed_at?: string | null };
         access_token?: string;
         msg?: string;
         message?: string;
@@ -5475,8 +5478,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         res.status(400).json({ message: 'Supabase Auth rejected this registration. Check the email and password and try again.' });
         return;
       }
-      authUserId = signup.user?.id || signup.id;
-      if (!authUserId || signup.user?.email?.toLowerCase() !== validation.email) {
+      const signupUser = parsePartnerAuthSignupUser(signup);
+      authUserId = signupUser?.id;
+      if (!authUserId || signupUser?.email?.toLowerCase() !== validation.email) {
         res.status(503).json({ message: 'Registration could not be confirmed. Please try again.' });
         return;
       }
@@ -5493,7 +5497,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         }),
       }).then((response) => readSupabaseJson<unknown>(response));
 
-      const status = signup.user?.email_confirmed_at ? 'active' : 'pending';
+      const status = signupUser.email_confirmed_at ? 'active' : 'pending';
       await readSupabaseJson<Array<{ id: string }>>(await supabaseAdminRequest('rest/v1/partner_profiles', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
