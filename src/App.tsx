@@ -522,6 +522,9 @@ export default function App() {
     if (currentPath === '/admin/categories' || currentPath === '/admin/categories/') {
       return <AdminPage {...adminThemeControls} section="categories" onNavigate={navigate} />;
     }
+    if (currentPath === '/admin/delivery-team' || currentPath === '/admin/delivery-team/') {
+      return <AdminPage {...adminThemeControls} section="deliveryTeam" onNavigate={navigate} />;
+    }
     if (currentPath === '/admin/content' || currentPath === '/admin/content/') {
       return <AdminPage {...adminThemeControls} section="content" onNavigate={navigate} onSiteContentSaved={setSiteContent} />;
     }

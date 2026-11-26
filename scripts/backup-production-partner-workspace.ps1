@@ -76,12 +76,7 @@ function Invoke-CheckedNativeCommand {
     [switch]$CaptureOutput
   )
 
-  $diagnostics = @()
-  if ($CaptureOutput) {
-    $diagnostics = @(& $Executable @Arguments)
-  } else {
-    & $Executable @Arguments | Out-Host
-  }
+  $diagnostics = @(& $Executable @Arguments 2>&1)
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) {
     $diagnosticText = ($diagnostics | ForEach-Object {
@@ -92,9 +87,12 @@ function Invoke-CheckedNativeCommand {
       }
     }) -join ' '
     $safeDiagnostic = $diagnosticText `
+      -replace '(?i)\b(?:postgres(?:ql)?|https?)://\S+', '[redacted-connection-uri]' `
       -replace '(?i)\b(password|secret|token|api[_-]?key|authorization|cookie)\s*[:=]\s*\S+', '$1=[redacted]' `
       -replace '(?i)\bBearer\s+\S+', 'Bearer [redacted]' `
-      -replace '"[^"]*"|''[^'']*''', '[redacted]' `
+      -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[redacted-email]' `
+      -replace '(?<!\d)(?:\+?\d[\s().-]*){10,15}(?!\d)', '[redacted-phone]' `
+      -replace '\b[A-Za-z0-9_-]{32,}\b', '[redacted-token]' `
       -replace '\s+', ' '
     if ($safeDiagnostic.Length -gt 300) {
       $safeDiagnostic = $safeDiagnostic.Substring(0, 300) + '...'
@@ -104,7 +102,30 @@ function Invoke-CheckedNativeCommand {
     }
     throw "$Operation failed (exit code $exitCode): $safeDiagnostic"
   }
+  if (-not $CaptureOutput) {
+    $diagnostics | Out-Host
+  }
   return $diagnostics
+}
+
+function ConvertTo-SafeNativeDiagnosticText {
+  param([AllowEmptyString()][string]$Text)
+
+  $safeDiagnostic = $Text `
+    -replace '(?i)\b(?:postgres(?:ql)?|https?)://\S+', '[redacted-connection-uri]' `
+    -replace '(?i)\b(password|secret|token|api[_-]?key|authorization|cookie)\s*[:=]\s*\S+', '$1=[redacted]' `
+    -replace '(?i)\bBearer\s+\S+', 'Bearer [redacted]' `
+    -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[redacted-email]' `
+    -replace '(?<!\d)(?:\+?\d[\s().-]*){10,15}(?!\d)', '[redacted-phone]' `
+    -replace '\b[A-Za-z0-9_-]{32,}\b', '[redacted-token]' `
+    -replace '\s+', ' '
+  if ($safeDiagnostic.Length -gt 1000) {
+    $safeDiagnostic = $safeDiagnostic.Substring(0, 1000) + '...'
+  }
+  if ([string]::IsNullOrWhiteSpace($safeDiagnostic)) {
+    return 'Native command failed; diagnostic was empty after redaction.'
+  }
+  return $safeDiagnostic
 }
 
 function Set-PrivateDirectoryAcl {
@@ -209,6 +230,7 @@ $clusterLogPath = Join-Path $backupDirectory 'restore-drill-server.log'
 $evidence = $null
 $localEnvironment = $null
 $remoteEnvironment = $null
+$currentOperation = 'Production pg_dump'
 
 New-Item -ItemType Directory -Path $backupDirectory -ErrorAction Stop | Out-Null
 Set-PrivateDirectoryAcl -Path $backupDirectory
@@ -246,6 +268,7 @@ try {
     throw 'Production pg_dump created an empty archive.'
   }
   $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+  $currentOperation = 'Archive table-of-contents integrity check'
   [void](Invoke-CheckedNativeCommand -Executable $PgRestorePath -Arguments @(
       '--list', '--file', $tocPath, $archivePath
     ) -Operation 'Archive table-of-contents integrity check')
@@ -334,6 +357,7 @@ try {
     )
   }
 
+  $currentOperation = 'Isolated PostgreSQL cluster initialization'
   $localEnvironment = Enter-StagingPsqlEnvironment
   [Environment]::SetEnvironmentVariable('PGSSLMODE', 'disable', 'Process')
   [Environment]::SetEnvironmentVariable('PGSSLROOTCERT', $null, 'Process')
@@ -348,6 +372,7 @@ try {
       '--auth-host=trust',
       '--no-instructions'
     ) -Operation 'Isolated PostgreSQL cluster initialization')
+  $currentOperation = 'Isolated PostgreSQL cluster startup'
   $startArguments = @(
     '--pgdata', $clusterPath,
     '--log', $clusterLogPath,
@@ -362,10 +387,12 @@ try {
     throw "Isolated PostgreSQL cluster startup failed (exit code $startExitCode)."
   }
 
+  $currentOperation = 'Isolated restore database creation'
   [void](Invoke-CheckedNativeCommand -Executable $CreateDbPath -Arguments @(
       '--no-password', '--host', '127.0.0.1', '--port', [string]$port,
       '--username', 'postgres', 'partner_restore_drill'
     ) -Operation 'Isolated restore database creation')
+  $currentOperation = 'Isolated Supabase role preparation'
   [void](Invoke-LocalPsql -Port $port -Sql @'
 DO $roles$
 DECLARE
@@ -385,6 +412,7 @@ END;
 $roles$;
 '@)
   $evidence.restoreDrill.startedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+  $currentOperation = 'Full isolated database restore'
   [void](Invoke-CheckedNativeCommand -Executable $PgRestorePath -Arguments @(
       '--no-password',
       '--host', '127.0.0.1',
@@ -397,6 +425,7 @@ $roles$;
       '--exit-on-error',
       $archivePath
     ) -Operation 'Full isolated database restore')
+  $currentOperation = 'Restored Auth table verification'
   $evidence.restoreDrill.authTableRows = @(Get-AuthTableRowCounts -Port $port)
   $evidence.restoreDrill.status = 'PASS'
   $evidence.restoreDrill.completedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
@@ -420,10 +449,10 @@ $roles$;
   if ($null -ne $evidence) {
     $evidence.restoreDrill.status = 'FAIL'
     $evidence.restoreDrill.completedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-    $evidence.restoreDrill.error = 'Restore/verification failed; see the local terminal diagnostic.'
+    $evidence.restoreDrill.failureStage = $currentOperation
+    $evidence.restoreDrill.error = ConvertTo-SafeNativeDiagnosticText -Text $_.Exception.Message
+    $evidence.restoreDrill.diagnostic = $evidence.restoreDrill.error
     Write-BackupEvidence -Path $evidencePath -Evidence $evidence
-  } elseif (Test-Path -LiteralPath $archivePath -PathType Leaf) {
-    Remove-Item -LiteralPath $archivePath -Force
   }
   throw
 } finally {

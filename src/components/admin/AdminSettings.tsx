@@ -114,6 +114,7 @@ const sectionLabels: Record<AdminSection, string> = {
   blogs: 'Blog Management',
   team: 'Team & Mentors',
   categories: 'Categories',
+  deliveryTeam: 'Delivery Team',
   securityMonitoring: 'Security Monitoring',
   settings: 'Settings',
 };

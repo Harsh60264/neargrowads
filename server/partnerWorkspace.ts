@@ -6,7 +6,7 @@ export interface PartnerProofPhoto {
 }
 
 export interface PartnerCoinLedgerEntry {
-  entry_type: 'earning' | 'withdrawal';
+  entry_type: 'earning' | 'withdrawal' | 'adjustment';
   amount: number;
   status: 'pending' | 'approved' | 'rejected' | 'requested' | 'settled';
 }
@@ -66,6 +66,8 @@ export function summarizePartnerCoins(entries: readonly PartnerCoinLedgerEntry[]
       } else if (entry.status === 'pending') {
         pendingApproval += entry.amount;
       }
+    } else if (entry.entry_type === 'adjustment' && entry.status === 'approved') {
+      balance += entry.amount;
     } else if (entry.entry_type === 'withdrawal') {
       if (entry.status === 'requested' || entry.status === 'settled') {
         balance += entry.amount;

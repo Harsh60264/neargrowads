@@ -11,6 +11,7 @@ test('permission matrix matches supported actions and includes Page Content publ
   assert.deepEqual(ADMIN_SECTION_ACTIONS.content, ['view', 'edit', 'publish']);
   assert.deepEqual(ADMIN_SECTION_ACTIONS.dashboard, ['view']);
   assert.deepEqual(ADMIN_SECTION_ACTIONS.securityMonitoring, ['view', 'edit']);
+  assert.deepEqual(ADMIN_SECTION_ACTIONS.deliveryTeam, ['view', 'create', 'edit']);
 });
 
 test('server permission validation accepts supported Page Content publishing and rejects invented actions', () => {
@@ -27,6 +28,7 @@ test('Super Admin defaults include normal content actions but exclude Security M
   assert.equal(DEFAULT_SUPER_ADMIN_PERMISSIONS.caseStudies?.delete, true);
   assert.equal(DEFAULT_SUPER_ADMIN_PERMISSIONS.blogs?.publish, true);
   assert.equal(DEFAULT_SUPER_ADMIN_PERMISSIONS.securityMonitoring, undefined);
+  assert.equal(DEFAULT_SUPER_ADMIN_PERMISSIONS.deliveryTeam, undefined);
 });
 
 test('Page Content publishing is permission-gated and privileged routes remain protected', () => {
@@ -41,4 +43,17 @@ test('Page Content publishing is permission-gated and privileged routes remain p
   assert.match(server, /if \(req\.path === '\/security-monitoring\/rules' && !identity\.isPrimaryOwner\)/);
   assert.match(server, /app\.post\('\/api\/admin\/users\/:id\/permanent-delete'[\s\S]*?requireOwner\(req, res\)/);
   assert.match(server, /app\.put\('\/api\/admin\/payment-settings'[\s\S]*?requireOwner\(req, res\)/);
+});
+
+test('Delivery Team mutations require explicit permission and remain excluded from automatic Super Admin grants', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const adminPage = readFileSync(new URL('../src/components/admin/AdminPage.tsx', import.meta.url), 'utf8');
+  const permissionMapStart = server.indexOf('function requiredAdminPermission(');
+  const permissionMapEnd = server.indexOf('async function writeAdminAudit(', permissionMapStart);
+  const permissionMap = server.slice(permissionMapStart, permissionMapEnd);
+  assert.match(permissionMap, /pathName === '\/delivery-team\/overview' && req\.method === 'GET'\) return \{ section: 'deliveryTeam', action: 'view' \}/);
+  assert.match(permissionMap, /pathName === '\/delivery-team\/stock' && req\.method === 'POST'\) return \{ section: 'deliveryTeam', action: 'edit' \}/);
+  assert.match(server, /if \(section === 'deliveryTeam'\)[\s\S]*?canAccessDeliveryTeam\(identity, action\)/);
+  assert.match(adminPage, /hasView\('deliveryTeam'\).*navigate\('\/admin\/delivery-team'\)/);
+  assert.match(adminPage, /hasAction\('deliveryTeam', 'edit'\)/);
 });

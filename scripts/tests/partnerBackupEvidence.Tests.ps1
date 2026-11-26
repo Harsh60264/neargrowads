@@ -89,6 +89,33 @@ try {
   $hiddenAncestorItem = Get-Item -LiteralPath $hiddenAncestor -Force -ErrorAction Stop
   $hiddenAncestorItem.Attributes = $hiddenAncestorItem.Attributes -bor [System.IO.FileAttributes]::Hidden
   $backupScript = Get-Content -LiteralPath $backupScriptPath -Raw
+  $backupTokens = $null
+  $backupParseErrors = $null
+  $backupAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $backupScriptPath, [ref]$backupTokens, [ref]$backupParseErrors
+  )
+  Assert-True ($backupParseErrors.Count -eq 0) 'The backup runner must remain valid PowerShell.'
+  $diagnosticSanitizerAst = $backupAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq 'ConvertTo-SafeNativeDiagnosticText'
+  }, $true)
+  Assert-True ($null -ne $diagnosticSanitizerAst) `
+    'The backup runner must preserve a sanitized native restore diagnostic.'
+  . ([scriptblock]::Create($diagnosticSanitizerAst.Extent.Text))
+  $extensionDiagnostic = ConvertTo-SafeNativeDiagnosticText `
+    -Text 'pg_restore: error: could not execute query: ERROR: extension "supabase_vault" is not available'
+  Assert-True ($extensionDiagnostic.Contains('extension "supabase_vault" is not available')) `
+    'Restore diagnostic sanitization must retain the exact missing-extension cause.'
+  $secretDiagnostic = ConvertTo-SafeNativeDiagnosticText `
+    -Text 'password=SensitiveValue Bearer SensitiveToken'
+  Assert-True (-not $secretDiagnostic.Contains('SensitiveValue') -and
+    -not $secretDiagnostic.Contains('SensitiveToken')) `
+    'Persisted backup diagnostics must redact password and bearer-token values.'
+  Assert-True ($backupScript.Contains('$evidence.restoreDrill.diagnostic = $evidence.restoreDrill.error') -and
+    $backupScript.Contains('$evidence.restoreDrill.failureStage = $currentOperation') -and
+    -not $backupScript.Contains('Remove-Item -LiteralPath $archivePath -Force')) `
+    'Failed restore diagnostics must be persisted without deleting the validated backup archive.'
   Assert-True ($backupScript -match '(?m)^\s*\$pathItem\s*=\s*Get-Item\s+-LiteralPath\s+\$pathToCheck\s+-Force\s+-ErrorAction\s+Stop\s*$') `
     'Backup-root validation must force retrieval of hidden path ancestors and surface lookup errors.'
   $hiddenPathToCheck = $hiddenBackupRoot
@@ -277,6 +304,9 @@ INSERT INTO storage.objects VALUES (21);
     'The verifier must emit its exact success marker.'
 
   $evidence.restoreDrill.status = 'FAIL'
+  $evidence.restoreDrill.failureStage = 'Full isolated database restore'
+  $evidence.restoreDrill.error = 'Full isolated database restore failed: extension "supabase_vault" is not available'
+  $evidence.restoreDrill.diagnostic = $evidence.restoreDrill.error
   $evidence.restoreDrill.authTableRows = @()
   [System.IO.File]::WriteAllText(
     $evidencePath,
@@ -290,6 +320,9 @@ INSERT INTO storage.objects VALUES (21);
     'Archive-only verification must use a distinct non-restore success marker.'
   Assert-True (@($archiveOnlyOutput | ForEach-Object { [string]$_ }) -notcontains 'BACKUP EVIDENCE PASS') `
     'Archive-only verification must never claim a successful full restore.'
+  Assert-True (@($archiveOnlyOutput | ForEach-Object { [string]$_ }) -contains
+    'Restore failure diagnostic: Full isolated database restore failed: extension "supabase_vault" is not available') `
+    'Archive-only verification must preserve and display the accurate restore diagnostic.'
   $failedRestoreRejected = $false
   try {
     & $verifierPath -EvidencePath $evidencePath | Out-Null

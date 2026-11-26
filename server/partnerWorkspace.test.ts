@@ -46,3 +46,17 @@ test('coin summary counts approved proof once and reserves requested withdrawals
     pendingApproval: 500,
   });
 });
+
+test('approved administrator adjustments change available coins without rewriting earnings', () => {
+  assert.deepEqual(summarizePartnerCoins([
+    { entry_type: 'earning', amount: 25_000, status: 'approved' },
+    { entry_type: 'adjustment', amount: -5_000, status: 'approved' },
+    { entry_type: 'adjustment', amount: 9_000, status: 'pending' },
+    { entry_type: 'withdrawal', amount: -10_000, status: 'requested' },
+  ]), {
+    balance: 10_000,
+    totalEarned: 25_000,
+    totalWithdrawn: 0,
+    pendingApproval: 0,
+  });
+});

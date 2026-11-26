@@ -12,6 +12,7 @@ import { AdminServicesManagement } from './AdminServicesManagement';
 import { AdminMascotSettings } from './AdminMascotSettings';
 import { AdminLeadExport } from './AdminLeadExport';
 import { AdminSecurityMonitoring } from './AdminSecurityMonitoring';
+import { AdminDeliveryTeam, DeliveryTeamOverviewWidget, type DeliveryTeamOverview } from './AdminDeliveryTeam';
 import type { SiteContent } from '../../data/siteContent';
 import {
   ArrowLeft,
@@ -39,6 +40,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShoppingBag,
+  Truck,
   UsersRound,
   X,
   BookOpen,
@@ -80,7 +82,7 @@ interface AdminSession {
     email: string;
     role: 'owner' | 'super_admin' | 'custom_admin';
     status: 'pending' | 'active' | 'disabled';
-    permissions: Partial<Record<'dashboard' | 'leads' | 'serviceStore' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'blogs' | 'team' | 'categories' | 'securityMonitoring' | 'settings', Partial<Record<'view' | 'create' | 'edit' | 'delete' | 'publish' | 'export', boolean>>>>;
+    permissions: Partial<Record<'dashboard' | 'leads' | 'serviceStore' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'blogs' | 'team' | 'categories' | 'deliveryTeam' | 'securityMonitoring' | 'settings', Partial<Record<'view' | 'create' | 'edit' | 'delete' | 'publish' | 'export', boolean>>>>;
     isPrimaryOwner: boolean;
     username?: string;
     mustChangePassword?: boolean;
@@ -175,7 +177,7 @@ export function shouldRefreshLeads({
 }
 
 export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, onSiteContentSaved, theme = 'dark', onToggleTheme = () => {} }: {
-  section?: 'blog' | 'team' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'leads' | 'categories' | 'securityMonitoring' | 'settings' | 'serviceStore';
+  section?: 'blog' | 'team' | 'content' | 'mascot' | 'caseStudies' | 'servicesManagement' | 'leads' | 'categories' | 'deliveryTeam' | 'securityMonitoring' | 'settings' | 'serviceStore';
   blogMode?: 'list' | 'editor';
   isNewBlog?: boolean;
   onNavigate?: (path: string) => void;
@@ -198,6 +200,8 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const [initialSessionCheckFailed, setInitialSessionCheckFailed] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [leads, setLeads] = useState<AdminLead[]>([]);
+  const [deliveryTeamOverview, setDeliveryTeamOverview] = useState<DeliveryTeamOverview | null>(null);
+  const [deliveryTeamOverviewError, setDeliveryTeamOverviewError] = useState('');
   const [storage, setStorage] = useState<LeadStorage | null>(null);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [identifier, setIdentifier] = useState('');
@@ -355,6 +359,48 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
     session.user.role === 'owner' ||
     session.user.permissions.leads?.view
   ));
+  const canViewDeliveryTeam = Boolean(session?.user && (
+    session.user.role === 'owner' ||
+    session.user.permissions.deliveryTeam?.view
+  ));
+
+  useEffect(() => {
+    if (!session?.authenticated || !canViewDeliveryTeam) {
+      setDeliveryTeamOverview(null);
+      setDeliveryTeamOverviewError('');
+      return;
+    }
+    let active = true;
+    let requestPending = false;
+    const loadOverview = async () => {
+      if (requestPending) return;
+      requestPending = true;
+      try {
+        const response = await fetch('/api/admin/delivery-team/overview', { credentials: 'same-origin' });
+        if (!response.ok) throw new Error(await responseMessage(response));
+        const data = await response.json() as { overview?: DeliveryTeamOverview };
+        if (!data.overview) throw new Error('Delivery Team overview data was incomplete.');
+        if (active) {
+          setDeliveryTeamOverview(data.overview);
+          setDeliveryTeamOverviewError('');
+        }
+      } catch (requestError) {
+        if (active) {
+          setDeliveryTeamOverviewError(requestError instanceof Error
+            ? requestError.message
+            : 'Delivery Team activity could not be loaded.');
+        }
+      } finally {
+        requestPending = false;
+      }
+    };
+    void loadOverview();
+    const timer = window.setInterval(() => void loadOverview(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [session?.authenticated, canViewDeliveryTeam]);
 
   useEffect(() => {
     if (!session?.authenticated || !canViewLeads || section !== 'leads') return;
@@ -893,6 +939,8 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
             ? <AdminServicesManagement canCreate={hasAction('servicesManagement', 'create')} canEdit={hasAction('servicesManagement', 'edit')} canDelete={hasAction('servicesManagement', 'delete')} canPublish={hasAction('servicesManagement', 'publish')} />
           : section === 'categories'
           ? <AdminBlogCategories onNavigate={navigate} embedded canCreate={hasAction('categories', 'create')} canEdit={hasAction('categories', 'edit')} canDelete={hasAction('categories', 'delete')} canCreateBlog={hasAction('blogs', 'create')} />
+          : section === 'deliveryTeam'
+            ? <AdminDeliveryTeam canCreate={hasAction('deliveryTeam', 'create')} canEdit={hasAction('deliveryTeam', 'edit')} theme={theme} />
           : section === 'securityMonitoring'
             ? <AdminSecurityMonitoring isPrimaryOwner={session.user?.isPrimaryOwner === true} canManageAlerts={canEditSecurityMonitoring} />
           : section === 'settings'
@@ -907,6 +955,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           : section === 'caseStudies' ? 'caseStudies'
             : section === 'servicesManagement' ? 'servicesManagement'
             : section === 'categories' ? 'categories'
+            : section === 'deliveryTeam' ? 'deliveryTeam'
             : section === 'securityMonitoring' ? 'securityMonitoring'
             : section === 'settings' ? 'settings'
               : 'dashboard';
@@ -968,6 +1017,13 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
             {hasView('blogs') && <button type="button" onClick={() => navigate('/admin/blog')} title="Blog Management" aria-current={activeSection === 'blogs' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${activeSection === 'blogs' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}><BookOpen className="h-4 w-4 shrink-0" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Blog Management</span></button>}
             {hasView('team') && <button type="button" onClick={() => navigate('/admin/team')} title="Team &amp; Mentors" aria-current={activeSection === 'team' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${activeSection === 'team' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}><UsersRound className="h-4 w-4 shrink-0" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Team &amp; Mentors</span></button>}
             {hasView('categories') && <button type="button" onClick={() => navigate('/admin/categories')} title="Categories" aria-current={activeSection === 'categories' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${activeSection === 'categories' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}><Tag className="h-4 w-4 shrink-0" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Categories</span></button>}
+            {hasView('deliveryTeam') && <button type="button" onClick={() => navigate('/admin/delivery-team')} title="Delivery Team" aria-current={activeSection === 'deliveryTeam' ? 'page' : undefined} aria-label={`Delivery Team${deliveryTeamOverview ? `, ${deliveryTeamOverview.pendingProofs} proofs and ${deliveryTeamOverview.pendingRequests} requests pending` : ''}`} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${activeSection === 'deliveryTeam' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
+              <Truck className="h-4 w-4 shrink-0 text-[#84D095]" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Delivery Team</span>
+              {!sidebarCollapsed && deliveryTeamOverview && (deliveryTeamOverview.pendingProofs + deliveryTeamOverview.pendingRequests) > 0 && <span className="ml-auto flex items-center gap-1">
+                {deliveryTeamOverview.pendingProofs > 0 && <span className="rounded-full bg-[#3EA259]/25 px-2 py-0.5 text-[10px] text-[#A7E1B3]" title="Proofs awaiting review">{deliveryTeamOverview.pendingProofs}P</span>}
+                {deliveryTeamOverview.pendingRequests > 0 && <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] text-amber-200" title="Requests awaiting review">{deliveryTeamOverview.pendingRequests}R</span>}
+              </span>}
+            </button>}
             {canViewSecurityMonitoring && <button type="button" onClick={() => navigate('/admin/security-monitoring')} title="Security Monitoring" aria-current={activeSection === 'securityMonitoring' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${activeSection === 'securityMonitoring' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}><ShieldAlert className="h-4 w-4 shrink-0 text-[#84D095]" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Security Monitoring</span></button>}
             {hasView('settings') && <button type="button" onClick={() => navigate('/admin/settings')} title="Settings" aria-current={activeSection === 'settings' ? 'page' : undefined} className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${activeSection === 'settings' ? 'bg-white/10 text-white' : 'text-[#B7C8BA] hover:bg-white/5 hover:text-white'} ${sidebarCollapsed ? 'lg:justify-center' : ''}`}><ShieldCheck className="h-4 w-4 shrink-0" /><span className={sidebarCollapsed ? 'lg:sr-only' : ''}>Settings</span></button>}
           </nav>
@@ -995,8 +1051,8 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           <header className="admin-workspace-header flex flex-wrap items-center justify-between gap-4 border-b border-[#E4E9E3] pb-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#78907D]">NearGrow Ads · CMS</p>
-              <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{section === 'leads' ? 'Leads & Inquiries' : section === 'serviceStore' ? 'Service Store' : section === 'team' ? 'Team & Mentors' : section === 'blog' ? 'Blog Management' : section === 'content' ? 'Page Content Manager' : section === 'mascot' ? 'NEO Mascot' : section === 'caseStudies' ? 'Case Studies' : section === 'servicesManagement' ? 'Services Management' : section === 'categories' ? 'Categories' : section === 'securityMonitoring' ? 'Security Monitoring' : section === 'settings' ? 'Settings' : 'Overview'}</h1>
-              <p className="mt-1 text-sm text-[#778178]">{section === 'leads' ? 'Review consultation requests, contact submissions, and new business inquiries.' : section === 'serviceStore' ? 'Create and manage the service packages shown in the public Catalogue.' : section === 'mascot' ? 'Manage NEO’s appearance and size across your website.' : section ? 'Manage this section in your NearGrow Ads workspace.' : 'Manage your website and keep up with new enquiries.'}</p>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{section === 'leads' ? 'Leads & Inquiries' : section === 'serviceStore' ? 'Service Store' : section === 'team' ? 'Team & Mentors' : section === 'blog' ? 'Blog Management' : section === 'content' ? 'Page Content Manager' : section === 'mascot' ? 'NEO Mascot' : section === 'caseStudies' ? 'Case Studies' : section === 'servicesManagement' ? 'Services Management' : section === 'categories' ? 'Categories' : section === 'deliveryTeam' ? 'Delivery Team' : section === 'securityMonitoring' ? 'Security Monitoring' : section === 'settings' ? 'Settings' : 'Overview'}</h1>
+              <p className="mt-1 text-sm text-[#778178]">{section === 'leads' ? 'Review consultation requests, contact submissions, and new business inquiries.' : section === 'serviceStore' ? 'Create and manage the service packages shown in the public Catalogue.' : section === 'mascot' ? 'Manage NEO’s appearance and size across your website.' : section === 'deliveryTeam' ? 'Manage WildCard delivery partners, campaigns, physical stock, proofs and NGA Coins.' : section ? 'Manage this section in your NearGrow Ads workspace.' : 'Manage your website and keep up with new enquiries.'}</p>
             </div>
             <div className="flex items-center gap-2">
               {themeToggle}
@@ -1040,6 +1096,25 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               </div>
             </aside>
           </div>}
+          {!section && canViewDeliveryTeam && <DeliveryTeamOverviewWidget
+            overview={deliveryTeamOverview}
+            error={deliveryTeamOverviewError}
+            theme={theme}
+            onRefresh={() => {
+              setDeliveryTeamOverviewError('');
+              void fetch('/api/admin/delivery-team/overview', { credentials: 'same-origin' })
+                .then(async (response) => {
+                  if (!response.ok) throw new Error(await responseMessage(response));
+                  return response.json() as Promise<{ overview?: DeliveryTeamOverview }>;
+                })
+                .then((data) => {
+                  if (!data.overview) throw new Error('Delivery Team overview data was incomplete.');
+                  setDeliveryTeamOverview(data.overview);
+                })
+                .catch((requestError: unknown) => setDeliveryTeamOverviewError(requestError instanceof Error ? requestError.message : 'Delivery Team activity could not be loaded.'));
+            }}
+            onOpen={() => navigate('/admin/delivery-team?tab=activity')}
+          />}
           {error && (
             <div role="alert" className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
               <span>{error}</span>

@@ -238,6 +238,18 @@ Write-Output 'Schema/data evidence: public, Auth, and Storage metadata present; 
 if ($ArchiveOnly) {
   Write-Output "Isolated full restore drill: FAIL ($($restoreCompletedAt.ToUniversalTime().ToString('o')))"
   Write-Output 'This archive-only result does not establish database restoreability or full Supabase recovery.'
+  $diagnosticProperty = $evidence.restoreDrill.PSObject.Properties['diagnostic']
+  if ($null -ne $diagnosticProperty -and
+    -not [string]::IsNullOrWhiteSpace([string]$diagnosticProperty.Value)) {
+    $failureStageProperty = $evidence.restoreDrill.PSObject.Properties['failureStage']
+    $failureStage = if ($null -ne $failureStageProperty) {
+      [string]$failureStageProperty.Value
+    } else {
+      'Not recorded'
+    }
+    Write-Output "Restore failure stage: $failureStage"
+    Write-Output "Restore failure diagnostic: $($diagnosticProperty.Value)"
+  }
 } else {
   Write-Output "Isolated full restore drill: PASS ($($restoreCompletedAt.ToUniversalTime().ToString('o')))"
 }

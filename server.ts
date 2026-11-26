@@ -102,8 +102,12 @@ import {
 import {
   normalizePartnerProfileUpdate,
   parsePartnerProofPhoto,
-  summarizePartnerCoins,
 } from './server/partnerWorkspace';
+import {
+  canAccessDeliveryTeam,
+  parseDeliveryTeamPagination,
+  validateManualCoinAdjustment,
+} from './server/deliveryTeam';
 import { createPublicSitemapHandler } from './server/publicSitemap';
 import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
@@ -3915,7 +3919,7 @@ async function getPartnerProofPhotoUrl(objectPath: string): Promise<string> {
 
 async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<string, unknown>> {
   const partnerId = profile.id;
-  const [assignments, proofs, movements, requests, damageReports, ledger, withdrawals] = await Promise.all([
+  const [assignments, proofs, movements, requests, damageReports, ledger, withdrawals, coinSummary] = await Promise.all([
     readPartnerWorkspaceTable<{
       id: string; campaign_id: string; daily_target: number; active: boolean; created_at: string;
     }>('partner_campaign_assignments', {
@@ -3963,12 +3967,13 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     }),
     readPartnerWorkspaceTable<{
       id: string; campaign_id: string | null; proof_id: string | null; withdrawal_request_id: string | null;
-      entry_type: 'earning' | 'withdrawal'; amount: number;
+      entry_type: 'earning' | 'withdrawal' | 'adjustment'; amount: number;
       status: 'pending' | 'approved' | 'rejected' | 'requested' | 'settled';
-      reference: string; notes: string; created_at: string;
+      reference: string; notes: string; created_at: string; administrator_id: string | null;
+      admin_previous_balance: number | null; admin_resulting_balance: number | null;
     }>('partner_coin_ledger', {
       partner_profile_id: `eq.${partnerId}`,
-      select: 'id,campaign_id,proof_id,withdrawal_request_id,entry_type,amount,status,reference,notes,created_at',
+      select: 'id,campaign_id,proof_id,withdrawal_request_id,entry_type,amount,status,reference,notes,created_at,administrator_id,admin_previous_balance,admin_resulting_balance',
       order: 'created_at.desc',
       limit: '250',
     }),
@@ -3980,6 +3985,15 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       order: 'created_at.desc',
       limit: '100',
     }),
+    readSupabaseJson<{
+      balance: number;
+      totalEarned: number;
+      totalWithdrawn: number;
+      pendingApproval: number;
+    }>(await supabaseAdminRequest('rest/v1/rpc/get_partner_coin_summary', {
+      method: 'POST',
+      body: JSON.stringify({ p_partner_profile_id: partnerId }),
+    })),
   ]);
   const campaignIds = [...new Set(assignments.map((assignment) => assignment.campaign_id))];
   const campaignFilter = campaignIds.length ? partnerInFilter(campaignIds) : 'in.(00000000-0000-0000-0000-000000000000)';
@@ -4042,8 +4056,286 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     damageReports,
     ledger,
     withdrawals,
-    coinSummary: summarizePartnerCoins(ledger),
+    coinSummary,
   };
+}
+
+interface DeliveryTeamActivityItem {
+  id: string;
+  partnerName: string;
+  activityType: string;
+  details: string;
+  status: string;
+  createdAt: string;
+}
+
+interface DeliveryTeamOverviewItem {
+  totalPartners: number;
+  activePartners: number;
+  totalAvailableCoins: number;
+  totalIssuedStock: number;
+  pendingRequests: number;
+  pendingProofs: number;
+  todaysActivity: number;
+  lowStockThreshold: number;
+}
+
+function summarizeDeliveryTeamDetails(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const details = value as Record<string, unknown>;
+  const reason = typeof details.reason === 'string' ? details.reason : '';
+  const campaign = typeof details.campaignName === 'string' ? details.campaignName : '';
+  const quantity = typeof details.quantity === 'number' ? `${details.quantity} WildCards` : '';
+  const amount = typeof details.amount === 'number' ? `${details.amount} NGA Coins` : '';
+  const balances = typeof details.previousBalance === 'number' && typeof details.resultingBalance === 'number'
+    ? `Balance ${details.previousBalance} → ${details.resultingBalance}` : '';
+  return [campaign, quantity, amount, balances, reason].filter(Boolean).join(' · ');
+}
+
+async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
+  const [adminEvents, proofs, movements, campaignRequests, damageReports, withdrawals, ledger, assignments] =
+    await Promise.all([
+      readPartnerWorkspaceTable<{
+        id: string; activity_type: string; partner_profile_id: string | null; partner_name: string;
+        campaign_id: string | null; details: Record<string, unknown>; status: string; created_at: string;
+      }>('delivery_team_activity', {
+        select: 'id,activity_type,partner_profile_id,partner_name,campaign_id,details,status,created_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; campaign_id: string; site_id: string; status: string;
+        coins: number; submitted_at: string; reviewed_at: string | null; review_note: string;
+      }>('partner_proofs', {
+        select: 'id,partner_profile_id,campaign_id,site_id,status,coins,submitted_at,reviewed_at,review_note',
+        order: 'submitted_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; assignment_id: string; movement_type: string;
+        quantity: number; notes: string; created_at: string; administrator_id: string | null;
+      }>('partner_stock_movements', {
+        select: 'id,partner_profile_id,assignment_id,movement_type,quantity,notes,created_at,administrator_id',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; assignment_id: string; request_type: string;
+        details: string; status: string; created_at: string; reviewed_at: string | null;
+      }>('partner_campaign_requests', {
+        select: 'id,partner_profile_id,assignment_id,request_type,details,status,created_at,reviewed_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; assignment_id: string; issue_type: string;
+        card_id: string; details: string; status: string; created_at: string; reviewed_at: string | null;
+      }>('partner_damage_reports', {
+        select: 'id,partner_profile_id,assignment_id,issue_type,card_id,details,status,created_at,reviewed_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; amount: number; status: string; reference: string;
+        created_at: string; reviewed_at: string | null;
+      }>('partner_withdrawal_requests', {
+        select: 'id,partner_profile_id,amount,status,reference,created_at,reviewed_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; entry_type: string; amount: number; status: string;
+        notes: string; created_at: string;
+      }>('partner_coin_ledger', {
+        select: 'id,partner_profile_id,entry_type,amount,status,notes,created_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+      readPartnerWorkspaceTable<{
+        id: string; partner_profile_id: string; campaign_id: string; created_at: string;
+      }>('partner_campaign_assignments', {
+        select: 'id,partner_profile_id,campaign_id,created_at',
+        order: 'created_at.desc',
+        limit: '100',
+      }),
+    ]);
+
+  const partnerIds = [...new Set([
+    ...adminEvents.map((item) => item.partner_profile_id),
+    ...proofs.map((item) => item.partner_profile_id),
+    ...movements.map((item) => item.partner_profile_id),
+    ...campaignRequests.map((item) => item.partner_profile_id),
+    ...damageReports.map((item) => item.partner_profile_id),
+    ...withdrawals.map((item) => item.partner_profile_id),
+    ...ledger.map((item) => item.partner_profile_id),
+    ...assignments.map((item) => item.partner_profile_id),
+  ].filter((id): id is string => Boolean(id)))];
+  const assignmentIds = [...new Set([
+    ...movements.map((item) => item.assignment_id),
+    ...campaignRequests.map((item) => item.assignment_id),
+    ...damageReports.map((item) => item.assignment_id),
+  ])];
+  const campaignIds = [...new Set([
+    ...proofs.map((item) => item.campaign_id),
+    ...adminEvents.map((item) => item.campaign_id),
+    ...assignments.map((item) => item.campaign_id),
+  ].filter((id): id is string => Boolean(id)))];
+  const siteIds = [...new Set(proofs.map((item) => item.site_id))];
+  const [profiles, assignmentRows, campaigns, sites] = await Promise.all([
+    partnerIds.length ? readPartnerWorkspaceTable<{ id: string; full_name: string }>('partner_profiles', {
+      id: partnerInFilter(partnerIds),
+      select: 'id,full_name',
+      limit: '1000',
+    }) : Promise.resolve([]),
+    assignmentIds.length ? readPartnerWorkspaceTable<{ id: string; campaign_id: string }>('partner_campaign_assignments', {
+      id: partnerInFilter(assignmentIds),
+      select: 'id,campaign_id',
+      limit: '1000',
+    }) : Promise.resolve([]),
+    campaignIds.length ? readPartnerWorkspaceTable<{ id: string; name: string }>('partner_campaigns', {
+      id: partnerInFilter(campaignIds),
+      select: 'id,name',
+      limit: '1000',
+    }) : Promise.resolve([]),
+    siteIds.length ? readPartnerWorkspaceTable<{ id: string; name: string }>('partner_campaign_sites', {
+      id: partnerInFilter(siteIds),
+      select: 'id,name',
+      limit: '1000',
+    }) : Promise.resolve([]),
+  ]);
+  const partnerNames = new Map(profiles.map((profile) => [profile.id, profile.full_name]));
+  const campaignNames = new Map(campaigns.map((campaign) => [campaign.id, campaign.name]));
+  const campaignByAssignment = new Map(assignmentRows.map((assignment) => [assignment.id, assignment.campaign_id]));
+  const siteNames = new Map(sites.map((site) => [site.id, site.name]));
+  const result: DeliveryTeamActivityItem[] = [];
+  const partnerName = (id: string | null) => id ? partnerNames.get(id) || 'Delivery partner' : 'Delivery Team';
+  const add = (item: DeliveryTeamActivityItem) => result.push(item);
+
+  for (const event of adminEvents) {
+    add({
+      id: `admin-${event.id}`,
+      partnerName: event.partner_name || partnerName(event.partner_profile_id),
+      activityType: event.activity_type,
+      details: summarizeDeliveryTeamDetails(event.details),
+      status: event.status,
+      createdAt: event.created_at,
+    });
+  }
+  for (const proof of proofs) {
+    const campaign = campaignNames.get(proof.campaign_id) || 'WildCard campaign';
+    add({
+      id: `proof-submitted-${proof.id}`,
+      partnerName: partnerName(proof.partner_profile_id),
+      activityType: 'Proof submitted',
+      details: `${campaign} · ${siteNames.get(proof.site_id) || 'Assigned shop'}`,
+      status: proof.status,
+      createdAt: proof.submitted_at,
+    });
+    if (proof.reviewed_at) add({
+      id: `proof-review-${proof.id}`,
+      partnerName: partnerName(proof.partner_profile_id),
+      activityType: proof.status === 'approved' ? 'Proof approved' : `Proof ${proof.status.replace('_', ' ')}`,
+      details: proof.review_note || `${formatActivityCoin(proof.coins)} NGA Coins`,
+      status: proof.status,
+      createdAt: proof.reviewed_at,
+    });
+  }
+  for (const movement of movements) {
+    if (movement.administrator_id) continue;
+    add({
+      id: `stock-${movement.id}`,
+      partnerName: partnerName(movement.partner_profile_id),
+      activityType: movement.movement_type === 'distributed' ? 'WildCard distributed' :
+        movement.movement_type === 'returned' ? 'WildCard stock returned' :
+          movement.movement_type === 'issued' ? 'WildCard stock issued' : 'WildCard stock adjusted',
+      details: `${Math.abs(movement.quantity)} cards · ${campaignNames.get(campaignByAssignment.get(movement.assignment_id) || '') || 'Campaign'}${movement.notes ? ` · ${movement.notes}` : ''}`,
+      status: 'recorded',
+      createdAt: movement.created_at,
+    });
+  }
+  for (const request of campaignRequests) {
+    add({
+      id: `campaign-request-${request.id}`,
+      partnerName: partnerName(request.partner_profile_id),
+      activityType: request.request_type === 'additional_stock' ? 'Stock request' : 'Campaign request',
+      details: `${campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign'} · ${request.details}`,
+      status: request.status,
+      createdAt: request.created_at,
+    });
+    if (request.reviewed_at) add({
+      id: `campaign-request-review-${request.id}`,
+      partnerName: partnerName(request.partner_profile_id),
+      activityType: request.request_type === 'additional_stock' ? `Stock request ${request.status}` : `Campaign request ${request.status}`,
+      details: campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign',
+      status: request.status,
+      createdAt: request.reviewed_at,
+    });
+  }
+  for (const report of damageReports) {
+    add({
+      id: `damage-${report.id}`,
+      partnerName: partnerName(report.partner_profile_id),
+      activityType: 'Damage reported',
+      details: `${report.issue_type}${report.card_id ? ` · Card ${report.card_id}` : ''}${report.details ? ` · ${report.details}` : ''}`,
+      status: report.status,
+      createdAt: report.created_at,
+    });
+    if (report.reviewed_at) add({
+      id: `damage-review-${report.id}`,
+      partnerName: partnerName(report.partner_profile_id),
+      activityType: `Damage report ${report.status}`,
+      details: `${report.issue_type}${report.card_id ? ` · Card ${report.card_id}` : ''}`,
+      status: report.status,
+      createdAt: report.reviewed_at,
+    });
+  }
+  for (const withdrawal of withdrawals) {
+    add({
+      id: `withdrawal-${withdrawal.id}`,
+      partnerName: partnerName(withdrawal.partner_profile_id),
+      activityType: 'Withdrawal requested',
+      details: `${formatActivityCoin(withdrawal.amount)} NGA Coins`,
+      status: withdrawal.status,
+      createdAt: withdrawal.created_at,
+    });
+    if (withdrawal.reviewed_at) add({
+      id: `withdrawal-review-${withdrawal.id}`,
+      partnerName: partnerName(withdrawal.partner_profile_id),
+      activityType: 'Withdrawal status updated',
+      details: withdrawal.reference ? `Reference ${withdrawal.reference}` : `${formatActivityCoin(withdrawal.amount)} NGA Coins`,
+      status: withdrawal.status,
+      createdAt: withdrawal.reviewed_at,
+    });
+  }
+  for (const entry of ledger) {
+    if (entry.entry_type !== 'earning' || entry.status !== 'approved') continue;
+    add({
+      id: `coins-${entry.id}`,
+      partnerName: partnerName(entry.partner_profile_id),
+      activityType: 'NGA Coins earned',
+      details: `${formatActivityCoin(entry.amount)} NGA Coins${entry.notes ? ` · ${entry.notes}` : ''}`,
+      status: entry.status,
+      createdAt: entry.created_at,
+    });
+  }
+  for (const assignment of assignments) {
+    if (adminEvents.some((event) =>
+      event.details && typeof event.details.assignmentId === 'string' &&
+      event.details.assignmentId === assignment.id)) continue;
+    add({
+      id: `campaign-assignment-${assignment.id}`,
+      partnerName: partnerName(assignment.partner_profile_id),
+      activityType: 'Campaign assigned',
+      details: campaignNames.get(assignment.campaign_id) || 'WildCard campaign',
+      status: 'active',
+      createdAt: assignment.created_at,
+    });
+  }
+  return result.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 100);
+}
+
+function formatActivityCoin(value: number): string {
+  return new Intl.NumberFormat('en-IN').format(value);
 }
 
 async function authenticateAdminSession(req: Request): Promise<AdminIdentity | undefined> {
@@ -4106,6 +4398,10 @@ function hasPermission(identity: AdminIdentity, section: AdminSection, action: A
   if (section === 'serviceStore') {
     return canAccessServiceStoreAction(identity.role, identity.permissions, action);
   }
+  if (section === 'deliveryTeam') {
+    if (action !== 'view' && action !== 'create' && action !== 'edit') return false;
+    return canAccessDeliveryTeam(identity, action);
+  }
   if (action !== 'view' && identity.permissions[section]?.view !== true) return false;
   return identity.permissions[section]?.[action] === true;
 }
@@ -4116,6 +4412,18 @@ function hasSecurityMonitoringAccess(identity: AdminIdentity, action: 'view' | '
 
 function requiredAdminPermission(req: Request): { section: AdminSection; action: AdminAction } | undefined {
   const pathName = req.path;
+  if (pathName === '/delivery-team/overview' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (pathName === '/delivery-team/partners' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (/^\/delivery-team\/partners\/[0-9a-f-]+$/i.test(pathName) && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (/^\/delivery-team\/partners\/[0-9a-f-]+\/coins$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
+  if (pathName === '/delivery-team/stock' && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
+  if (pathName === '/delivery-team/campaigns' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (pathName === '/delivery-team/campaigns' && req.method === 'POST') return { section: 'deliveryTeam', action: 'create' };
+  if (/^\/delivery-team\/campaigns\/[0-9a-f-]+\/status$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
+  if (pathName === '/delivery-team/requests' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (/^\/delivery-team\/proofs\/[0-9a-f-]+\/review$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
+  if (/^\/delivery-team\/requests\/(campaign|damage|withdrawal)\/[0-9a-f-]+\/review$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
+  if (pathName === '/delivery-team/settings' && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   const serviceStoreAction = serviceStoreAdminAction(pathName, req.method);
   if (serviceStoreAction) return { section: 'serviceStore', action: serviceStoreAction };
   if (pathName === '/uploads/sign' || pathName === '/uploads/complete') {
@@ -6114,6 +6422,608 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           ? 'The minimum withdrawal is 100000 NGA Coins.'
           : 'Your withdrawal request could not be submitted.';
       res.status(providerMessage ? 400 : 503).json({ message });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/overview', async (_req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    try {
+      const [overview, recentActivity] = await Promise.all([
+        readSupabaseJson<DeliveryTeamOverviewItem>(await supabaseAdminRequest(
+          'rest/v1/rpc/get_delivery_team_overview',
+          { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id }) },
+        )),
+        loadDeliveryTeamActivity(),
+      ]);
+      res.json({ overview: { ...overview, recentActivity: recentActivity.slice(0, 10) } });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team overview failed:', error);
+      res.status(503).json({ message: 'Delivery Team overview could not be loaded.' });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/partners', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const filters = parseDeliveryTeamPagination(new URLSearchParams({
+      search: typeof req.query.search === 'string' ? req.query.search : '',
+      status: typeof req.query.status === 'string' ? req.query.status : 'all',
+      page: typeof req.query.page === 'string' ? req.query.page : '1',
+      pageSize: typeof req.query.pageSize === 'string' ? req.query.pageSize : '20',
+    }));
+    try {
+      const result = await readSupabaseJson<{ partners: unknown[]; total: number }>(await supabaseAdminRequest(
+        'rest/v1/rpc/get_delivery_team_partners',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_search: filters.search,
+            p_status: filters.status,
+            p_page: filters.page,
+            p_page_size: filters.pageSize,
+          }),
+        },
+      ));
+      res.json({ partners: result.partners, total: result.total });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team partner list failed:', error);
+      res.status(503).json({ message: 'Delivery Team partners could not be loaded.' });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/partners/:partnerId', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const partnerId = req.params.partnerId;
+    if (!/^[0-9a-f-]{36}$/i.test(partnerId)) {
+      res.status(400).json({ message: 'The delivery partner ID is invalid.' });
+      return;
+    }
+    try {
+      const detail = await readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
+        'rest/v1/rpc/get_delivery_team_partner_detail',
+        { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id, p_partner_profile_id: partnerId }) },
+      ));
+      res.json({ detail });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team partner detail failed:', error);
+      res.status(503).json({ message: 'The delivery partner details could not be loaded.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/partners/:partnerId/coins', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Coin adjustments must be submitted from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const partnerId = req.params.partnerId;
+    const input = validateManualCoinAdjustment(req.body);
+    const isReset = req.body?.isReset === true;
+    if (!/^[0-9a-f-]{36}$/i.test(partnerId) || !input ||
+      (req.body?.isReset !== undefined && typeof req.body.isReset !== 'boolean')) {
+      res.status(400).json({ message: 'Enter a valid partner, non-zero whole coin amount, required reason and unique request key.' });
+      return;
+    }
+    try {
+      const result = await readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_adjust_partner_coins',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_partner_profile_id: partnerId,
+            p_amount: input.amount,
+            p_reason: input.reason,
+            p_idempotency_key: input.idempotencyKey,
+            p_is_reset: isReset,
+          }),
+        },
+      ));
+      res.json({ adjusted: true, ...result });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] Delivery Team coin adjustment failed:', error);
+      res.status(/negative|Idempotency key/i.test(providerMessage) ? 409 : 503).json({
+        message: /negative/i.test(providerMessage)
+          ? 'This adjustment would make the available coin balance negative.'
+          : /Idempotency key/i.test(providerMessage)
+            ? 'This adjustment request key has already been used with different details.'
+            : 'The NGA Coins adjustment could not be recorded.',
+      });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/stock', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'WildCard stock changes must be submitted from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const {
+      partnerProfileId,
+      assignmentId,
+      movementType,
+      quantity,
+      notes,
+      idempotencyKey,
+    } = req.body || {};
+    if (typeof partnerProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(partnerProfileId) ||
+      typeof assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(assignmentId) ||
+      !['issued', 'returned', 'adjusted'].includes(movementType) ||
+      !Number.isSafeInteger(quantity) || quantity === 0 || Math.abs(quantity) > 1_000_000 ||
+      (movementType === 'issued' && quantity < 1) ||
+      (movementType === 'returned' && quantity > -1) ||
+      typeof notes !== 'string' || notes.trim().length < 3 || notes.trim().length > 500 ||
+      typeof idempotencyKey !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+      res.status(400).json({ message: 'Enter a valid partner, campaign assignment, stock movement, quantity, reason and request key.' });
+      return;
+    }
+    try {
+      const result = await readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_manage_partner_stock',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_partner_profile_id: partnerProfileId,
+            p_assignment_id: assignmentId,
+            p_movement_type: movementType,
+            p_quantity: quantity,
+            p_notes: notes.trim(),
+            p_idempotency_key: idempotencyKey,
+          }),
+        },
+      ));
+      res.json({ recorded: true, ...result });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] Delivery Team stock movement failed:', error);
+      res.status(/negative|Idempotency key/i.test(providerMessage) ? 409 : 503).json({
+        message: /negative/i.test(providerMessage)
+          ? 'This movement would make the partner stock balance negative.'
+          : /Idempotency key/i.test(providerMessage)
+            ? 'This stock request key has already been used with different details.'
+            : 'The WildCard stock movement could not be recorded.',
+      });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/campaigns', async (_req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    try {
+      const campaigns = await readSupabaseJson<unknown[]>(await supabaseAdminRequest(
+        'rest/v1/rpc/get_delivery_team_campaigns',
+        { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id }) },
+      ));
+      res.json({ campaigns });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team campaigns failed:', error);
+      res.status(503).json({ message: 'WildCard campaigns could not be loaded.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/campaigns', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Campaigns must be created from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const body = req.body || {};
+    const sites = body.sites;
+    const partnerProfileId = body.partnerProfileId;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    const area = typeof body.area === 'string' ? body.area.trim() : '';
+    const startDate = body.startDate;
+    const endDate = body.endDate;
+    const dailyTarget = Number(body.dailyTarget);
+    const coinsPerProof = Number(body.coinsPerProof);
+    const initialStock = Number(body.initialStock);
+    if (typeof partnerProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(partnerProfileId) ||
+      name.length < 2 || name.length > 120 || description.length > 1000 ||
+      area.length < 2 || area.length > 160 ||
+      typeof startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+      typeof endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
+      !Number.isInteger(dailyTarget) || dailyTarget < 1 || dailyTarget > 1000 ||
+      !Number.isInteger(coinsPerProof) || coinsPerProof < 1 || coinsPerProof > 1_000_000 ||
+      !Number.isInteger(initialStock) || initialStock < 0 || initialStock > 1_000_000 ||
+      !Array.isArray(sites) || sites.length < 1 || sites.length > 100 ||
+      sites.some((site: unknown) => !site || typeof site !== 'object' ||
+        typeof (site as Record<string, unknown>).name !== 'string' ||
+        (site as Record<string, unknown>).name!.toString().trim().length < 2 ||
+        (site as Record<string, unknown>).name!.toString().trim().length > 120 ||
+        typeof (site as Record<string, unknown>).address !== 'string' ||
+        (site as Record<string, unknown>).address!.toString().trim().length < 2 ||
+        (site as Record<string, unknown>).address!.toString().trim().length > 240)) {
+      res.status(400).json({ message: 'Enter valid campaign details, dates, reward, target, stock and at least one shop.' });
+      return;
+    }
+    try {
+      const assignmentId = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_create_partner_campaign_assignment',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_partner_profile_id: partnerProfileId,
+            p_name: name,
+            p_description: description,
+            p_area: area,
+            p_start_date: startDate,
+            p_end_date: endDate,
+            p_daily_target: dailyTarget,
+            p_coins_per_proof: coinsPerProof,
+            p_initial_stock: initialStock,
+            p_sites: sites.map((site: { name: string; address: string }) => ({
+              name: site.name.trim(),
+              address: site.address.trim(),
+            })),
+          }),
+        },
+      ));
+      res.status(201).json({ assigned: true, assignmentId });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team campaign creation failed:', error);
+      res.status(503).json({ message: 'The campaign could not be created and assigned.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/campaigns/:campaignId/status', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Campaign status changes must be submitted from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const campaignId = req.params.campaignId;
+    const status = req.body?.status;
+    if (!/^[0-9a-f-]{36}$/i.test(campaignId) || !['active', 'paused', 'completed'].includes(status)) {
+      res.status(400).json({ message: 'Select a valid campaign and status.' });
+      return;
+    }
+    try {
+      const updatedStatus = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_update_partner_campaign_status',
+        {
+          method: 'POST',
+          body: JSON.stringify({ p_admin_id: identity.id, p_campaign_id: campaignId, p_status: status }),
+        },
+      ));
+      res.json({ updated: true, status: updatedStatus });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team campaign status update failed:', error);
+      res.status(409).json({ message: 'The campaign status could not be changed. Completed campaigns cannot be resumed.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/settings', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Delivery Team settings must be changed from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    const threshold = req.body?.lowStockThreshold;
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > 100_000) {
+      res.status(400).json({ message: 'The low-stock threshold must be a whole number between 1 and 100,000.' });
+      return;
+    }
+    try {
+      const savedThreshold = await readSupabaseJson<number>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_set_delivery_team_low_stock_threshold',
+        { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id, p_threshold: threshold }) },
+      ));
+      res.json({ saved: true, lowStockThreshold: savedThreshold });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team settings update failed:', error);
+      res.status(503).json({ message: 'The low-stock threshold could not be saved.' });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/requests', async (_req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const [proofs, campaignRequests, damageReports, withdrawals] = await Promise.all([
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; campaign_id: string; site_id: string;
+          photo_path: string; note: string; latitude: number | null; longitude: number | null;
+          coins: number; submitted_at: string;
+        }>('partner_proofs', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,coins,submitted_at',
+          order: 'submitted_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; request_type: string;
+          details: string; created_at: string;
+        }>('partner_campaign_requests', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,request_type,details,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; card_id: string;
+          issue_type: string; details: string; created_at: string;
+        }>('partner_damage_reports', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,card_id,issue_type,details,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; amount: number; status: string; created_at: string;
+        }>('partner_withdrawal_requests', {
+          status: 'eq.requested',
+          select: 'id,partner_profile_id,amount,status,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+      ]);
+      const partnerIds = [...new Set([
+        ...proofs.map((item) => item.partner_profile_id),
+        ...campaignRequests.map((item) => item.partner_profile_id),
+        ...damageReports.map((item) => item.partner_profile_id),
+        ...withdrawals.map((item) => item.partner_profile_id),
+      ])];
+      const assignmentIds = [...new Set([
+        ...proofs.map((item) => item.assignment_id),
+        ...campaignRequests.map((item) => item.assignment_id),
+        ...damageReports.map((item) => item.assignment_id),
+      ])];
+      const campaignIds = [...new Set(proofs.map((item) => item.campaign_id))];
+      const siteIds = [...new Set(proofs.map((item) => item.site_id))];
+      const [profiles, assignments, campaigns, sites, proofViews] = await Promise.all([
+        partnerIds.length ? readPartnerWorkspaceTable<{ id: string; full_name: string }>('partner_profiles', {
+          id: partnerInFilter(partnerIds), select: 'id,full_name', limit: '1000',
+        }) : Promise.resolve([]),
+        assignmentIds.length ? readPartnerWorkspaceTable<{ id: string; campaign_id: string }>('partner_campaign_assignments', {
+          id: partnerInFilter(assignmentIds), select: 'id,campaign_id', limit: '1000',
+        }) : Promise.resolve([]),
+        campaignIds.length ? readPartnerWorkspaceTable<{ id: string; name: string }>('partner_campaigns', {
+          id: partnerInFilter(campaignIds), select: 'id,name', limit: '1000',
+        }) : Promise.resolve([]),
+        siteIds.length ? readPartnerWorkspaceTable<{ id: string; name: string }>('partner_campaign_sites', {
+          id: partnerInFilter(siteIds), select: 'id,name', limit: '1000',
+        }) : Promise.resolve([]),
+        Promise.all(proofs.map(async (proof) => ({
+          proof,
+          photoUrl: await getPartnerProofPhotoUrl(proof.photo_path),
+        }))),
+      ]);
+      const profileNames = new Map(profiles.map((profile) => [profile.id, profile.full_name]));
+      const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign.name]));
+      const campaignByAssignment = new Map(assignments.map((assignment) => [assignment.id, campaignById.get(assignment.campaign_id) || 'WildCard campaign']));
+      const siteById = new Map(sites.map((site) => [site.id, site.name]));
+      res.json({
+        proofs: proofViews.map(({ proof, photoUrl }) => ({
+          id: proof.id,
+          partnerName: profileNames.get(proof.partner_profile_id) || 'Delivery partner',
+          campaignName: campaignById.get(proof.campaign_id) || 'WildCard campaign',
+          siteName: siteById.get(proof.site_id) || 'Assigned shop',
+          photoUrl,
+          note: proof.note,
+          latitude: proof.latitude,
+          longitude: proof.longitude,
+          coins: proof.coins,
+          submittedAt: proof.submitted_at,
+        })),
+        campaignRequests: campaignRequests.map((item) => ({
+          id: item.id,
+          partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
+          assignmentId: item.assignment_id,
+          campaignName: campaignByAssignment.get(item.assignment_id) || 'WildCard campaign',
+          requestType: item.request_type,
+          details: item.details,
+          createdAt: item.created_at,
+        })),
+        damageReports: damageReports.map((item) => ({
+          id: item.id,
+          partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
+          assignmentId: item.assignment_id,
+          campaignName: campaignByAssignment.get(item.assignment_id) || 'WildCard campaign',
+          cardId: item.card_id,
+          issueType: item.issue_type,
+          details: item.details,
+          createdAt: item.created_at,
+        })),
+        withdrawals: withdrawals.map((item) => ({
+          id: item.id,
+          partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
+          amount: item.amount,
+          status: item.status,
+          createdAt: item.created_at,
+        })),
+      });
+    } catch (error) {
+      console.error('[NearGrow Ads] Delivery Team request queues failed:', error);
+      res.status(503).json({ message: 'Delivery Team proof and request queues could not be loaded.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/proofs/:proofId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Proof reviews must be submitted from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    const proofId = req.params.proofId;
+    const { decision } = req.body || {};
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(proofId) ||
+      !['approved', 'needs_correction', 'rejected'].includes(decision) ||
+      reviewNote.length > 500 || (decision !== 'approved' && reviewNote.length < 3)) {
+      res.status(400).json({ message: 'Enter a valid proof decision and required review note.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_review_partner_proof',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_proof_id: proofId,
+            p_decision: decision,
+            p_review_note: reviewNote,
+          }),
+        },
+      ));
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] Delivery Team proof review failed:', error);
+      res.status(/stock|already been reviewed/i.test(providerMessage) ? 409 : 503).json({
+        message: /No campaign stock/i.test(providerMessage)
+          ? 'No stock is available for this campaign. Issue stock before approving the proof.'
+          : /already been reviewed/i.test(providerMessage)
+            ? 'This proof has already been reviewed.'
+            : 'The proof could not be reviewed.',
+      });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/requests/:type/:requestId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Partner requests must be reviewed from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    const { type, requestId } = req.params;
+    const { decision } = req.body || {};
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) {
+      res.status(400).json({ message: 'The partner request ID is invalid.' });
+      return;
+    }
+    try {
+      let status: string;
+      if (type === 'campaign') {
+        const stockQuantity = Number(req.body?.stockQuantity ?? 0);
+        if (!['approved', 'rejected'].includes(decision) || reviewNote.length < 3 || reviewNote.length > 500 ||
+          !Number.isInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000) {
+          res.status(400).json({ message: 'Enter a valid campaign request decision and stock quantity.' });
+          return;
+        }
+        status = await readSupabaseJson<string>(await supabaseAdminRequest(
+          'rest/v1/rpc/admin_review_partner_campaign_request',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              p_admin_id: identity.id,
+              p_request_id: requestId,
+              p_decision: decision,
+              p_review_note: reviewNote,
+              p_stock_quantity: stockQuantity,
+            }),
+          },
+        ));
+      } else if (type === 'damage') {
+        if (!['resolved', 'rejected'].includes(decision) ||
+          reviewNote.length < 3 || reviewNote.length > 500) {
+          res.status(400).json({ message: 'Select a valid damage report outcome and enter a review reason.' });
+          return;
+        }
+        status = await readSupabaseJson<string>(await supabaseAdminRequest(
+          'rest/v1/rpc/admin_review_partner_damage_report',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              p_admin_id: identity.id,
+              p_report_id: requestId,
+              p_decision: decision,
+              p_review_note: reviewNote,
+            }),
+          },
+        ));
+      } else if (type === 'withdrawal') {
+        const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+        const payoutConfirmed = req.body?.payoutConfirmed === true;
+        if (!['settled', 'rejected'].includes(decision) || reference.length > 120 ||
+          reviewNote.length < 3 || reviewNote.length > 500 ||
+          (decision === 'settled' && (!payoutConfirmed || reference.length < 3))) {
+          res.status(400).json({ message: 'Enter a review reason; to settle, confirm the external payout and provide its reference.' });
+          return;
+        }
+        status = await readSupabaseJson<string>(await supabaseAdminRequest(
+          'rest/v1/rpc/admin_review_partner_withdrawal',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              p_admin_id: identity.id,
+              p_request_id: requestId,
+              p_decision: decision,
+              p_reference: reference,
+              p_review_note: reviewNote,
+              p_payout_confirmed: payoutConfirmed,
+            }),
+          },
+        ));
+      } else {
+        res.status(404).json({ message: 'This partner request type is not supported.' });
+        return;
+      }
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] Delivery Team request review failed:', error);
+      res.status(/already been reviewed|No partner stock remains|payout/i.test(providerMessage) ? 409 : 503).json({
+        message: /No partner stock remains/i.test(providerMessage)
+          ? 'No partner stock remains to resolve this damage report.'
+          : /already been reviewed/i.test(providerMessage)
+            ? 'This request has already been reviewed.'
+            : /payout/i.test(providerMessage)
+              ? 'The payout confirmation or reference is invalid.'
+              : 'The partner request could not be reviewed.',
+      });
     }
   });
 

@@ -128,7 +128,7 @@ interface DamageReport {
 interface CoinLedgerEntry {
   id: string;
   campaign_id: string | null;
-  entry_type: 'earning' | 'withdrawal';
+  entry_type: 'earning' | 'withdrawal' | 'adjustment';
   amount: number;
   status: 'pending' | 'approved' | 'rejected' | 'requested' | 'settled';
   reference: string;
@@ -860,8 +860,8 @@ function EarningsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRe
         {filteredLedger.length ? <div className="nwg-table-scroll"><table className="nwg-table">
           <thead><tr><th>Date & time</th><th>Activity</th><th>Campaign / reference</th><th>Coins</th><th>Status</th><th>Notes</th></tr></thead>
           <tbody>{filteredLedger.slice(0, 5).map((entry) => <tr key={entry.id}>
-            <td>{formatDate(entry.created_at)}</td><td className={entry.entry_type === 'earning' ? 'nwg-positive' : 'nwg-negative'}>
-              {entry.entry_type === 'earning' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}{entry.entry_type}</td>
+            <td>{formatDate(entry.created_at)}</td><td className={entry.amount >= 0 ? 'nwg-positive' : 'nwg-negative'}>
+              {entry.amount >= 0 ? <ArrowUp size={14} /> : <ArrowDown size={14} />}{entry.entry_type === 'adjustment' ? 'administrator adjustment' : entry.entry_type}</td>
             <td>{entry.reference || campaignName(data, entry.campaign_id)}</td>
             <td className={entry.amount < 0 ? 'nwg-negative' : 'nwg-positive'}>{entry.amount > 0 ? '+' : ''}{formatNumber(entry.amount)}</td>
             <td><StatusPill status={entry.status} /></td><td>{entry.notes || '—'}</td>

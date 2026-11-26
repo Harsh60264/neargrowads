@@ -9,6 +9,7 @@ export const ADMIN_SECTION_ACTIONS = {
   blogs: ['view', 'create', 'edit', 'delete', 'publish'],
   team: ['view', 'create', 'edit', 'delete'],
   categories: ['view', 'create', 'edit', 'delete'],
+  deliveryTeam: ['view', 'create', 'edit'],
   securityMonitoring: ['view', 'edit'],
   settings: ['view'],
 } as const;
