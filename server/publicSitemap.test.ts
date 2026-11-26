@@ -23,6 +23,7 @@ test('includes indexable core pages and published content using the canonical ho
     ],
     packages: [
       { slug: 'published-package', status: 'published', lastModified: modifiedAt },
+      { slug: 'edited-gmb-slug', status: 'published', packageCode: 'NGA-GMB-001', lastModified: modifiedAt },
       { slug: 'hidden-package', status: 'draft', lastModified: modifiedAt },
       { slug: 'checkout', status: 'published', lastModified: modifiedAt },
     ],
@@ -37,6 +38,9 @@ test('includes indexable core pages and published content using the canonical ho
   assert.ok(locs.includes(`${canonicalOrigin}/services/local-seo`));
   assert.ok(locs.includes(`${canonicalOrigin}/blog/published-article`));
   assert.ok(locs.includes(`${canonicalOrigin}/catalogue/published-package`));
+  assert.ok(locs.includes(`${canonicalOrigin}/gmb-audit`));
+  assert.equal(locs.filter((loc) => loc.includes('gmb-audit')).length, 1);
+  assert.ok(!locs.includes(`${canonicalOrigin}/catalogue/gmb-audit`));
   assert.ok(locs.every((loc) => loc.startsWith(`${canonicalOrigin}/`)));
   assert.ok(!xml.includes('staging.neargrowads.com'));
   assert.ok(!xml.includes('neargrowads.com/services/unreleased-service'));
@@ -113,8 +117,9 @@ test('excludes packages in inactive or hidden catalogue categories', () => {
   const xml = buildPublicSitemapXml(canonicalOrigin, {
     services: [],
     articles: [],
-    packages: publicPackages.map(({ slug, status, updatedAt }) => ({
+    packages: publicPackages.map(({ slug, packageCode, status, updatedAt }) => ({
       slug,
+      packageCode,
       status,
       lastModified: updatedAt,
     })),

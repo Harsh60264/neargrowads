@@ -42,6 +42,25 @@ export interface ServicePackage {
   updatedAt?: string;
 }
 
+export const GMB_AUDIT_PACKAGE_CODE = 'NGA-GMB-001';
+export const GMB_AUDIT_PACKAGE_SLUG = 'gmb-audit';
+
+export function publicServicePackagePath(
+  item: Pick<ServicePackage, 'slug'> & Partial<Pick<ServicePackage, 'packageCode'>>,
+): string {
+  return item.packageCode === GMB_AUDIT_PACKAGE_CODE || item.slug === GMB_AUDIT_PACKAGE_SLUG
+    ? '/gmb-audit'
+    : `/catalogue/${encodeURIComponent(item.slug)}`;
+}
+
+export function findPublicServicePackage(packages: readonly ServicePackage[], slug: string): ServicePackage | undefined {
+  if (slug === GMB_AUDIT_PACKAGE_SLUG) {
+    return packages.find((item) => item.packageCode === GMB_AUDIT_PACKAGE_CODE) ??
+      packages.find((item) => item.slug === GMB_AUDIT_PACKAGE_SLUG);
+  }
+  return packages.find((item) => item.slug === slug);
+}
+
 export const formatServicePrice = (price: number): string =>
   new Intl.NumberFormat('en-IN', {
     style: 'currency',

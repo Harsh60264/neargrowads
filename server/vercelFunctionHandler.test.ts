@@ -55,6 +55,7 @@ test('restores only known public dynamic page families', () => {
     '/partners/login',
     '/services/google-ads',
     '/catalogue/published-package',
+    '/gmb-audit',
     '/blog/published-article',
   ]) {
     const req = { url: `/api/handler?__vercel_original_api_path=${encodeURIComponent(path)}` };

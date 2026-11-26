@@ -2,7 +2,7 @@ import type { SiteContent } from './siteContent';
 
 const allowedInternalRoutes = new Set([
   '/', '/services', '/catalogue', '/work', '/about', '/blog', '/contact',
-  '/get-started', '/privacy-policy', '/terms-and-conditions',
+  '/get-started', '/gmb-audit', '/privacy-policy', '/terms-and-conditions',
 ]);
 
 export function isSafePublicDestination(value: string): boolean {

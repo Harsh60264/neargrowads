@@ -25,9 +25,11 @@ import {
 } from 'lucide-react';
 import {
   billingTypeLabel,
+  findPublicServicePackage,
   finalServicePrice,
   formatServicePrice,
   hasServiceDiscount,
+  publicServicePackagePath,
   type ServiceBillingType,
   type ServiceCatalogueBadge,
   type ServiceCatalogueCategory,
@@ -37,6 +39,7 @@ import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
 import { OptionalLocationPicker } from '../forms/OptionalLocationPicker';
 import type { CustomerLocation } from '../../data/customerLocation';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
+import { resolveCanonicalPageOrigin } from '../../data/siteCanonical';
 import { publicText } from '../../data/publicCopy';
 import {
   cashfreeCustomerPaymentStatus,
@@ -249,7 +252,7 @@ function useAccessibleDialog(ref: { current: HTMLElement | null }, onClose: () =
   }, [ref]);
 }
 
-export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CONTENT }: { slug?: string; onNavigate: (path: string) => void; siteContent?: SiteContent }) {
+export function CataloguePage({ slug, canonicalPath, onNavigate, siteContent = DEFAULT_SITE_CONTENT }: { slug?: string; canonicalPath?: string; onNavigate: (path: string) => void; siteContent?: SiteContent }) {
   const text = (key: string) => publicText(siteContent.copy, key);
   const [packages, setPackages] = useState<ServicePackage[]>([]);
   const [categories, setCategories] = useState<ServiceCatalogueCategory[]>([]);
@@ -423,12 +426,18 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
   }, [toast]);
 
   useEffect(() => {
-    const item = packages.find((candidate) => candidate.slug === slug);
+    const item = slug ? findPublicServicePackage(packages, slug) : undefined;
     const previousTitle = document.title;
     const description = document.head.querySelector<HTMLMetaElement>('meta[name="description"]');
     const previousDescription = description?.content;
     const canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     const previousCanonical = canonical?.href;
+    const canonicalPathname = canonicalPath || (item ? publicServicePackagePath(item) : window.location.pathname);
+    const canonicalOrigin = resolveCanonicalPageOrigin(
+      canonicalPathname,
+      import.meta.env.VITE_SITE_URL || window.location.origin,
+    );
+    const canonicalUrl = new URL(canonicalPathname, `${canonicalOrigin.replace(/\/+$/, '')}/`).href;
     const structuredData = item
       ? {
           '@context': 'https://schema.org',
@@ -437,12 +446,12 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
           description: item.summary || item.description,
           serviceType: item.category,
           provider: { '@type': 'Organization', name: 'NearGrow Ads' },
-          url: window.location.href,
+          url: canonicalUrl,
           offers: {
             '@type': 'Offer',
             priceCurrency: 'INR',
             price: finalServicePrice(item),
-            url: window.location.href,
+            url: canonicalUrl,
           },
         }
       : {
@@ -452,7 +461,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
           itemListElement: packages.map((packageItem, index) => ({
             '@type': 'ListItem',
             position: index + 1,
-            url: `${window.location.origin}/catalogue/${encodeURIComponent(packageItem.slug)}`,
+            url: new URL(publicServicePackagePath(packageItem), canonicalOrigin).href,
             item: {
               '@type': 'Service',
               name: packageItem.title,
@@ -473,14 +482,14 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
     document.head.appendChild(structuredDataScript);
     document.title = item ? `${item.title} | NearGrow Ads Catalogue` : siteContent.seo.catalogue.title;
     description?.setAttribute('content', item?.summary || siteContent.seo.catalogue.description);
-    canonical?.setAttribute('href', window.location.href);
+    canonical?.setAttribute('href', canonicalUrl);
     return () => {
       structuredDataScript.remove();
       document.title = previousTitle;
       if (description && previousDescription !== undefined) description.content = previousDescription;
       if (canonical && previousCanonical) canonical.href = previousCanonical;
     };
-  }, [slug, packages, siteContent.seo.catalogue]);
+  }, [slug, canonicalPath, packages, siteContent.seo.catalogue]);
 
   const categoryOptions = useMemo(() => {
     return [
@@ -541,7 +550,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
     setPage((current) => Math.min(current, Math.max(1, pageCount)));
   }, [pageCount]);
 
-  const selectedPackage = slug ? packages.find((item) => item.slug === slug) : undefined;
+  const selectedPackage = slug ? findPublicServicePackage(packages, slug) : undefined;
   const savedPackages = packages.filter((item) => favorites.includes(item.id));
   const comparePackages = compare.map((id) => packages.find((item) => item.id === id)).filter((item): item is ServicePackage => Boolean(item));
 
@@ -859,7 +868,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
               <section className="mt-8 rounded-2xl border p-5 sm:p-6" style={cardStyle}>
                 <h3 className="mb-4 flex items-center gap-2 font-bold"><Heart className="h-4 w-4 text-[#70BE55]" /> Saved for later</h3>
                 <div className="flex flex-wrap gap-3">
-                  {savedPackages.map((item) => <button key={item.id} type="button" onClick={() => onNavigate(`/catalogue/${item.slug}`)} className="rounded-xl border px-4 py-3 text-left text-sm hover:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }}><span className="block font-semibold">{item.title}</span><span className="mt-1 block text-xs text-[var(--brand-text-muted)]">{priceLabel(item)}</span></button>)}
+                  {savedPackages.map((item) => <button key={item.id} type="button" onClick={() => onNavigate(publicServicePackagePath(item))} className="rounded-xl border px-4 py-3 text-left text-sm hover:border-[#3EA259]" style={{ borderColor: 'var(--brand-border)' }}><span className="block font-semibold">{item.title}</span><span className="mt-1 block text-xs text-[var(--brand-text-muted)]">{priceLabel(item)}</span></button>)}
                 </div>
               </section>
             )}
@@ -870,7 +879,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
               <section className="mt-8">
                 <div className="mb-4"><p className="text-xs font-bold uppercase tracking-widest text-[#70BE55]">Selected services</p><h3 className="mt-1 text-xl font-bold">Featured Packages</h3></div>
                 <div className="grid gap-4 md:grid-cols-2">
-                  {filteredPackages.filter((item) => item.catalogueBadge).map((item) => <FeaturedCard key={item.id} item={item} onOpen={() => onNavigate(`/catalogue/${item.slug}`)} />)}
+                  {filteredPackages.filter((item) => item.catalogueBadge).map((item) => <FeaturedCard key={item.id} item={item} onOpen={() => onNavigate(publicServicePackagePath(item))} />)}
                 </div>
               </section>
             )}
@@ -882,7 +891,7 @@ export function CataloguePage({ slug, onNavigate, siteContent = DEFAULT_SITE_CON
                   item={item}
                   favorite={favorites.includes(item.id)}
                   compared={compare.includes(item.id)}
-                  onOpen={() => onNavigate(`/catalogue/${item.slug}`)}
+                  onOpen={() => onNavigate(publicServicePackagePath(item))}
                   onAdd={() => addToCart(item)}
                   onBuy={() => startPackageCheckout(item)}
                   checkoutAvailable={directCheckout.available}

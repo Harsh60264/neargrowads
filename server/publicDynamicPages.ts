@@ -13,6 +13,7 @@ const partnerAuthPagePaths = new Set<string>(PARTNER_AUTH_PAGE_PATHS);
 export const PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS = [
   '/partners/localdrop',
   ...PARTNER_AUTH_PAGE_PATHS,
+  '/gmb-audit',
   '/services/*',
   '/catalogue/*',
   '/blog/*',
@@ -24,7 +25,7 @@ export interface RenderedPublicDynamicPage {
 }
 
 export function isPublicDynamicPagePath(pathname: string): boolean {
-  return pathname === '/partners/localdrop' || partnerAuthPagePaths.has(pathname) ||
+  return pathname === '/partners/localdrop' || pathname === '/gmb-audit' || partnerAuthPagePaths.has(pathname) ||
     /^\/(?:services|catalogue|blog)\/.+$/.test(pathname);
 }
 

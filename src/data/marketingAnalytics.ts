@@ -14,6 +14,7 @@ const PUBLIC_STATIC_PATHS = new Set([
   '/blog',
   '/contact',
   '/get-started',
+  '/gmb-audit',
   '/partners/localdrop',
   '/privacy-policy',
   '/terms-and-conditions',

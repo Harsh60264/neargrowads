@@ -16,6 +16,7 @@ test('validates opaque browser identifiers without accepting arbitrary input', (
 test('normalizes public routes and removes query strings, fragments, and unsafe path data', () => {
   assert.equal(normalizeWebsiteActivityPath('/blog/Example-Post/?email=private#details'), '/blog/example-post');
   assert.equal(normalizeWebsiteActivityPath('/services'), '/services');
+  assert.equal(normalizeWebsiteActivityPath('/gmb-audit?utm_source=private'), '/gmb-audit');
   assert.equal(normalizeWebsiteActivityPath('/admin'), undefined);
   assert.equal(normalizeWebsiteActivityPath('/admin/security-monitoring'), undefined);
   assert.equal(normalizeWebsiteActivityPath('/blog/private%40example.com'), '/other');

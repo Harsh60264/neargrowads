@@ -1,9 +1,11 @@
 import type { RequestHandler } from 'express';
 import { validServiceCatalogueSlug } from '../src/data/serviceCatalogueCategories';
+import { publicServicePackagePath } from '../src/data/serviceCatalogue';
 
 export interface SitemapContentItem {
   slug: string;
   status: string;
+  packageCode?: string;
   lastModified?: string | null;
 }
 
@@ -72,7 +74,7 @@ export function buildPublicSitemapXml(origin: string, content: PublicSitemapCont
   }
   for (const item of content.packages) {
     if (item.status === 'published' && validServiceCatalogueSlug(item.slug)) {
-      urls.set(`/catalogue/${item.slug}`, sitemapDate(item.lastModified));
+      urls.set(publicServicePackagePath(item), sitemapDate(item.lastModified));
     }
   }
 

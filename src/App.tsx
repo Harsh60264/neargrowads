@@ -290,7 +290,9 @@ export default function App() {
     };
     const specialRouteSeo = isAdminRoute
       ? { title: 'Admin | NearGrow Ads', description: 'Administrative workspace.' }
-      : staticRouteSeo[normalizedPath];
+      : staticRouteSeo[normalizedPath] ?? (normalizedPath === '/gmb-audit'
+        ? { title: siteContent.seo.catalogue.title, description: siteContent.seo.catalogue.description }
+        : undefined);
     const seo = defaultSeo ?? {
       title: article
         ? article.metaTitle || article.title
@@ -570,6 +572,9 @@ export default function App() {
     }
     if (currentPath === '/services') {
       return <ServicesIndexPage onNavigate={navigate} siteContent={siteContent} theme={theme} />;
+    }
+    if (currentPath === '/gmb-audit') {
+      return <CataloguePage slug="gmb-audit" canonicalPath="/gmb-audit" onNavigate={navigate} siteContent={siteContent} />;
     }
     if (currentPath === '/catalogue' || currentPath.startsWith('/catalogue/')) {
       const slug = currentPath.startsWith('/catalogue/') ? currentPath.slice('/catalogue/'.length) : undefined;

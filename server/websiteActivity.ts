@@ -11,6 +11,7 @@ const STATIC_PUBLIC_PATHS = new Set([
   '/blog',
   '/contact',
   '/get-started',
+  '/gmb-audit',
   '/privacy-policy',
   '/terms-and-conditions',
   '/thank-you',

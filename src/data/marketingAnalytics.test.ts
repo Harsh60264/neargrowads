@@ -12,6 +12,7 @@ test('allows public website routes and normalizes trailing slashes', () => {
   assert.equal(getPublicMarketingPagePath('/about/'), '/about');
   assert.equal(getPublicMarketingPagePath('/services/google-ads'), '/services/google-ads');
   assert.equal(getPublicMarketingPagePath('/blog/growth-guide'), '/blog/growth-guide');
+  assert.equal(getPublicMarketingPagePath('/gmb-audit'), '/gmb-audit');
 });
 
 test('excludes admin, partner-account, authentication, and unsupported routes', () => {

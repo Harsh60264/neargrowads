@@ -113,7 +113,11 @@ import {
 } from './server/deliveryTeam';
 import { createPublicSitemapHandler } from './server/publicSitemap';
 import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
-import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
+import {
+  findPublicServicePackage,
+  GMB_AUDIT_PACKAGE_SLUG,
+  type ServiceCatalogueCategory,
+} from './src/data/serviceCatalogue';
 import type { ThemeImageVariants } from './src/data/themeImages';
 import { isValidBlogImagePlacement } from './src/data/blogImagePlacement';
 import {
@@ -5501,8 +5505,11 @@ async function resolvePublicPageMetadata(pathname: string): Promise<{
       : { found: false, title: 'Page Not Found | NearGrow Ads', description: 'The requested page is not available.', image: '', noindex: true };
   }
   const catalogueMatch = normalized.match(/^\/catalogue\/([a-z0-9-]+)$/);
-  if (catalogueMatch) {
-    const item = (await readServicePackages(true)).find((candidate) => candidate.slug === catalogueMatch[1]);
+  if (catalogueMatch || normalized === '/gmb-audit') {
+    const packages = await readServicePackages(true);
+    const item = normalized === '/gmb-audit'
+      ? findPublicServicePackage(packages, GMB_AUDIT_PACKAGE_SLUG)
+      : packages.find((candidate) => candidate.slug === catalogueMatch?.[1]);
     return item
       ? { found: true, title: `${item.title} | NearGrow Ads`, description: item.summary, image: item.imageUrl, noindex: false }
       : { found: false, title: 'Page Not Found | NearGrow Ads', description: 'The requested page is not available.', image: '', noindex: true };
@@ -13485,6 +13492,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         packages: packages.map((item) => ({
           slug: item.slug,
           status: item.status,
+          packageCode: item.packageCode,
           lastModified: item.updatedAt,
         })),
       };

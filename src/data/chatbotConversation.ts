@@ -3,7 +3,7 @@ import type { CaseStudy } from './caseStudiesData';
 import type { ServicePackage } from './serviceCatalogue';
 import type { SiteContent, PublicFaq } from './siteContent';
 import type { WebsiteService } from './websiteServices';
-import { billingTypeLabel, finalServicePrice, formatServicePrice } from './serviceCatalogue';
+import { billingTypeLabel, finalServicePrice, formatServicePrice, publicServicePackagePath } from './serviceCatalogue';
 import { isSafePublicDestination } from './publicLinks';
 
 export interface ChatbotKnowledge {
@@ -447,7 +447,7 @@ export class ChatbotConversation {
         { id: 'pricing', label: 'Other prices' },
         { id: 'main-menu', label: 'Main menu' },
       ],
-      `/catalogue/${item.slug}`,
+      publicServicePackagePath(item),
     );
   }
 

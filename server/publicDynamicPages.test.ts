@@ -17,7 +17,11 @@ test('configures exact 301 redirects and validates dynamic routes before SPA fal
 
   assert.deepEqual(config.redirects, [
     { source: '/google-ads-delhi', destination: '/services/google-ads', statusCode: 301 },
-    { source: '/gmb-audit/', destination: '/services/google-business-profile', statusCode: 301 },
+    { source: '/catalogue/gmb-audit', destination: '/gmb-audit', statusCode: 301 },
+    { source: '/catalogue/gmb-audit/', destination: '/gmb-audit', statusCode: 301 },
+    { source: '/catalogue/https-www-neargrowads-com-gmb-audit', destination: '/gmb-audit', statusCode: 301 },
+    { source: '/catalogue/https-www-neargrowads-com-gmb-audit/', destination: '/gmb-audit', statusCode: 301 },
+    { source: '/gmb-audit/', destination: '/gmb-audit', statusCode: 301 },
   ]);
   assert.equal(config.functions['api/handler.ts']?.includeFiles, 'dist/index.html');
 
@@ -27,6 +31,8 @@ test('configures exact 301 redirects and validates dynamic routes before SPA fal
   assert.equal(routes.get('/blog')?.destination, '/index.html');
   assert.equal(routes.get('/api/:path*')?.destination,
     '/api/handler?__vercel_original_api_path=/api/:path*');
+  assert.equal(routes.get('/gmb-audit')?.destination,
+    '/api/handler?__vercel_original_api_path=/gmb-audit');
   assert.equal(routes.get('/admin')?.destination, '/index.html');
   assert.equal(routes.get('/admin/:path*')?.destination, '/index.html');
 
@@ -69,6 +75,7 @@ test('matches only routes inside the public dynamic page families', () => {
     '/services/slug/child',
     '/catalogue/slug',
     '/blog/slug',
+    '/gmb-audit',
   ]) {
     assert.equal(isPublicDynamicPagePath(pathname), true);
   }
@@ -105,6 +112,7 @@ test('routes all public dynamic families through a status-aware page handler', a
     '/services/service-slug',
     '/catalogue/package-slug',
     '/blog/article-slug',
+    '/gmb-audit',
   ]) {
     const response: globalThis.Response = await fetch(`http://127.0.0.1:${address.port}${pathname}`);
     assert.equal(response.status, 200);
@@ -120,6 +128,7 @@ test('routes all public dynamic families through a status-aware page handler', a
     '/services/service-slug',
     '/catalogue/package-slug',
     '/blog/article-slug',
+    '/gmb-audit',
   ]);
 });
 
