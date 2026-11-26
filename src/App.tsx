@@ -33,8 +33,14 @@ import { publicMedia } from './data/publicMedia';
 import { resolveCanonicalPageOrigin } from './data/siteCanonical';
 import { captureFirstTouchCampaign } from './data/leadTracking';
 import { PublicActivityTracker } from './components/PublicActivityTracker';
+import { MarketingAnalyticsConsent } from './components/MarketingAnalyticsConsent';
 import { ArrowLeft } from 'lucide-react';
 import { readAdminAuthRoute } from './components/admin/adminAuthCallback';
+import {
+  readMarketingAnalyticsConsent,
+  saveMarketingAnalyticsConsent,
+  type MarketingAnalyticsConsent as MarketingConsent,
+} from './data/marketingAnalytics';
 import {
   DEFAULT_ADMIN_CMS_THEME_ASSIGNMENTS,
   DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS,
@@ -116,6 +122,9 @@ export default function App() {
   const [theme, setTheme] = useState<PublicTheme>(getSessionTheme);
   const [adminTheme, setAdminTheme] = useState<PublicTheme>(() => getSessionTheme('neargrow-admin-theme'));
   const [chatOpen, setChatOpen] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState<MarketingConsent>(() =>
+    typeof window === 'undefined' ? null : readMarketingAnalyticsConsent(),
+  );
 
   useLayoutEffect(() => {
     setReadyTransitionId(transitionId);
@@ -469,6 +478,11 @@ export default function App() {
     setCurrentPath(nextPath);
   }, [isCmsPreview]);
 
+  const updateMarketingConsent = useCallback((consent: Exclude<MarketingConsent, null>) => {
+    saveMarketingAnalyticsConsent(consent);
+    setMarketingConsent(consent);
+  }, []);
+
   useEffect(() => {
     const handleInternalLink = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -649,7 +663,16 @@ export default function App() {
 
   return (
     <>
-      <PublicActivityTracker pathname={currentPath} enabled={!isCmsPreview} />
+      <PublicActivityTracker
+        pathname={currentPath}
+        enabled={!isCmsPreview && marketingConsent === 'accepted'}
+      />
+      <MarketingAnalyticsConsent
+        consent={marketingConsent}
+        enabled={!isCmsPreview}
+        onConsentChange={updateMarketingConsent}
+        pathname={currentPath}
+      />
       <div
         className={`min-h-screen flex flex-col ${isAdminRoute ? 'bg-white text-[#171A17]' : 'public-website bg-[var(--brand-bg)] text-[var(--brand-text)]'}`}
         data-public-theme={isAdminRoute ? undefined : publicThemeMode}

@@ -41,19 +41,28 @@
     <meta name="twitter:image" content="__SITE_ORIGIN__/neargrow-mark.jpg" />
 
     <script>
-      if (window.location.pathname !== '/admin/accept-invite' &&
-        window.location.pathname !== '/admin/password-reset') {
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { window.dataLayer.push(arguments); }
-        window.gtag = gtag;
-        gtag('js', new Date());
-        gtag('config', 'G-4VFEZPY7JW');
-
-        const analyticsScript = document.createElement('script');
-        analyticsScript.async = true;
-        analyticsScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-4VFEZPY7JW';
-        document.head.appendChild(analyticsScript);
-      }
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+      window.gtag('consent', 'default', {
+        analytics_storage: 'denied',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied'
+      });
+      window.neargrowLoadTagManager = function () {
+        if (document.getElementById('neargrow-gtm-script') ||
+          document.querySelector('script[src*="googletagmanager.com/gtm.js?id=GTM-P6G98T5X"]')) return;
+        (function (w, d, s, l, i) {
+          w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+          var firstScript = d.getElementsByTagName(s)[0];
+          var tagScript = d.createElement(s);
+          var dataLayerQuery = l !== 'dataLayer' ? '&l=' + l : '';
+          tagScript.id = 'neargrow-gtm-script';
+          tagScript.async = true;
+          tagScript.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dataLayerQuery;
+          firstScript.parentNode.insertBefore(tagScript, firstScript);
+        })(window, document, 'script', 'dataLayer', 'GTM-P6G98T5X');
+      };
     </script>
 
     <!-- Google Fonts: Plus Jakarta Sans for clean geometric modern agency brand -->
@@ -112,6 +121,16 @@
     </script>
   </head>
   <body class="bg-white text-[#171A17] antialiased selection:bg-[#48A868]/20 selection:text-[#171A17]">
+    <noscript>
+      <iframe
+        title="Google Tag Manager"
+        src="/api/gtm-noscript"
+        height="0"
+        width="0"
+        style="display:none;visibility:hidden"
+        referrerpolicy="same-origin"
+      ></iframe>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

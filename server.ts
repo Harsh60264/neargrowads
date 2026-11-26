@@ -21,6 +21,9 @@ import {
   type ServiceOrderInput,
 } from './server/serviceOrders.ts';
 import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
+import {
+  getGtmNoscriptRedirectLocation,
+} from './src/data/marketingAnalytics';
 import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
 import { readCustomerLocation, withCustomerLocation } from './server/customerLocationSerialization.ts';
 import {
@@ -5626,6 +5629,23 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       version: '1.0.0',
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get('/api/gtm-noscript', (req: Request, res: Response): void => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const requestOrigin = `${req.protocol}://${req.get('host')}`;
+    const redirectLocation = getGtmNoscriptRedirectLocation(
+      req.get('cookie'),
+      req.get('referer'),
+      requestOrigin,
+    );
+    if (!redirectLocation) {
+      res.status(204).end();
+      return;
+    }
+
+    res.redirect(302, redirectLocation);
   });
 
   app.get('/api/uploads/:folder/:filename', (req: Request, res: Response): void => {
