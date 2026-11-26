@@ -433,16 +433,37 @@ html[data-theme='light'] .partner-workspace .partner-preview-screen-header { bac
 }
 
 .partner-workspace {
-  --nwg-green: #135a38;
-  --nwg-green-dark: #0c3f2a;
-  --nwg-leaf: #287c4d;
-  --nwg-soft: #edf4e9;
-  --nwg-line: #dce4da;
-  --nwg-ink: #17231d;
-  --nwg-muted: #657269;
-  --nwg-amber: #a76b08;
+  --nwg-green: var(--brand-green);
+  --nwg-green-dark: var(--brand-green-deep);
+  --nwg-leaf: var(--brand-green);
+  --nwg-soft: var(--brand-bg-soft);
+  --nwg-line: var(--brand-border);
+  --nwg-control-border: color-mix(in srgb, var(--brand-border) 30%, var(--brand-text-muted));
+  --nwg-ink: var(--brand-text);
+  --nwg-muted: var(--brand-text-muted);
+  --nwg-amber: var(--brand-orange-deep);
   --nwg-red: #b42318;
-  background: #f7f8f4;
+  --nwg-bg: var(--brand-bg);
+  --nwg-surface: var(--brand-surface);
+  --nwg-elevated: color-mix(in srgb, var(--brand-surface) 66%, var(--brand-bg-soft));
+  --nwg-input: color-mix(in srgb, var(--brand-surface) 82%, var(--brand-bg-soft));
+  --nwg-hover: var(--brand-bg-soft);
+  --nwg-nav-active: var(--brand-green-light);
+  --nwg-focus: var(--brand-green);
+  --nwg-success: var(--brand-green);
+  --nwg-success-bg: var(--brand-green-light);
+  --nwg-warning: var(--brand-orange-deep);
+  --nwg-warning-bg: var(--brand-orange-light);
+  --nwg-danger: #b42318;
+  --nwg-danger-bg: #fff0ed;
+  --nwg-step-number-bg: var(--brand-green-deep);
+  --nwg-button-primary: var(--brand-green-deep);
+  --nwg-button-primary-hover: var(--brand-green-hover);
+  --nwg-button-primary-text: #fff;
+  --nwg-button-secondary-text: var(--brand-green-deep);
+  --nwg-shadow: var(--brand-shadow);
+  color-scheme: light;
+  background: var(--nwg-bg);
   color: var(--nwg-ink);
 }
 
@@ -452,9 +473,9 @@ html[data-theme='light'] .partner-workspace .partner-preview-screen-header { bac
 .partner-workspace .partner-preview-topline { min-height: 70px; padding-inline: clamp(22px, 3.2vw, 48px); }
 .partner-workspace .partner-preview-brand { font-size: 18px; }
 .partner-workspace .partner-preview-sidebar nav button { min-height: 45px; font-size: 12px; }
-.partner-workspace .partner-preview-sidebar nav button[aria-current='page'] { background: #e8f0e5; color: var(--nwg-green); }
-.partner-workspace .partner-preview-mobile-tabs { background: #fff; }
-.partner-workspace .partner-preview-mobile-tabs button[aria-current='page'] { border-color: #b6d2ba; background: #e8f0e5; color: var(--nwg-green); }
+.partner-workspace .partner-preview-sidebar nav button[aria-current='page'] { background: var(--nwg-nav-active); color: var(--nwg-green); }
+.partner-workspace .partner-preview-mobile-tabs { background: var(--nwg-surface); }
+.partner-workspace .partner-preview-mobile-tabs button[aria-current='page'] { border-color: var(--nwg-line); background: var(--nwg-nav-active); color: var(--nwg-green); }
 .nwg-workspace-main { min-width: 0; }
 .nwg-screen { width: min(100%, 1224px); min-width: 0; margin-inline: auto; padding: 49px clamp(22px, 3.2vw, 48px) 48px; }
 .nwg-page-heading { margin: 0 0 19px; padding-inline: 18px; }
@@ -753,8 +774,6 @@ html[data-theme='light'] .partner-workspace .partner-preview-screen-header { bac
 .nwg-workspace-error p { margin: 0; color: var(--nwg-muted); font-size: 11px; line-height: 1.5; }
 
 .partner-workspace :is(button,input,select,textarea,a):focus-visible { outline: 2px solid #26764a; outline-offset: 2px; }
-html[data-theme='dark'] .partner-workspace { background: #101914; color: #edf4ee; }
-
 @media (min-width: 1600px) {
   .partner-workspace .partner-preview-layout {
     margin-left: calc((100% - 1516px) / 2 + 18px);
@@ -811,16 +830,6 @@ html[data-theme='dark'] .partner-workspace { background: #101914; color: #edf4ee
   .nwg-profile-screen .nwg-sample-data .nwg-card-heading { margin-bottom: 7px; }
 }
 
-html[data-theme='dark'] .partner-workspace .nwg-card,
-html[data-theme='dark'] .partner-workspace .nwg-table td,
-html[data-theme='dark'] .partner-workspace .nwg-proof-modal { background: #18221b; color: #edf4ee; }
-html[data-theme='dark'] .partner-workspace .nwg-page-heading h1,
-html[data-theme='dark'] .partner-workspace .nwg-card-heading h2,
-html[data-theme='dark'] .partner-workspace .nwg-metric > strong,
-html[data-theme='dark'] .partner-workspace .nwg-metric-label,
-html[data-theme='dark'] .partner-workspace .nwg-assignment-title h2,
-html[data-theme='dark'] .partner-workspace .nwg-empty > strong { color: #edf4ee; }
-
 @media (max-width: 1180px) {
   .partner-workspace .partner-preview-layout { grid-template-columns: 220px minmax(0, 1fr); }
   .nwg-dashboard-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -834,6 +843,10 @@ html[data-theme='dark'] .partner-workspace .nwg-empty > strong { color: #edf4ee;
 }
 @media (max-width: 950px) {
   .nwg-dashboard-hero,.nwg-campaign-overview,.nwg-campaign-tools,.nwg-proof-layout,.nwg-earnings-lower,.nwg-examples-layout { grid-template-columns: 1fr; }
+  .nwg-guide-steps { grid-template-columns: 1fr; gap: 8px; }
+  .nwg-guide-steps > article { min-height: 77px; }
+  .nwg-step-arrow { justify-self: center; transform: rotate(90deg); }
+  .nwg-earnings-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nwg-map-card { min-height: 230px; }
   .nwg-map-card iframe { height: 190px; min-height: 190px; flex: none; }
   .nwg-proof-layout { align-items: stretch; }
@@ -943,4 +956,403 @@ html[data-theme='dark'] .partner-workspace .nwg-empty > strong { color: #edf4ee;
 }
 @media (prefers-reduced-motion: reduce) {
   .partner-workspace .nwg-progress-track > span,.partner-workspace .nwg-button { transition: none; }
+}
+
+.partner-workspace .nwg-page-heading {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--nwg-ink);
+}
+html[data-theme='light'] [data-public-theme='light'] .partner-workspace .nwg-page-heading {
+  background: transparent !important;
+}
+.partner-workspace .nwg-page-heading h1,
+.partner-workspace .nwg-card-heading h2,
+.partner-workspace .nwg-assignment-title h2,
+.partner-workspace .nwg-empty > strong,
+.partner-workspace .nwg-metric-label,
+.partner-workspace .nwg-metric > strong,
+.partner-workspace .nwg-target-numbers strong,
+.partner-workspace .nwg-sample-data dt,
+.partner-workspace .nwg-sample-data dd,
+.partner-workspace .nwg-profile-summary h2,
+.partner-workspace .nwg-support-card h2,
+.partner-workspace .nwg-edit-profile > h2 {
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-card,
+.partner-workspace .nwg-metric,
+.partner-workspace .nwg-proof-modal,
+.partner-workspace .nwg-sample-data {
+  border-color: var(--nwg-line);
+  background: var(--nwg-surface);
+  color: var(--nwg-ink);
+  box-shadow: var(--nwg-shadow);
+}
+.partner-workspace .nwg-metric-soft,
+.partner-workspace .nwg-profile-summary,
+.partner-workspace .nwg-target-card,
+.partner-workspace .nwg-assignment-title,
+.partner-workspace .nwg-guide-steps > article,
+.partner-workspace .nwg-damage-card,
+.partner-workspace .nwg-map-unavailable,
+.partner-workspace .nwg-example-pair figure,
+.partner-workspace .nwg-camera-frame {
+  border-color: var(--nwg-line);
+  background: var(--nwg-elevated);
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-page-heading > p:last-child,
+.partner-workspace .nwg-card-heading p,
+.partner-workspace .nwg-muted,
+.partner-workspace .nwg-empty,
+.partner-workspace .nwg-empty > p,
+.partner-workspace .nwg-metric-detail,
+.partner-workspace .nwg-campaign-select,
+.partner-workspace .nwg-assignment-title p,
+.partner-workspace .nwg-assignment-details > div > span,
+.partner-workspace .nwg-campaign-sites > span,
+.partner-workspace .nwg-campaign-sites > p,
+.partner-workspace .nwg-request-row p,
+.partner-workspace .nwg-request-row time,
+.partner-workspace .nwg-withdrawal-form > p,
+.partner-workspace .nwg-pending-row small,
+.partner-workspace .nwg-support-card p,
+.partner-workspace .nwg-guide-steps article p,
+.partner-workspace .nwg-sample-warning,
+.partner-workspace .nwg-loading,
+.partner-workspace .nwg-workspace-error p {
+  color: var(--nwg-muted);
+}
+.partner-workspace .nwg-card-heading-main > svg,
+.partner-workspace .nwg-icon-box,
+.partner-workspace .nwg-metric-icon,
+.partner-workspace .nwg-assignment-details > div,
+.partner-workspace .nwg-campaign-sites > span > svg,
+.partner-workspace .nwg-map-caption > svg,
+.partner-workspace .nwg-empty > svg,
+.partner-workspace .nwg-camera-placeholder,
+.partner-workspace .nwg-step-arrow,
+.partner-workspace .nwg-guide-steps > article,
+.partner-workspace .nwg-sample-warning svg {
+  color: var(--nwg-green);
+}
+.partner-workspace .nwg-card,
+.partner-workspace .nwg-table th,
+.partner-workspace .nwg-table td,
+.partner-workspace .nwg-assignment-details > div,
+.partner-workspace .nwg-campaign-sites,
+.partner-workspace .nwg-request-row,
+.partner-workspace .nwg-inline-form,
+.partner-workspace .nwg-damage-history > div,
+.partner-workspace .nwg-proof-history-row,
+.partner-workspace .nwg-target-numbers,
+.partner-workspace .nwg-pending-row,
+.partner-workspace .nwg-sample-data dl,
+.partner-workspace .nwg-sample-data dl > div {
+  border-color: var(--nwg-line);
+}
+.partner-workspace .nwg-table th {
+  background: var(--nwg-elevated);
+  color: var(--nwg-muted);
+}
+.partner-workspace .nwg-table td {
+  background: var(--nwg-surface);
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-progress-numbers strong,
+.partner-workspace .nwg-progress-heading .nwg-inline-heading,
+.partner-workspace .nwg-numeric,
+.partner-workspace .nwg-positive {
+  color: var(--nwg-success) !important;
+}
+.partner-workspace .nwg-progress-track {
+  background: color-mix(in srgb, var(--nwg-bg) 65%, var(--nwg-line));
+}
+.partner-workspace .nwg-progress-track > span {
+  background: var(--nwg-green);
+}
+.partner-workspace .nwg-button-primary {
+  background: var(--nwg-button-primary);
+  color: var(--nwg-button-primary-text);
+}
+.partner-workspace .nwg-button-primary:not(:disabled):hover {
+  background: var(--nwg-button-primary-hover);
+}
+.partner-workspace .nwg-button-secondary,
+.partner-workspace .nwg-button-light {
+  border-color: var(--nwg-control-border);
+  background: var(--nwg-input);
+  color: var(--nwg-button-secondary-text);
+}
+.partner-workspace .nwg-button-secondary:not(:disabled):hover,
+.partner-workspace .nwg-button-light:not(:disabled):hover {
+  border-color: var(--nwg-green);
+  background: var(--nwg-hover);
+}
+.partner-workspace .nwg-button:disabled {
+  color: var(--nwg-muted);
+  opacity: 1;
+}
+.partner-workspace .nwg-button-primary:disabled {
+  border-color: var(--nwg-control-border);
+  background: var(--nwg-elevated);
+}
+.partner-workspace .nwg-status {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-status-pending,
+.partner-workspace .nwg-status-requested,
+.partner-workspace .nwg-status-paused {
+  background: var(--nwg-warning-bg);
+  color: var(--nwg-warning);
+}
+.partner-workspace .nwg-status-needs_correction,
+.partner-workspace .nwg-status-rejected {
+  background: var(--nwg-danger-bg);
+  color: var(--nwg-danger);
+}
+.partner-workspace .nwg-status-completed,
+.partner-workspace .nwg-status-resolved,
+.partner-workspace .nwg-status-settled,
+.partner-workspace .nwg-status-active {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-active-campaign .nwg-status {
+  background: rgb(255 255 255 / 16%);
+  color: #fff;
+}
+.partner-workspace .nwg-campaign-select select,
+.partner-workspace .nwg-form input,
+.partner-workspace .nwg-form select,
+.partner-workspace .nwg-form textarea,
+.partner-workspace .nwg-inline-form input,
+.partner-workspace .nwg-inline-form select,
+.partner-workspace .nwg-inline-form textarea,
+.partner-workspace .nwg-review-card .nwg-card-heading > select,
+.partner-workspace .nwg-withdrawal-form input,
+.partner-workspace .nwg-search,
+.partner-workspace .nwg-search input,
+.partner-workspace .nwg-location-button,
+.partner-workspace .nwg-target-numbers {
+  border-color: var(--nwg-control-border);
+  background: var(--nwg-input);
+  color: var(--nwg-ink);
+  color-scheme: light;
+}
+.partner-workspace .nwg-form input::placeholder,
+.partner-workspace .nwg-form textarea::placeholder,
+.partner-workspace .nwg-inline-form input::placeholder,
+.partner-workspace .nwg-inline-form textarea::placeholder,
+.partner-workspace .nwg-search input::placeholder {
+  color: var(--nwg-muted);
+  opacity: .9;
+}
+.partner-workspace :is(input, select, textarea):disabled {
+  border-color: var(--nwg-control-border);
+  background: var(--nwg-elevated);
+  color: var(--nwg-muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.partner-workspace .nwg-location-button > span,
+.partner-workspace .nwg-char-count,
+.partner-workspace .nwg-history-note,
+.partner-workspace .nwg-form-end > span {
+  color: var(--nwg-muted);
+}
+.partner-workspace .nwg-history-note,
+.partner-workspace .nwg-form-end > span {
+  font-size: max(10px, 1em);
+}
+.partner-workspace .nwg-location-button:not(:disabled):hover {
+  background: var(--nwg-hover);
+}
+.partner-workspace .nwg-camera-actions {
+  border: 1px solid var(--nwg-line);
+  background: color-mix(in srgb, var(--nwg-surface) 94%, transparent);
+  box-shadow: var(--nwg-shadow);
+}
+.partner-workspace .nwg-map-caption {
+  border-color: var(--nwg-line);
+  color: var(--nwg-muted);
+}
+.partner-workspace .nwg-map-caption strong,
+.partner-workspace .nwg-map-unavailable strong {
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-map-attribution {
+  border: 1px solid var(--nwg-line);
+  background: var(--nwg-surface);
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-captured-label {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-feedback {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-feedback.is-error,
+.partner-workspace .nwg-workspace-error {
+  border-color: color-mix(in srgb, var(--nwg-danger) 40%, var(--nwg-line));
+  background: var(--nwg-danger-bg);
+  color: var(--nwg-danger);
+}
+.partner-workspace .nwg-feedback.is-error,
+.partner-workspace .nwg-workspace-error strong {
+  color: var(--nwg-danger);
+}
+.partner-workspace .nwg-required,
+.partner-workspace .nwg-negative {
+  color: var(--nwg-danger) !important;
+}
+.partner-workspace .nwg-damage-card .nwg-card-heading-main > svg {
+  color: var(--nwg-warning);
+}
+.partner-workspace .nwg-target-numbers {
+  border-color: var(--nwg-line);
+}
+.partner-workspace .nwg-proof-history-row > img,
+.partner-workspace .nwg-proof-modal > img {
+  background: var(--nwg-elevated);
+}
+.partner-workspace .nwg-modal-close {
+  border: 1px solid var(--nwg-line);
+  background: var(--nwg-elevated);
+  color: var(--nwg-ink);
+}
+.partner-workspace .nwg-edit-profile input[readonly] {
+  background: var(--nwg-elevated);
+  color: var(--nwg-muted);
+}
+.partner-workspace .nwg-step-number {
+  background: var(--nwg-step-number-bg);
+  color: #fff;
+}
+.partner-workspace .nwg-profile-avatar,
+.partner-workspace .nwg-example-pair figure > div {
+  background: var(--nwg-elevated);
+}
+.partner-workspace .nwg-example-pair figure figcaption {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-example-pair figure figcaption.is-bad {
+  background: var(--nwg-danger-bg);
+  color: var(--nwg-danger);
+}
+.partner-workspace .nwg-example-label.is-good {
+  background: var(--nwg-success-bg);
+  color: var(--nwg-success);
+}
+.partner-workspace .nwg-example-label.is-bad {
+  background: var(--nwg-danger-bg);
+  color: var(--nwg-danger);
+}
+.partner-workspace .nwg-sample-data dl {
+  background: var(--nwg-surface);
+}
+.partner-workspace .nwg-sample-data dt > svg {
+  color: var(--nwg-green);
+}
+.partner-workspace .nwg-separator {
+  color: var(--nwg-muted);
+}
+.partner-workspace .partner-preview-sidebar nav button:not([aria-current='page']),
+.partner-workspace .partner-preview-mobile-tabs button:not([aria-current='page']) {
+  color: var(--brand-text-muted);
+}
+.partner-workspace .partner-preview-sidebar nav button:hover:not([aria-current='page']),
+.partner-workspace .partner-preview-mobile-tabs button:hover:not([aria-current='page']) {
+  background: var(--nwg-hover);
+  color: var(--nwg-ink);
+}
+.partner-workspace :is(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--nwg-focus);
+  outline-offset: 3px;
+}
+.partner-workspace :is(a, button):active {
+  outline-color: var(--nwg-focus);
+}
+.partner-workspace .nwg-card-heading p,
+.partner-workspace .nwg-assignment-title p,
+.partner-workspace .nwg-empty > p,
+.partner-workspace .nwg-metric-label,
+.partner-workspace .nwg-metric-detail,
+.partner-workspace .nwg-form label,
+.partner-workspace .nwg-inline-form label,
+.partner-workspace .nwg-button,
+.partner-workspace .nwg-table th,
+.partner-workspace .nwg-table td,
+.partner-workspace .nwg-status,
+.partner-workspace .nwg-submit-prompt > p,
+.partner-workspace .nwg-request-row time,
+.partner-workspace .nwg-capture-card .nwg-form > label > small,
+.partner-workspace .nwg-target-numbers > span,
+.partner-workspace .nwg-example-label,
+.partner-workspace .nwg-live-label,
+.partner-workspace .nwg-no-records,
+.partner-workspace .nwg-campaign-select,
+.partner-workspace .partner-preview-mobile-tabs button,
+.partner-workspace .partner-workspace-logout,
+.partner-workspace .nwg-campaign-meta span,
+.partner-workspace .nwg-assignment-details > div > span,
+.partner-workspace .nwg-assignment-details small,
+.partner-workspace .nwg-map-caption,
+.partner-workspace .nwg-map-attribution,
+.partner-workspace .nwg-location-picker > small,
+.partner-workspace .nwg-char-count,
+.partner-workspace .nwg-withdraw-action > small,
+.partner-workspace .nwg-pending-row small,
+.partner-workspace .nwg-proof-history-copy > small,
+.partner-workspace .nwg-sample-warning,
+.partner-workspace .nwg-sample-data dt,
+.partner-workspace .nwg-sample-data dd,
+.partner-workspace .nwg-example-pair figcaption,
+.partner-workspace .nwg-support-card p,
+.partner-workspace .nwg-guide-steps article p {
+  font-size: max(10px, 1em);
+}
+.partner-workspace .nwg-form input,
+.partner-workspace .nwg-form select,
+.partner-workspace .nwg-form textarea,
+.partner-workspace .nwg-inline-form input,
+.partner-workspace .nwg-inline-form select,
+.partner-workspace .nwg-inline-form textarea,
+.partner-workspace .nwg-review-card .nwg-card-heading > select,
+.partner-workspace .nwg-withdrawal-form input,
+.partner-workspace .nwg-campaign-select select,
+.partner-workspace .nwg-search input {
+  font-size: 12px;
+}
+
+html[data-theme='dark'] .partner-preview.partner-workspace {
+  --preview-muted: var(--brand-text-muted);
+  --preview-border: var(--brand-border);
+  --preview-primary-text: var(--brand-bg);
+}
+html[data-theme='dark'] .partner-workspace {
+  --nwg-amber: var(--brand-orange);
+  --nwg-warning: var(--brand-orange);
+  --nwg-warning-bg: color-mix(in srgb, var(--brand-orange-light) 82%, var(--brand-surface));
+  --nwg-danger: #fda4af;
+  --nwg-danger-bg: #351b22;
+  --nwg-step-number-bg: color-mix(in srgb, var(--brand-green-deep) 88%, #000);
+  --nwg-input: color-mix(in srgb, var(--brand-bg-soft) 62%, var(--brand-surface));
+  --nwg-elevated: color-mix(in srgb, var(--brand-surface) 54%, var(--brand-bg-soft));
+  --nwg-button-primary: color-mix(in srgb, var(--brand-green-deep) 88%, #000);
+  --nwg-button-primary-hover: color-mix(in srgb, var(--brand-green-deep) 76%, #000);
+  --nwg-button-primary-text: #fff;
+  --nwg-button-secondary-text: var(--brand-green);
+  color-scheme: dark;
+  background: var(--nwg-bg);
+  color: var(--nwg-ink);
+}
+html[data-theme='dark'] .partner-workspace :is(input, select, textarea) {
+  color-scheme: dark;
 }
