@@ -1356,3 +1356,112 @@ html[data-theme='dark'] .partner-workspace {
 html[data-theme='dark'] .partner-workspace :is(input, select, textarea) {
   color-scheme: dark;
 }
+
+.partner-workspace-mobile-menu,
+.partner-workspace-mobile-close,
+.partner-workspace-mobile-backdrop {
+  display: none;
+}
+
+.partner-workspace-drawer-head { display: contents; }
+
+.partner-workspace .nwg-screen {
+  padding-top: clamp(24px, 3vw, 38px);
+  padding-bottom: 40px;
+}
+
+.partner-workspace .nwg-page-heading { margin-bottom: 16px; }
+.partner-workspace .nwg-page-heading h1 { font-size: clamp(26px, 2.45vw, 34px); }
+.partner-workspace .nwg-page-heading > p:last-child { font-size: 13px; }
+.partner-workspace .nwg-card { border-radius: 14px; padding: 16px; }
+.partner-workspace .nwg-card-heading { margin-bottom: 13px; }
+.partner-workspace .nwg-dashboard-hero { gap: 14px; }
+.partner-workspace .nwg-active-campaign,
+.partner-workspace .nwg-daily-progress { min-height: 145px; }
+.partner-workspace .nwg-dashboard-stats { gap: 14px; margin-top: 17px; }
+.partner-workspace .nwg-metric { min-height: 94px; }
+
+@media (max-width: 720px) {
+  .partner-workspace .partner-preview-sidebar.is-mobile-open {
+    position: fixed;
+    z-index: 81;
+    inset: 0 auto 0 0;
+    display: flex;
+    width: min(86vw, 320px);
+    max-height: 100dvh;
+    min-height: 100dvh;
+    overflow-y: auto;
+    border-right: 1px solid var(--nwg-line);
+    padding: 18px 14px;
+    box-shadow: var(--nwg-shadow);
+  }
+
+  .partner-workspace .partner-workspace-mobile-backdrop {
+    position: fixed;
+    z-index: 80;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgb(9 20 13 / 48%);
+  }
+
+  .partner-workspace .partner-workspace-mobile-menu,
+  .partner-workspace .partner-workspace-mobile-close {
+    display: inline-grid;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid var(--nwg-line);
+    border-radius: 11px;
+    background: var(--nwg-surface);
+    color: var(--nwg-ink);
+  }
+
+  .partner-workspace .partner-workspace-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .partner-workspace .partner-workspace-drawer-head .partner-preview-brand {
+    margin: 0;
+  }
+
+  .partner-workspace .partner-preview-sidebar nav button { min-height: 46px; }
+  .partner-workspace .partner-preview-topline {
+    justify-content: flex-start;
+    gap: 11px;
+    padding-inline: 14px;
+  }
+  .partner-workspace .partner-workspace-topline-brand { min-width: 0; flex: 1; }
+  .partner-workspace .partner-workspace-logout { margin-left: auto; }
+  .partner-workspace .partner-preview-mobile-tabs { padding-inline: 14px; }
+  .partner-workspace .partner-preview-mobile-tabs button {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+  .partner-workspace .nwg-screen { padding-top: 22px; }
+  .partner-workspace .nwg-page-heading h1 { font-size: 26px; }
+  .partner-workspace .nwg-page-heading > p:last-child { font-size: 12px; }
+  .partner-workspace .nwg-card { padding: 14px; }
+  .partner-workspace .nwg-dashboard-stats { gap: 9px; }
+  .partner-workspace :is(.nwg-form, .nwg-inline-form) :is(input, select, textarea),
+  .partner-workspace .nwg-withdrawal-form input,
+  .partner-workspace .nwg-button,
+  .partner-workspace .partner-workspace-logout {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 390px) {
+  .partner-workspace .partner-preview-topline { gap: 8px; padding-inline: 10px; }
+  .partner-workspace .partner-workspace-mobile-menu,
+  .partner-workspace .partner-workspace-mobile-close { width: 42px; height: 42px; }
+  .partner-workspace .partner-preview-app-name { font-size: 11px; }
+  .partner-workspace .partner-preview-app-caption { font-size: 10px; }
+  .partner-workspace .partner-workspace-logout { gap: 5px; padding-inline: 8px; }
+  .partner-workspace .nwg-screen { padding-inline: 11px; }
+}

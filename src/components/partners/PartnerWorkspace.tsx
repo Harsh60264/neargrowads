@@ -24,6 +24,7 @@ import {
   LogOut,
   MailCheck,
   MapPin,
+  Menu,
   Megaphone,
   Package,
   Pencil,
@@ -985,6 +986,10 @@ export function PartnerWorkspace({
   const [workspace, setWorkspace] = useState<PartnerWorkspaceData | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState(true);
   const [workspaceError, setWorkspaceError] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileNavRef = useRef<HTMLElement>(null);
+  const wasMobileNavOpen = useRef(false);
 
   const refreshWorkspace = useCallback(async () => {
     setWorkspaceError('');
@@ -1002,14 +1007,88 @@ export function PartnerWorkspace({
 
   useEffect(() => { void refreshWorkspace(); }, [refreshWorkspace]);
 
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      if (wasMobileNavOpen.current) mobileMenuButtonRef.current?.focus();
+      wasMobileNavOpen.current = false;
+      return;
+    }
+
+    wasMobileNavOpen.current = true;
+    const drawer = mobileNavRef.current;
+    const getFocusableElements = () => Array.from(
+      drawer?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    );
+    getFocusableElements()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = getFocusableElements();
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (!firstElement || !lastElement) return;
+      if (!drawer?.contains(document.activeElement)) {
+        event.preventDefault();
+        firstElement.focus();
+      } else if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    const handleResize = () => {
+      if (window.innerWidth > 720) setMobileNavOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [mobileNavOpen]);
+
+  const selectSection = (nextSection: SectionId) => {
+    setSection(nextSection);
+    setMobileNavOpen(false);
+  };
+
   return (
     <div className="partner-preview partner-workspace">
       <div className="partner-preview-layout">
-        <aside className="partner-preview-sidebar" aria-label="Partner workspace">
-          <p className="partner-preview-brand">NearGrow <span>WildCard</span></p>
+        {mobileNavOpen && <button
+          type="button"
+          className="partner-workspace-mobile-backdrop"
+          aria-label="Close partner navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />}
+        <aside
+          id="partner-workspace-navigation"
+          ref={mobileNavRef}
+          className={`partner-preview-sidebar${mobileNavOpen ? ' is-mobile-open' : ''}`}
+          role={mobileNavOpen ? 'dialog' : undefined}
+          aria-modal={mobileNavOpen ? true : undefined}
+          aria-label="Partner workspace"
+        >
+          <div className="partner-workspace-drawer-head">
+            <p className="partner-preview-brand">NearGrow <span>WildCard</span></p>
+            <button type="button" className="partner-workspace-mobile-close" aria-label="Close partner navigation"
+              onClick={() => setMobileNavOpen(false)}>
+              <X aria-hidden="true" size={19} />
+            </button>
+          </div>
           <nav aria-label="Partner workspace navigation">
             {sections.map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>
+              <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => selectSection(id)}>
                 <Icon aria-hidden="true" size={18} /> <span>{label}</span>
               </button>
             ))}
@@ -1018,7 +1097,18 @@ export function PartnerWorkspace({
 
         <div className="partner-preview-content">
           <header className="partner-preview-topline">
-            <div>
+            <button
+              ref={mobileMenuButtonRef}
+              type="button"
+              className="partner-workspace-mobile-menu"
+              aria-label={mobileNavOpen ? 'Close partner navigation' : 'Open partner navigation'}
+              aria-expanded={mobileNavOpen}
+              aria-controls="partner-workspace-navigation"
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
+              <Menu aria-hidden="true" size={19} />
+            </button>
+            <div className="partner-workspace-topline-brand">
               <span className="partner-preview-app-name">NearGrow <strong>WildCard</strong></span>
               <span className="partner-preview-app-caption">Partner workspace</span>
             </div>
@@ -1028,7 +1118,7 @@ export function PartnerWorkspace({
           </header>
           <nav className="partner-preview-mobile-tabs" aria-label="Partner workspace navigation">
             {sections.map(({ id, label }) => (
-              <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>
+              <button key={id} type="button" aria-current={section === id ? 'page' : undefined} onClick={() => selectSection(id)}>
                 {label}
               </button>
             ))}

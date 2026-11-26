@@ -32,6 +32,7 @@ import {
   LockKeyhole,
   LogOut,
   Mail,
+  Menu,
   MessageCircle,
   Phone,
   RefreshCw,
@@ -189,7 +190,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
     <button
       type="button"
       onClick={onToggleTheme}
-      className="admin-theme-toggle inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border transition"
+      className="admin-theme-toggle inline-grid h-11 w-11 shrink-0 place-items-center rounded-lg border transition sm:h-9 sm:w-9"
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
     >
@@ -977,6 +978,11 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           </a>
           <div className="flex items-center gap-2">
             {themeToggle}
+            <div
+              aria-label={`Signed in as ${session.user?.email || 'NearGrow admin'}`}
+              title={session.user?.email}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#DDEFE0] text-sm font-bold text-[#286D3B]"
+            >{session.user?.email.slice(0, 2).toUpperCase() || 'NG'}</div>
             <button
               ref={mobileMenuButtonRef}
               type="button"
@@ -984,16 +990,16 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               aria-label="Open CMS navigation"
               aria-expanded={mobileNavOpen}
               aria-controls="admin-mobile-navigation"
-              className="grid h-10 w-10 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10"
+              className="grid h-11 w-11 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10"
             >
               <span className="sr-only">Open navigation</span>
-              <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
+              <Menu className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
         </header>
         {mobileNavOpen && <button type="button" aria-label="Close CMS navigation" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/50 lg:hidden" />}
         <aside ref={mobileDrawerRef} id="admin-mobile-navigation" className={`admin-sidebar fixed inset-y-0 left-0 z-50 flex w-[min(88vw,320px)] flex-col overflow-y-auto bg-[#14251A] px-5 py-4 text-white shadow-2xl sm:px-6 lg:sticky lg:top-0 lg:z-auto lg:self-start lg:h-[100dvh] lg:max-h-[100dvh] lg:min-h-0 lg:w-auto lg:shrink-0 lg:overflow-y-auto lg:overscroll-contain lg:touch-pan-y lg:px-4 lg:py-5 lg:shadow-none ${mobileNavOpen ? 'flex' : 'hidden'} lg:flex ${sidebarCollapsed ? 'lg:w-[84px]' : 'lg:w-[260px]'}`} role="dialog" aria-modal={mobileNavOpen || undefined} aria-label="CMS navigation">
-          <button ref={mobileDrawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close CMS navigation" className="mb-2 ml-auto grid h-10 w-10 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10 lg:hidden">
+          <button ref={mobileDrawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close CMS navigation" className="mb-2 ml-auto grid h-11 w-11 place-items-center rounded-lg border border-white/15 text-[#D7E3D9] transition hover:bg-white/10 lg:hidden">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
           <a href="/" aria-label="NearGrow Ads home" className={`flex items-center gap-3 px-2 py-2 ${sidebarCollapsed ? 'lg:justify-center' : ''}`}>
@@ -1049,7 +1055,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
         </aside>
 
         <section className={`min-w-0 w-full max-w-full flex-1 px-4 py-6 transition-[margin] duration-200 sm:px-7 lg:px-10 lg:py-9 xl:px-12 ${sidebarCollapsed ? 'lg:ml-0' : ''}`}>
-          <header className="admin-workspace-header flex flex-wrap items-center justify-between gap-4 border-b border-[#E4E9E3] pb-6">
+          <header className={`admin-workspace-header${section === 'deliveryTeam' ? ' admin-delivery-team-header' : ''} flex flex-wrap items-center justify-between gap-4 border-b border-[#E4E9E3] pb-6`}>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#78907D]">NearGrow Ads · CMS</p>
               <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{section === 'leads' ? 'Leads & Inquiries' : section === 'serviceStore' ? 'Service Store' : section === 'team' ? 'Team & Mentors' : section === 'blog' ? 'Blog Management' : section === 'content' ? 'Page Content Manager' : section === 'mascot' ? 'NEO Mascot' : section === 'caseStudies' ? 'Case Studies' : section === 'servicesManagement' ? 'Services Management' : section === 'categories' ? 'Categories' : section === 'deliveryTeam' ? 'Delivery Team' : section === 'securityMonitoring' ? 'Security Monitoring' : section === 'settings' ? 'Settings' : 'Overview'}</h1>

@@ -227,20 +227,37 @@ function ActivityTable({ items }: { items: DeliveryTeamActivity[] }) {
     </div>;
   }
 
-  return <div className="dt-activity-table-wrap">
-    <table className="dt-activity-table">
-      <thead><tr><th>Time</th><th>Delivery partner</th><th>Activity</th><th>Details</th><th>Status</th></tr></thead>
-      <tbody>{items.map((item) => <tr key={item.id}>
-        <td><time dateTime={item.createdAt}>{formatActivityTime(item.createdAt)}</time></td>
-        <td><strong>{item.partnerName}</strong></td>
-        <td>{item.activityType}</td>
-        <td>{item.details || '—'}</td>
-        <td>{item.status
-          ? <span className={`dt-status dt-status--${item.status.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{item.status}</span>
-          : <span className="dt-muted">—</span>}</td>
-      </tr>)}</tbody>
-    </table>
-  </div>;
+  return <>
+    <div className="dt-activity-table-wrap">
+      <table className="dt-activity-table">
+        <thead><tr><th>Time</th><th>Delivery partner</th><th>Activity</th><th>Details</th><th>Status</th></tr></thead>
+        <tbody>{items.map((item) => <tr key={item.id}>
+          <td><time dateTime={item.createdAt}>{formatActivityTime(item.createdAt)}</time></td>
+          <td><strong>{item.partnerName}</strong></td>
+          <td>{item.activityType}</td>
+          <td>{item.details || '—'}</td>
+          <td>{item.status
+            ? <span className={`dt-status dt-status--${item.status.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{item.status}</span>
+            : <span className="dt-muted">—</span>}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <div className="dt-activity-card-list" aria-label="Recent activity">
+      {items.map((item) => <article className="dt-activity-card" key={item.id}>
+        <div className="dt-activity-card-header">
+          <div className="dt-activity-partner">
+            <span className="dt-avatar" aria-hidden="true">{getPartnerInitials(item.partnerName)}</span>
+            <div><strong>{item.partnerName}</strong><time dateTime={item.createdAt}>{formatActivityTime(item.createdAt)}</time></div>
+          </div>
+          {item.status
+            ? <span className={`dt-status dt-status--${item.status.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{item.status}</span>
+            : <span className="dt-muted">—</span>}
+        </div>
+        <div className="dt-activity-card-type"><Activity size={14} aria-hidden="true" /><strong>{item.activityType}</strong></div>
+        <p>{item.details || '—'}</p>
+      </article>)}
+    </div>
+  </>;
 }
 
 export function DeliveryTeamOverviewWidget({
@@ -762,12 +779,46 @@ export function AdminDeliveryTeam({
                     <td><span className={`dt-stock-badge ${isOutOfStock ? 'is-empty' : isLowStock ? 'is-low' : ''}`}>
                       {isOutOfStock ? 'Out of stock' : `${isLowStock ? 'Low · ' : 'In stock · '}${formatNumber(partner.remaining_stock)}`}
                     </span></td>
-                    <td><button type="button" className="dt-button dt-button--small" disabled={actionBusy} onClick={() => void openPartner(partner)}>Manage</button></td>
+                    <td><button type="button" className="dt-button dt-button--small" disabled={actionBusy} aria-pressed={selectedPartner?.partner.id === partner.id} onClick={() => void openPartner(partner)}>Manage</button></td>
                   </tr>;
                 })}
                 {!partners.length && <tr><td colSpan={6}><p className="dt-empty">{loading ? 'Loading partners…' : 'No registered partners match this search.'}</p></td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="dt-partner-card-list" aria-label="Delivery partners">
+            {partners.map((partner, index) => {
+              const isOutOfStock = partner.remaining_stock <= 0;
+              const isLowStock = !isOutOfStock && partner.remaining_stock <= (overview?.lowStockThreshold || 5);
+              const isSelected = selectedPartner?.partner.id === partner.id;
+              return <article className={`dt-partner-card${isSelected ? ' is-selected' : ''}`} key={partner.id}>
+                <div className="dt-partner-card-header">
+                  <div className="dt-partner-cell">
+                    <span className="dt-avatar" aria-hidden="true">{getPartnerInitials(partner.full_name)}</span>
+                    <div className="dt-partner-copy">
+                      <strong>{partner.full_name}</strong>
+                      <span>ID {partner.id}</span>
+                      <span>{partner.mobile_number || partner.email}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="dt-button dt-button--small"
+                    disabled={actionBusy}
+                    aria-pressed={isSelected}
+                    onClick={() => void openPartner(partner)}
+                  >Manage</button>
+                </div>
+                <div className="dt-partner-card-meta">
+                  <span className={`dt-status dt-status--${partner.status}`}>{partner.status}</span>
+                  <span className="dt-coin-value"><Coins size={14} aria-hidden="true" />{formatNumber(partner.available_coins)}</span>
+                  <span className={`dt-stock-badge ${isOutOfStock ? 'is-empty' : isLowStock ? 'is-low' : ''}`}>
+                    {isOutOfStock ? 'Out of stock' : `${isLowStock ? 'Low · ' : 'In stock · '}${formatNumber(partner.remaining_stock)}`}
+                  </span>
+                </div>
+              </article>;
+            })}
+            {!partners.length && <p className="dt-empty">{loading ? 'Loading partners…' : 'No registered partners match this search.'}</p>}
           </div>
           <footer className="dt-pagination">
             <span>Showing {totalPartners ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, totalPartners)} of {formatNumber(totalPartners)}</span>
