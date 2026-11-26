@@ -202,6 +202,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
   const [leads, setLeads] = useState<AdminLead[]>([]);
   const [deliveryTeamOverview, setDeliveryTeamOverview] = useState<DeliveryTeamOverview | null>(null);
   const [deliveryTeamOverviewError, setDeliveryTeamOverviewError] = useState('');
+  const deliveryTeamRefreshRef = useRef<() => void>(() => undefined);
   const [storage, setStorage] = useState<LeadStorage | null>(null);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [identifier, setIdentifier] = useState('');
@@ -940,7 +941,7 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
           : section === 'categories'
           ? <AdminBlogCategories onNavigate={navigate} embedded canCreate={hasAction('categories', 'create')} canEdit={hasAction('categories', 'edit')} canDelete={hasAction('categories', 'delete')} canCreateBlog={hasAction('blogs', 'create')} />
           : section === 'deliveryTeam'
-            ? <AdminDeliveryTeam canCreate={hasAction('deliveryTeam', 'create')} canEdit={hasAction('deliveryTeam', 'edit')} theme={theme} />
+            ? <AdminDeliveryTeam canCreate={hasAction('deliveryTeam', 'create')} canEdit={hasAction('deliveryTeam', 'edit')} theme={theme} refreshRef={deliveryTeamRefreshRef} />
           : section === 'securityMonitoring'
             ? <AdminSecurityMonitoring isPrimaryOwner={session.user?.isPrimaryOwner === true} canManageAlerts={canEditSecurityMonitoring} />
           : section === 'settings'
@@ -1058,6 +1059,9 @@ export function AdminPage({ section, blogMode, isNewBlog = false, onNavigate, on
               {themeToggle}
               {(!section || section === 'leads') && canViewLeads && <button type="button" onClick={() => void loadLeads()} disabled={loadingLeads} className="inline-flex h-10 items-center gap-2 rounded-xl border-[#DFE6DF] bg-white px-3 text-xs font-semibold text-[#546258] shadow-sm transition hover:border-[#B7CCBA] disabled:opacity-50">
                 <RefreshCw className={`h-3.5 w-3.5 ${loadingLeads ? 'animate-spin' : ''}`} /> Refresh
+              </button>}
+              {section === 'deliveryTeam' && hasView('deliveryTeam') && <button type="button" onClick={() => deliveryTeamRefreshRef.current()} className="inline-flex h-10 items-center gap-2 rounded-xl border-[#DFE6DF] bg-white px-3 text-xs font-semibold text-[#546258] shadow-sm transition hover:border-[#B7CCBA]">
+                <RefreshCw className="h-3.5 w-3.5" /> Refresh
               </button>}
               <button type="button" onClick={() => void signOut()} disabled={busy} className="hidden h-10 items-center gap-2 rounded-xl border-[#DFE6DF] bg-white px-3 text-xs font-semibold text-[#546258] shadow-sm lg:inline-flex"><LogOut className="h-3.5 w-3.5" /> Sign out</button>
               <div title={session.user?.email} className="hidden h-10 w-10 place-items-center rounded-full bg-[#DDEFE0] text-sm font-bold text-[#286D3B] sm:grid">{session.user?.email.slice(0, 2).toUpperCase() || 'NG'}</div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  Activity, ArrowDown, ArrowUp, BadgeCheck, Bell, Boxes, BriefcaseBusiness, Check, ChevronLeft,
-  ChevronRight, CircleAlert, Coins, LoaderCircle, MapPin, PackageCheck, RefreshCw, Search,
+  Activity, ArrowDown, BadgeCheck, Bell, Boxes, BriefcaseBusiness, Check, ChevronLeft,
+  ChevronRight, CircleAlert, Coins, LoaderCircle, MapPin, Minus, PackageCheck, Plus, RefreshCw, Search,
   Settings2, ShieldCheck, UsersRound, X,
 } from 'lucide-react';
 import './adminDeliveryTeam.css';
@@ -183,6 +183,24 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
+function formatActivityTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getPartnerInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'NG';
+  return (parts.length > 1
+    ? `${parts[0][0]}${parts[1][0]}`
+    : parts[0].slice(0, 2)).toUpperCase();
+}
+
 function ActivityRows({ items, compact = false }: { items: DeliveryTeamActivity[]; compact?: boolean }) {
   if (!items.length) return <p className="dt-empty">No WildCard activity has been recorded yet.</p>;
   return <div className="dt-activity-list">
@@ -197,6 +215,31 @@ function ActivityRows({ items, compact = false }: { items: DeliveryTeamActivity[
         {!compact && <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time>}
       </div>
     </article>)}
+  </div>;
+}
+
+function ActivityTable({ items }: { items: DeliveryTeamActivity[] }) {
+  if (!items.length) {
+    return <div className="dt-activity-empty">
+      <Activity size={20} aria-hidden="true" />
+      <strong>No recent activity yet</strong>
+      <span>Partner submissions, requests and ledger activity will appear here.</span>
+    </div>;
+  }
+
+  return <div className="dt-activity-table-wrap">
+    <table className="dt-activity-table">
+      <thead><tr><th>Time</th><th>Delivery partner</th><th>Activity</th><th>Details</th><th>Status</th></tr></thead>
+      <tbody>{items.map((item) => <tr key={item.id}>
+        <td><time dateTime={item.createdAt}>{formatActivityTime(item.createdAt)}</time></td>
+        <td><strong>{item.partnerName}</strong></td>
+        <td>{item.activityType}</td>
+        <td>{item.details || '—'}</td>
+        <td>{item.status
+          ? <span className={`dt-status dt-status--${item.status.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{item.status}</span>
+          : <span className="dt-muted">—</span>}</td>
+      </tr>)}</tbody>
+    </table>
   </div>;
 }
 
@@ -252,50 +295,24 @@ function MetricCard({
 }) {
   return <article className={`dt-metric dt-metric--${tone}`}>
     <span className="dt-metric-icon">{icon}</span>
-    <p>{label}</p>
-    <strong>{value}</strong>
-    <small>{detail}</small>
+    <div className="dt-metric-copy">
+      <p>{label}</p>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
   </article>;
-}
-
-function Modal({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  return <div className="dt-modal-backdrop" role="presentation" onMouseDown={(event) => {
-    if (event.target === event.currentTarget) onClose();
-  }}>
-    <section className="dt-modal" role="dialog" aria-modal="true" aria-labelledby="dt-modal-title">
-      <header className="dt-modal-header">
-        <h2 id="dt-modal-title">{title}</h2>
-        <button type="button" className="dt-icon-button" onClick={onClose} aria-label="Close dialog"><X size={18} /></button>
-      </header>
-      {children}
-    </section>
-  </div>;
 }
 
 export function AdminDeliveryTeam({
   canCreate,
   canEdit,
   theme,
+  refreshRef,
 }: {
   canCreate: boolean;
   canEdit: boolean;
   theme: 'light' | 'dark';
+  refreshRef: { current: () => void };
 }) {
   const [tab, setTab] = useState<TeamTab>(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
@@ -402,6 +419,11 @@ export function AdminDeliveryTeam({
   }, [refresh]);
 
   useEffect(() => {
+    refreshRef.current = () => { void refresh(); };
+    return () => { refreshRef.current = () => undefined; };
+  }, [refresh, refreshRef]);
+
+  useEffect(() => {
     if (tab !== 'campaigns' || !canCreate) return;
     let active = true;
     const params = new URLSearchParams({
@@ -432,6 +454,10 @@ export function AdminDeliveryTeam({
   const openPartner = useCallback(async (partner: DeliveryTeamPartner) => {
     setError('');
     setNotice('');
+    setCoinAmount('');
+    setCoinReason('');
+    setStockQuantity('');
+    setStockReason('');
     try {
       const response = await requestJson<{ detail: DeliveryTeamPartnerDetail }>(
         `/api/admin/delivery-team/partners/${encodeURIComponent(partner.id)}`,
@@ -672,25 +698,14 @@ export function AdminDeliveryTeam({
   ];
 
   return <div className="delivery-team" data-theme={theme}>
-    <header className="dt-page-heading">
-      <div>
-        <p className="dt-eyebrow"><span className="dt-dot" /> WildCard operations</p>
-        <h2>Delivery Team</h2>
-        <p>Manage registered partners, physical stock, proofs, requests and audited NGA Coins activity.</p>
-      </div>
-      <button type="button" className="dt-button dt-button--quiet" onClick={() => void refresh()} disabled={loading}>
-        <RefreshCw size={16} className={loading ? 'dt-spin' : ''} /> Refresh data
-      </button>
-    </header>
-
     {error && <div className="dt-error" role="alert"><CircleAlert size={17} />{error}<button type="button" onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
     {notice && <div className="dt-notice" role="status"><Check size={17} />{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss notice"><X size={15} /></button></div>}
 
     {overview && <div className="dt-metrics">
-      <MetricCard label="Registered partners" value={formatNumber(overview.totalPartners)} detail={`${formatNumber(overview.activePartners)} active`} icon={<UsersRound size={19} />} />
-      <MetricCard label="Available NGA Coins" value={formatNumber(overview.totalAvailableCoins)} detail="Across registered partners" icon={<Coins size={19} />} tone="navy" />
+      <MetricCard label="Delivery partners" value={formatNumber(overview.totalPartners)} detail={`${formatNumber(overview.activePartners)} active`} icon={<UsersRound size={19} />} />
+      <MetricCard label="Total NGA Coins" value={formatNumber(overview.totalAvailableCoins)} detail="Across delivery partners" icon={<Coins size={19} />} tone="navy" />
       <MetricCard label="WildCards issued" value={formatNumber(overview.totalIssuedStock)} detail="Physical stock ledger" icon={<PackageCheck size={19} />} />
-      <MetricCard label="Pending requests" value={formatNumber(overview.pendingRequests + overview.pendingProofs)} detail={`${overview.pendingRequests} requests · ${overview.pendingProofs} proofs`} icon={<Bell size={19} />} tone="amber" />
+      <MetricCard label="Pending requests" value={formatNumber(overview.pendingRequests)} detail={`${overview.pendingProofs} proofs to review`} icon={<Bell size={19} />} tone="amber" />
       <MetricCard label="Today's activity" value={formatNumber(overview.todaysActivity)} detail="Recorded partner actions" icon={<Activity size={19} />} tone="navy" />
     </div>}
 
@@ -707,47 +722,154 @@ export function AdminDeliveryTeam({
       </button>)}
     </nav>
 
-    {tab === 'deliveryBoys' && <section className="dt-panel">
-      <div className="dt-panel-heading">
-        <div><h3>Delivery partners</h3><p>Real partner accounts and current ledger-derived balances.</p></div>
-        <div className="dt-filters">
-          <label className="dt-search"><Search size={16} /><span className="dt-sr-only">Search partners</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email or partner ID" />
-          </label>
-          <label className="dt-select-wrap"><span className="dt-sr-only">Filter partner status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
-              <option value="all">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="disabled">Disabled</option>
-            </select>
-          </label>
+    {tab === 'deliveryBoys' && <>
+      <div className="dt-dashboard-layout">
+        <section className="dt-panel dt-partners-panel" aria-labelledby="dt-partners-title">
+          <div className="dt-panel-heading">
+            <div><h3 id="dt-partners-title">Delivery partners <span className="dt-heading-count">{formatNumber(totalPartners)}</span></h3><p>Manage partner accounts and ledger balances.</p></div>
+            <div className="dt-filters">
+              <label className="dt-search"><Search size={15} /><span className="dt-sr-only">Search partners</span>
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, ID or phone" />
+              </label>
+              <label className="dt-select-wrap"><span className="dt-sr-only">Filter partner status</span>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+                  <option value="all">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="disabled">Disabled</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div className="dt-table-wrap">
+            <table className="dt-table">
+              <thead><tr><th>#</th><th>Delivery partner</th><th>Status</th><th>NGA Coins</th><th>WildCard stock</th><th><span className="dt-sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                {partners.map((partner, index) => {
+                  const isOutOfStock = partner.remaining_stock <= 0;
+                  const isLowStock = !isOutOfStock && partner.remaining_stock <= (overview?.lowStockThreshold || 5);
+                  return <tr key={partner.id} className={selectedPartner?.partner.id === partner.id ? 'is-selected' : undefined}>
+                    <td className="dt-row-number">{(page - 1) * pageSize + index + 1}</td>
+                    <td>
+                      <div className="dt-partner-cell">
+                        <span className="dt-avatar" aria-hidden="true">{getPartnerInitials(partner.full_name)}</span>
+                        <div className="dt-partner-copy">
+                          <button type="button" className="dt-partner-select" disabled={actionBusy} onClick={() => void openPartner(partner)}>{partner.full_name}</button>
+                          <span>ID {partner.id}</span>
+                          <span>{partner.mobile_number || partner.email}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span className={`dt-status dt-status--${partner.status}`}>{partner.status}</span></td>
+                    <td><span className="dt-coin-value"><Coins size={14} aria-hidden="true" />{formatNumber(partner.available_coins)}</span></td>
+                    <td><span className={`dt-stock-badge ${isOutOfStock ? 'is-empty' : isLowStock ? 'is-low' : ''}`}>
+                      {isOutOfStock ? 'Out of stock' : `${isLowStock ? 'Low · ' : 'In stock · '}${formatNumber(partner.remaining_stock)}`}
+                    </span></td>
+                    <td><button type="button" className="dt-button dt-button--small" disabled={actionBusy} onClick={() => void openPartner(partner)}>Manage</button></td>
+                  </tr>;
+                })}
+                {!partners.length && <tr><td colSpan={6}><p className="dt-empty">{loading ? 'Loading partners…' : 'No registered partners match this search.'}</p></td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <footer className="dt-pagination">
+            <span>Showing {totalPartners ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, totalPartners)} of {formatNumber(totalPartners)}</span>
+            <div><button type="button" className="dt-icon-button" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={17} /></button>
+              <span>Page {page} of {maxPages}</span>
+              <button type="button" className="dt-icon-button" aria-label="Next page" disabled={page >= maxPages} onClick={() => setPage((current) => Math.min(maxPages, current + 1))}><ChevronRight size={17} /></button></div>
+          </footer>
+        </section>
+
+        <aside className="dt-panel dt-quick-actions" aria-labelledby="dt-quick-actions-title">
+          <div className="dt-quick-heading">
+            <span className="dt-quick-icon"><Boxes size={20} aria-hidden="true" /></span>
+            <div><h3 id="dt-quick-actions-title">Quick Actions</h3><p>Manage the selected delivery partner.</p></div>
+          </div>
+          {selectedPartner ? <>
+            <div className="dt-selected-partner">
+              <span className="dt-avatar dt-avatar--large" aria-hidden="true">{getPartnerInitials(selectedPartner.partner.full_name)}</span>
+              <div className="dt-selected-partner-copy">
+                <strong>{selectedPartner.partner.full_name}</strong>
+                <span>ID {selectedPartner.partner.id}</span>
+                {selectedPartner.partner.mobile_number && <span>{selectedPartner.partner.mobile_number}</span>}
+              </div>
+              <span className={`dt-status dt-status--${selectedPartner.partner.status}`}>{selectedPartner.partner.status}</span>
+            </div>
+
+            <section className="dt-quick-section dt-coin-section" aria-labelledby="dt-coins-title">
+              <div className="dt-quick-section-heading"><h4 id="dt-coins-title"><Coins size={16} /> NGA Coins</h4></div>
+              <div className="dt-coin-balance">
+                <span>Current balance</span>
+                <strong><Coins size={17} aria-hidden="true" />{formatNumber(selectedPartner.coinSummary.balance)}</strong>
+                <small>Earned {formatNumber(selectedPartner.coinSummary.totalEarned)} · Withdrawn {formatNumber(selectedPartner.coinSummary.totalWithdrawn)}</small>
+              </div>
+              {canEdit ? <form className="dt-coin-adjust-form" onSubmit={(event) => void adjustCoins(event)}>
+                <label className="dt-field"><span>Adjust coins</span>
+                  <div className="dt-coin-stepper">
+                    <button type="button" aria-label="Decrease coin adjustment" disabled={actionBusy} onClick={() => setCoinAmount((current) => String((Number(current) || 0) - 1))}><Minus size={14} /></button>
+                    <input type="number" step="1" required disabled={actionBusy} value={coinAmount} onChange={(event) => setCoinAmount(event.target.value)} placeholder="0" />
+                    <button type="button" aria-label="Increase coin adjustment" disabled={actionBusy} onClick={() => setCoinAmount((current) => String((Number(current) || 0) + 1))}><Plus size={14} /></button>
+                  </div>
+                </label>
+                <label className="dt-field"><span>Reason (required)</span><input required minLength={3} maxLength={500} value={coinReason} onChange={(event) => setCoinReason(event.target.value)} /></label>
+                {coinAmount && Number.isSafeInteger(Number(coinAmount)) && <p className="dt-resulting-balance">Resulting balance: {formatNumber(selectedPartner.coinSummary.balance + Number(coinAmount))}</p>}
+                <div className="dt-quick-actions-row">
+                  <button className="dt-button dt-button--quiet" type="button" disabled={actionBusy || selectedPartner.coinSummary.balance <= 0} onClick={() => void resetCoins()}><ArrowDown size={14} /> Reset to 0</button>
+                  <button className="dt-button dt-button--primary" type="submit" disabled={actionBusy}><Check size={14} /> Update Coins</button>
+                </div>
+              </form> : <p className="dt-view-only"><ShieldCheck size={15} /> Your role has view-only access to coin management.</p>}
+            </section>
+
+            <section className="dt-quick-section dt-stock-section" aria-labelledby="dt-stock-title">
+              <div className="dt-quick-section-heading"><h4 id="dt-stock-title"><PackageCheck size={16} /> Physical WildCard stock</h4></div>
+              <div className="dt-stock-summary">
+                <span>Available stock</span><strong>{formatNumber(selectedPartner.stockSummary.available)}</strong>
+                <small>Issued {formatNumber(selectedPartner.stockSummary.issued)} · Distributed {formatNumber(selectedPartner.stockSummary.distributed)}</small>
+              </div>
+              {canEdit && selectedPartner.assignments.length > 0 ? <form className="dt-stock-form" onSubmit={(event) => void manageStock(event)}>
+                <label className="dt-field"><span>Campaign assignment</span>
+                  <select required value={stockAssignmentId} onChange={(event) => setStockAssignmentId(event.target.value)}>
+                    <option value="">Select campaign</option>
+                    {selectedPartner.assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.campaign_name} · {assignment.campaign_status}</option>)}
+                  </select>
+                </label>
+                <div className="dt-two-fields">
+                  <label className="dt-field"><span>Movement</span><select value={stockMovement} onChange={(event) => setStockMovement(event.target.value as typeof stockMovement)}><option value="issued">Issue stock</option><option value="returned">Record return</option><option value="adjusted">Adjust stock</option></select></label>
+                  <label className="dt-field"><span>Quantity</span><input type="number" required min={stockMovement === 'adjusted' ? '-1000000' : '1'} max="1000000" step="1" value={stockQuantity} onChange={(event) => setStockQuantity(event.target.value)} /></label>
+                </div>
+                <label className="dt-field"><span>Reason (required)</span><input required minLength={3} maxLength={500} value={stockReason} onChange={(event) => setStockReason(event.target.value)} /></label>
+                <p className="dt-stock-safety">Returns reduce partner-held stock. Negative stock balances are rejected.</p>
+                <button className="dt-button dt-button--primary dt-stock-submit" type="submit" disabled={actionBusy || !stockAssignmentId}><Boxes size={14} /> Record stock movement</button>
+              </form> : canEdit
+                ? <p className="dt-empty dt-stock-empty">No campaign assignment is available for this partner.</p>
+                : <p className="dt-view-only"><ShieldCheck size={15} /> Your role has view-only access to stock management.</p>}
+            </section>
+
+            <details className="dt-history-details">
+              <summary>Coin transaction history <ChevronRight size={14} /></summary>
+              {selectedPartner.coinHistory.length
+                ? <div className="dt-history-list">{selectedPartner.coinHistory.map((entry) => <article key={entry.id}><div><strong>{entry.entry_type.replace('_', ' ')}</strong><span>{entry.notes || entry.reference || entry.status} · {formatDate(entry.created_at)}</span>{entry.administrator_id && <small>Admin {entry.administrator_id} · balance {formatNumber(entry.admin_previous_balance || 0)} → {formatNumber(entry.admin_resulting_balance || 0)}</small>}</div><b className={entry.amount < 0 ? 'is-negative' : ''}>{entry.amount > 0 ? '+' : ''}{formatNumber(entry.amount)}</b></article>)}</div>
+                : <p className="dt-empty">No coin transactions recorded.</p>}
+            </details>
+            <details className="dt-history-details">
+              <summary>Stock transaction history <ChevronRight size={14} /></summary>
+              {selectedPartner.stockHistory.length
+                ? <div className="dt-history-list">{selectedPartner.stockHistory.map((entry) => <article key={entry.id}><div><strong>{entry.movement_type.replace('_', ' ')} · {entry.campaign_name || 'Campaign'}</strong><span>{entry.notes} · {formatDate(entry.created_at)}</span>{entry.previous_balance !== null && entry.previous_balance !== undefined && <small>Stock {entry.previous_balance} → {entry.resulting_balance}</small>}</div><b className={entry.quantity < 0 ? 'is-negative' : ''}>{entry.quantity > 0 ? '+' : ''}{formatNumber(entry.quantity)}</b></article>)}</div>
+                : <p className="dt-empty">No stock transactions recorded.</p>}
+            </details>
+          </> : <div className="dt-quick-empty">
+            <UsersRound size={24} aria-hidden="true" />
+            <strong>Select a delivery partner</strong>
+            <span>Choose Manage in the table to view current balances and supported actions.</span>
+          </div>}
+        </aside>
+      </div>
+
+      <section className="dt-panel dt-recent-activity" aria-labelledby="dt-recent-activity-title">
+        <div className="dt-panel-heading dt-recent-heading">
+          <div><h3 id="dt-recent-activity-title"><Activity size={18} /> Recent Activity</h3><p>Latest real submissions, requests and ledger activity.</p></div>
+          <button type="button" className="dt-link-button" onClick={() => setTab('activity')}>View All Activity <ChevronRight size={15} /></button>
         </div>
-      </div>
-      <div className="dt-table-wrap">
-        <table className="dt-table">
-          <thead><tr><th>Partner</th><th>Status</th><th>Available coins</th><th>Remaining stock</th><th>Campaign</th><th>Pending</th><th>Last activity</th><th><span className="dt-sr-only">Manage</span></th></tr></thead>
-          <tbody>
-            {partners.map((partner) => <tr key={partner.id}>
-              <td><div className="dt-partner-name">{partner.full_name}</div><span className="dt-muted">{partner.email} · {partner.mobile_number}</span><small className="dt-id">ID {partner.id}</small></td>
-              <td><span className={`dt-status dt-status--${partner.status}`}>{partner.status}</span></td>
-              <td className="dt-number">{formatNumber(partner.available_coins)}</td>
-              <td><span className={`dt-stock-state ${partner.remaining_stock <= (overview?.lowStockThreshold || 5) ? 'is-low' : ''}`}>
-                {partner.remaining_stock <= 0 ? 'Out of Stock' : partner.remaining_stock <= (overview?.lowStockThreshold || 5) ? `Low · ${formatNumber(partner.remaining_stock)}` : formatNumber(partner.remaining_stock)}
-              </span></td>
-              <td>{partner.campaign_name ? <><strong>{partner.campaign_name}</strong><span className="dt-muted">{partner.campaign_area}</span></> : <span className="dt-muted">Unassigned</span>}</td>
-              <td>{partner.pending_requests > 0 ? <span className="dt-pending-count">{partner.pending_requests}</span> : '—'}</td>
-              <td className="dt-muted">{formatDate(partner.last_activity || partner.last_login_at)}</td>
-              <td><button type="button" className="dt-button dt-button--small" onClick={() => void openPartner(partner)}>Manage</button></td>
-            </tr>)}
-            {!partners.length && <tr><td colSpan={8}><p className="dt-empty">{loading ? 'Loading partners…' : 'No registered partners match this search.'}</p></td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <footer className="dt-pagination">
-        <span>Showing {totalPartners ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, totalPartners)} of {formatNumber(totalPartners)}</span>
-        <div><button type="button" className="dt-icon-button" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={17} /></button>
-          <span>Page {page} of {maxPages}</span>
-          <button type="button" className="dt-icon-button" aria-label="Next page" disabled={page >= maxPages} onClick={() => setPage((current) => Math.min(maxPages, current + 1))}><ChevronRight size={17} /></button></div>
-      </footer>
-    </section>}
+        <ActivityTable items={activity.slice(0, 5)} />
+      </section>
+    </>}
 
     {tab === 'activity' && <section className="dt-panel">
       <div className="dt-panel-heading"><div><h3>Recent activity</h3><p>Latest 100 real proof, stock, request, coin and campaign events.</p></div>
@@ -859,40 +981,5 @@ export function AdminDeliveryTeam({
       <div className="dt-security-note"><ShieldCheck size={18} /><p>Coin and stock changes are permission-checked on the server, written through atomic database functions and preserved in their respective ledgers. The 100,000 NGA Coins withdrawal threshold is unchanged.</p></div>
     </section>}
 
-    {selectedPartner && <Modal title={`Quick Actions · ${selectedPartner.partner.full_name}`} onClose={() => setSelectedPartner(null)}>
-      <div className="dt-partner-modal-body">
-        <div className="dt-partner-summary">
-          <p>{selectedPartner.partner.email} · {selectedPartner.partner.mobile_number}</p>
-          <span className={`dt-status dt-status--${selectedPartner.partner.status}`}>{selectedPartner.partner.status}</span>
-          <small>Partner ID {selectedPartner.partner.id}</small>
-        </div>
-        <div className="dt-balance-cards">
-          <div><span>Available NGA Coins</span><strong>{formatNumber(selectedPartner.coinSummary.balance)}</strong><small>Earned {formatNumber(selectedPartner.coinSummary.totalEarned)} · Withdrawn {formatNumber(selectedPartner.coinSummary.totalWithdrawn)}</small></div>
-          <div><span>Available WildCards</span><strong>{formatNumber(selectedPartner.stockSummary.available)}</strong><small>Issued {formatNumber(selectedPartner.stockSummary.issued)} · Distributed {formatNumber(selectedPartner.stockSummary.distributed)}</small></div>
-        </div>
-        {canEdit && <form className="dt-adjust-form" onSubmit={(event) => void adjustCoins(event)}>
-          <h3><Coins size={17} /> Adjust NGA Coins</h3>
-          <p>Positive values add coins; negative values deduct. Current and resulting balances are confirmed before saving.</p>
-          <div className="dt-two-fields"><label className="dt-field"><span>Adjustment (+ / −)</span><input type="number" required step="1" value={coinAmount} onChange={(event) => setCoinAmount(event.target.value)} placeholder="e.g. 500 or -250" /></label>
-            <label className="dt-field"><span>Reason (required)</span><input required minLength={3} maxLength={500} value={coinReason} onChange={(event) => setCoinReason(event.target.value)} /></label></div>
-          {coinAmount && Number.isSafeInteger(Number(coinAmount)) && <p className="dt-resulting-balance">Resulting balance: {formatNumber(selectedPartner.coinSummary.balance + Number(coinAmount))}</p>}
-          <div className="dt-actions"><button className="dt-button dt-button--primary" type="submit" disabled={actionBusy}><ArrowUp size={15} /> Record adjustment</button><button className="dt-button dt-button--danger" type="button" disabled={actionBusy || selectedPartner.coinSummary.balance <= 0} onClick={() => void resetCoins()}><ArrowDown size={15} /> Reset available to zero</button></div>
-        </form>}
-        {canEdit && <form className="dt-adjust-form" onSubmit={(event) => void manageStock(event)}>
-          <h3><Boxes size={17} /> Manage physical WildCard stock</h3>
-          <div className="dt-two-fields"><label className="dt-field"><span>Campaign assignment</span><select required value={stockAssignmentId} onChange={(event) => setStockAssignmentId(event.target.value)}><option value="">Select campaign</option>{selectedPartner.assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.campaign_name} · {assignment.campaign_status}</option>)}</select></label>
-            <label className="dt-field"><span>Movement</span><select value={stockMovement} onChange={(event) => setStockMovement(event.target.value as typeof stockMovement)}><option value="issued">Issue additional stock</option><option value="returned">Record stock returned</option><option value="adjusted">Record positive adjustment</option></select></label></div>
-          <div className="dt-two-fields"><label className="dt-field"><span>{stockMovement === 'adjusted' ? 'Balance adjustment (+ / − cards)' : 'Quantity (cards)'}</span><input type="number" required min={stockMovement === 'adjusted' ? '-1000000' : '1'} max="1000000" step="1" value={stockQuantity} onChange={(event) => setStockQuantity(event.target.value)} /></label><label className="dt-field"><span>Reason (required)</span><input required minLength={3} maxLength={500} value={stockReason} onChange={(event) => setStockReason(event.target.value)} /></label></div>
-          <p className="dt-muted">Returns reduce partner-held stock. Adjustments can increase or decrease stock; the server rejects any operation that would create a negative balance.</p>
-          <button className="dt-button dt-button--primary" type="submit" disabled={actionBusy || !stockAssignmentId}><Boxes size={15} /> Record stock movement</button>
-        </form>}
-        <section className="dt-history-section"><h3>Complete coin transaction history</h3>
-          {selectedPartner.coinHistory.length ? <div className="dt-history-list">{selectedPartner.coinHistory.map((entry) => <article key={entry.id}><div><strong>{entry.entry_type.replace('_', ' ')}</strong><span>{entry.notes || entry.reference || entry.status} · {formatDate(entry.created_at)}</span>{entry.administrator_id && <small>Admin {entry.administrator_id} · balance {formatNumber(entry.admin_previous_balance || 0)} → {formatNumber(entry.admin_resulting_balance || 0)}</small>}</div><b className={entry.amount < 0 ? 'is-negative' : ''}>{entry.amount > 0 ? '+' : ''}{formatNumber(entry.amount)}</b></article>)}</div> : <p className="dt-empty">No coin transactions recorded.</p>}
-        </section>
-        <section className="dt-history-section"><h3>Complete stock transaction history</h3>
-          {selectedPartner.stockHistory.length ? <div className="dt-history-list">{selectedPartner.stockHistory.map((entry) => <article key={entry.id}><div><strong>{entry.movement_type.replace('_', ' ')} · {entry.campaign_name || 'Campaign'}</strong><span>{entry.notes} · {formatDate(entry.created_at)}</span>{entry.previous_balance !== null && entry.previous_balance !== undefined && <small>Stock {entry.previous_balance} → {entry.resulting_balance}</small>}</div><b className={entry.quantity < 0 ? 'is-negative' : ''}>{entry.quantity > 0 ? '+' : ''}{formatNumber(entry.quantity)}</b></article>)}</div> : <p className="dt-empty">No stock transactions recorded.</p>}
-        </section>
-      </div>
-    </Modal>}
   </div>;
 }
