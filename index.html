@@ -58,6 +58,7 @@
           var tagScript = d.createElement(s);
           var dataLayerQuery = l !== 'dataLayer' ? '&l=' + l : '';
           tagScript.id = 'neargrow-gtm-script';
+          tagScript.addEventListener('load', function () { w.neargrowGtmLoaded = true; });
           tagScript.async = true;
           tagScript.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dataLayerQuery;
           firstScript.parentNode.insertBefore(tagScript, firstScript);

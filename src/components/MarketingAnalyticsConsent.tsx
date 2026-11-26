@@ -34,10 +34,19 @@ export function MarketingAnalyticsConsent({
       page_location: `${window.location.origin}${publicPath}`,
       page_path: publicPath,
     });
-    window.neargrowLoadTagManager?.();
+    const tagManagerScript = document.getElementById('neargrow-gtm-script');
+    if (!tagManagerScript) {
+      window.neargrowLoadTagManager?.();
+      lastTrackedPath.current = publicPath;
+      return;
+    }
+    if (!window.neargrowGtmLoaded) {
+      lastTrackedPath.current = publicPath;
+      return;
+    }
     if (lastTrackedPath.current === publicPath) return;
-    window.dataLayer?.push({
-      event: 'ng_public_page_view',
+    window.gtag?.('event', 'page_view', {
+      page_location: `${window.location.origin}${publicPath}`,
       page_path: publicPath,
     });
     lastTrackedPath.current = publicPath;
