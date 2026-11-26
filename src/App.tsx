@@ -125,6 +125,7 @@ export default function App() {
   const [marketingConsent, setMarketingConsent] = useState<MarketingConsent>(() =>
     typeof window === 'undefined' ? null : readMarketingAnalyticsConsent(),
   );
+  const [cookieSettingsOpen, setCookieSettingsOpen] = useState(false);
 
   useLayoutEffect(() => {
     setReadyTransitionId(transitionId);
@@ -132,6 +133,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentPath.startsWith('/admin') || isCmsPreview) setChatOpen(false);
+    setCookieSettingsOpen(false);
   }, [currentPath, isCmsPreview]);
 
   useLayoutEffect(() => {
@@ -676,7 +678,9 @@ export default function App() {
         consent={marketingConsent}
         enabled={!isCmsPreview}
         onConsentChange={updateMarketingConsent}
+        onCloseSettings={() => setCookieSettingsOpen(false)}
         pathname={currentPath}
+        settingsOpen={cookieSettingsOpen}
       />
       <div
         className={`min-h-screen flex flex-col ${isAdminRoute ? 'bg-white text-[#171A17]' : 'public-website bg-[var(--brand-bg)] text-[var(--brand-text)]'}`}
@@ -704,7 +708,13 @@ export default function App() {
                 <RouteErrorBoundary key={currentPath}>{renderCurrentView()}</RouteErrorBoundary>
               </React.Suspense>
             </main>
-            {!isPartnerAuthRoute && <Footer onNavigate={navigate} siteContent={siteContent} />}
+            {!isPartnerAuthRoute && (
+              <Footer
+                onNavigate={navigate}
+                onOpenCookieSettings={() => setCookieSettingsOpen(true)}
+                siteContent={siteContent}
+              />
+            )}
             {!hidePartnerAuthAssistants && (
               <FloatingAssistant
                 sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}

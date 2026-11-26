@@ -8,10 +8,11 @@ import { followPublicDestination, getCtaDestination, isSafePublicDestination } f
 
 interface FooterProps {
   onNavigate: (path: string) => void;
+  onOpenCookieSettings: () => void;
   siteContent?: SiteContent;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onNavigate, siteContent = DEFAULT_SITE_CONTENT }) => {
+export const Footer: React.FC<FooterProps> = ({ onNavigate, onOpenCookieSettings, siteContent = DEFAULT_SITE_CONTENT }) => {
   const text = (key: string) => publicText(siteContent.copy, key);
   const settings = siteContent.footerSettings;
   const navigateTo = (path: string) => followPublicDestination(path, onNavigate);
@@ -179,6 +180,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, siteContent = DEFAUL
             <span>·</span>
             <button onClick={() => onNavigate('/privacy-policy')} className="hover:text-neutral-300 transition-colors">
               {text('footer.privacy')}
+            </button>
+            <span>·</span>
+            <button onClick={onOpenCookieSettings} className="hover:text-neutral-300 transition-colors">
+              Cookie Settings
             </button>
             <span>·</span>
             <button
