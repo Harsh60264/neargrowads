@@ -637,11 +637,12 @@ export default function App() {
   const normalizedCurrentPath = currentPath.replace(/\/+$/, '') || '/';
   const isPartnerAuthRoute = [
     '/partners/portal-preview',
+    '/partners/dashboard',
     '/partners/login',
     '/partners/register',
     '/partners/recovery',
   ].includes(normalizedCurrentPath);
-  const hidePartnerAuthAssistants = ['/partners/login', '/partners/register'].includes(normalizedCurrentPath);
+  const hidePartnerAuthAssistants = ['/partners/login', '/partners/register', '/partners/dashboard'].includes(normalizedCurrentPath);
 
   return (
     <>

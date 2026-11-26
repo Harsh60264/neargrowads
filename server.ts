@@ -99,6 +99,11 @@ import {
   validatePartnerRegistration,
   buildPartnerAuthRedirect,
 } from './server/partnerAuth';
+import {
+  normalizePartnerProfileUpdate,
+  parsePartnerProofPhoto,
+  summarizePartnerCoins,
+} from './server/partnerWorkspace';
 import { createPublicSitemapHandler } from './server/publicSitemap';
 import { createPublicDynamicPageHandler, PUBLIC_DYNAMIC_PAGE_ROUTE_PATTERNS } from './server/publicDynamicPages';
 import type { ServiceCatalogueCategory } from './src/data/serviceCatalogue';
@@ -3824,6 +3829,223 @@ async function authenticatePartnerSession(req: Request): Promise<PartnerProfile 
   return profile;
 }
 
+async function requirePartnerSession(req: Request, res: Response): Promise<PartnerProfile | undefined> {
+  try {
+    const profile = await authenticatePartnerSession(req);
+    if (!profile) {
+      res.status(401).json({ message: 'Your partner session has expired. Please sign in again.' });
+    }
+    return profile;
+  } catch (error) {
+    console.error('[NearGrow Ads] Partner session verification failed:', error);
+    res.status(503).json({ message: 'Your partner session could not be verified. Please try again.' });
+    return undefined;
+  }
+}
+
+async function readPartnerWorkspaceTable<T>(
+  table: string,
+  parameters: Record<string, string>,
+): Promise<T[]> {
+  const query = new URLSearchParams(parameters);
+  return readSupabaseJson<T[]>(await supabaseAdminRequest(`rest/v1/${table}?${query}`));
+}
+
+function partnerInFilter(ids: readonly string[]): string {
+  return `in.(${ids.join(',')})`;
+}
+
+async function createPartnerProofPhoto(profileId: string, contentType: string, bytes: Buffer): Promise<string> {
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!baseUrl || !serviceKey) throw new Error('Partner proof storage is not configured.');
+  const extension = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg';
+  const objectPath = `${profileId}/${randomUUID()}.${extension}`;
+  const response = await fetch(
+    `${baseUrl}/storage/v1/object/partner-proofs/${objectPath.split('/').map(encodeURIComponent).join('/')}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': contentType,
+        'x-upsert': 'false',
+      },
+      body: new Uint8Array(bytes),
+    },
+  );
+  if (!response.ok) {
+    await response.text();
+    throw new Error(`Partner proof photo upload failed (${response.status}).`);
+  }
+  return objectPath;
+}
+
+async function removePartnerProofPhoto(objectPath: string): Promise<void> {
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!baseUrl || !serviceKey) throw new Error('Partner proof storage is not configured.');
+  const response = await fetch(
+    `${baseUrl}/storage/v1/object/partner-proofs/${objectPath.split('/').map(encodeURIComponent).join('/')}`,
+    { method: 'DELETE', headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+  );
+  if (!response.ok) {
+    await response.text();
+    throw new Error(`Partner proof photo cleanup failed (${response.status}).`);
+  }
+  await response.text();
+}
+
+async function getPartnerProofPhotoUrl(objectPath: string): Promise<string> {
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/+$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!baseUrl || !serviceKey) throw new Error('Partner proof storage is not configured.');
+  const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
+  const signed = await readSupabaseJson<{ signedURL?: string }>(
+    await supabaseAdminRequest(`storage/v1/object/sign/partner-proofs/${encodedPath}`, {
+      method: 'POST',
+      body: JSON.stringify({ expiresIn: 3600 }),
+    }),
+  );
+  if (!signed.signedURL) throw new Error('Supabase did not return a signed partner proof photo URL.');
+  if (/^https:\/\//i.test(signed.signedURL)) return signed.signedURL;
+  const signedPath = signed.signedURL.startsWith('/') ? signed.signedURL : `/${signed.signedURL}`;
+  return `${baseUrl}/storage/v1${signedPath.startsWith('/storage/v1/') ? signedPath.slice('/storage/v1'.length) : signedPath}`;
+}
+
+async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<string, unknown>> {
+  const partnerId = profile.id;
+  const [assignments, proofs, movements, requests, damageReports, ledger, withdrawals] = await Promise.all([
+    readPartnerWorkspaceTable<{
+      id: string; campaign_id: string; daily_target: number; active: boolean; created_at: string;
+    }>('partner_campaign_assignments', {
+      partner_profile_id: `eq.${partnerId}`,
+      active: 'eq.true',
+      select: 'id,campaign_id,daily_target,active,created_at',
+      order: 'created_at.desc',
+      limit: '100',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; assignment_id: string; campaign_id: string; site_id: string; photo_path: string;
+      note: string; latitude: number | null; longitude: number | null; coins: number; status: string;
+      review_note: string; submitted_at: string; reviewed_at: string | null;
+    }>('partner_proofs', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,coins,status,review_note,submitted_at,reviewed_at',
+      order: 'submitted_at.desc',
+      limit: '100',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; assignment_id: string; movement_type: string; quantity: number; notes: string; created_at: string;
+    }>('partner_stock_movements', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,assignment_id,movement_type,quantity,notes,created_at',
+      order: 'created_at.desc',
+      limit: '100',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; assignment_id: string; request_type: string; details: string; status: string;
+      review_note: string; created_at: string;
+    }>('partner_campaign_requests', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,assignment_id,request_type,details,status,review_note,created_at',
+      order: 'created_at.desc',
+      limit: '100',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; assignment_id: string; card_id: string; issue_type: string; details: string;
+      status: string; created_at: string;
+    }>('partner_damage_reports', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,assignment_id,card_id,issue_type,details,status,created_at',
+      order: 'created_at.desc',
+      limit: '100',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; campaign_id: string | null; proof_id: string | null; withdrawal_request_id: string | null;
+      entry_type: 'earning' | 'withdrawal'; amount: number;
+      status: 'pending' | 'approved' | 'rejected' | 'requested' | 'settled';
+      reference: string; notes: string; created_at: string;
+    }>('partner_coin_ledger', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,campaign_id,proof_id,withdrawal_request_id,entry_type,amount,status,reference,notes,created_at',
+      order: 'created_at.desc',
+      limit: '250',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; amount: number; status: string; reference: string; review_note: string; created_at: string;
+    }>('partner_withdrawal_requests', {
+      partner_profile_id: `eq.${partnerId}`,
+      select: 'id,amount,status,reference,review_note,created_at',
+      order: 'created_at.desc',
+      limit: '100',
+    }),
+  ]);
+  const campaignIds = [...new Set(assignments.map((assignment) => assignment.campaign_id))];
+  const campaignFilter = campaignIds.length ? partnerInFilter(campaignIds) : 'in.(00000000-0000-0000-0000-000000000000)';
+  const [campaigns, sites] = campaignIds.length ? await Promise.all([
+    readPartnerWorkspaceTable<{
+      id: string; name: string; description: string; area: string; start_date: string;
+      end_date: string; daily_target: number; coins_per_proof: number; status: string;
+      map_center_latitude: number | null; map_center_longitude: number | null;
+    }>('partner_campaigns', {
+      id: campaignFilter,
+      select: 'id,name,description,area,start_date,end_date,daily_target,coins_per_proof,status,map_center_latitude,map_center_longitude',
+      order: 'start_date.desc',
+    }),
+    readPartnerWorkspaceTable<{
+      id: string; campaign_id: string; name: string; address: string;
+    }>('partner_campaign_sites', {
+      campaign_id: campaignFilter,
+      select: 'id,campaign_id,name,address',
+      order: 'name.asc',
+    }),
+  ]) : [[], []];
+  const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+  const sitesByCampaign = new Map<string, typeof sites>();
+  for (const site of sites) {
+    const campaignSites = sitesByCampaign.get(site.campaign_id) || [];
+    campaignSites.push(site);
+    sitesByCampaign.set(site.campaign_id, campaignSites);
+  }
+  const stockByAssignment = new Map<string, number>();
+  for (const movement of movements) {
+    stockByAssignment.set(movement.assignment_id, (stockByAssignment.get(movement.assignment_id) || 0) + movement.quantity);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const campaignViews = assignments.flatMap((assignment) => {
+    const campaign = campaignById.get(assignment.campaign_id);
+    if (!campaign) return [];
+    const campaignProofs = proofs.filter((proof) => proof.assignment_id === assignment.id);
+    const todayProofs = campaignProofs.filter((proof) => proof.submitted_at.slice(0, 10) === today);
+    return [{
+      assignmentId: assignment.id,
+      dailyTarget: assignment.daily_target,
+      stockAvailable: stockByAssignment.get(assignment.id) || 0,
+      campaign,
+      sites: sitesByCampaign.get(campaign.id) || [],
+      proofs: campaignProofs,
+      deliveriesToday: todayProofs.filter((proof) => proof.status === 'approved').length,
+      submissionsToday: todayProofs.length,
+    }];
+  });
+  const proofViews = await Promise.all(proofs.slice(0, 50).map(async (proof) => ({
+    ...proof,
+    photoUrl: await getPartnerProofPhotoUrl(proof.photo_path),
+  })));
+  return {
+    user: profile,
+    campaigns: campaignViews,
+    proofs: proofViews,
+    stockHistory: movements,
+    requests,
+    damageReports,
+    ledger,
+    withdrawals,
+    coinSummary: summarizePartnerCoins(ledger),
+  };
+}
+
 async function authenticateAdminSession(req: Request): Promise<AdminIdentity | undefined> {
   const token = readAdminSession(req);
   if (!token) return undefined;
@@ -5655,19 +5877,505 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   app.get('/api/partners/dashboard', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
     try {
-      const profile = await authenticatePartnerSession(req);
-      if (!profile) {
-        res.status(401).json({ message: 'Your partner session has expired. Please sign in again.' });
+      const profile = await requirePartnerSession(req, res);
+      if (!profile) return;
+      res.json({ authenticated: true, ...(await loadPartnerWorkspace(profile)) });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner workspace data could not be loaded:', error);
+      res.status(503).json({
+        authenticated: false,
+        message: 'Partner campaign data could not be loaded. Confirm the partner workspace migration is applied and try again.',
+      });
+    }
+  });
+
+  app.patch('/api/partners/profile', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Profile changes must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const update = normalizePartnerProfileUpdate(req.body);
+    if (!update) {
+      res.status(400).json({ message: 'Enter a valid name and mobile number.' });
+      return;
+    }
+    try {
+      await readSupabaseJson<unknown>(await supabaseAdminRequest(
+        `rest/v1/partner_profiles?id=eq.${encodeURIComponent(profile.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ full_name: update.fullName, mobile_number: update.mobileNumber }),
+        },
+      ));
+      const updatedProfile = await readPartnerProfile(profile.id);
+      if (!updatedProfile) throw new Error('The saved partner profile could not be read back.');
+      res.json({ user: updatedProfile });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner profile update failed:', error);
+      res.status(503).json({ message: 'Your profile could not be saved. Please try again.' });
+    }
+  });
+
+  app.post('/api/partners/proofs', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Proofs must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
+      typeof req.body?.siteId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.siteId)) {
+      res.status(400).json({ message: 'Select an assigned campaign and shop.' });
+      return;
+    }
+    const photo = parsePartnerProofPhoto(req.body?.photoDataUrl);
+    if (!photo) {
+      res.status(400).json({ message: 'Capture or select a clear JPEG, PNG, or WebP proof photo up to 2 MB.' });
+      return;
+    }
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+    const latitude = req.body?.latitude === null || req.body?.latitude === undefined
+      ? null
+      : Number(req.body.latitude);
+    const longitude = req.body?.longitude === null || req.body?.longitude === undefined
+      ? null
+      : Number(req.body.longitude);
+    if (note.length > 200 ||
+      ((latitude === null) !== (longitude === null)) ||
+      (latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude! < -180 || longitude! > 180))) {
+      res.status(400).json({ message: 'Check the note and captured location, then try again.' });
+      return;
+    }
+
+    let photoPath: string | undefined;
+    try {
+      photoPath = await createPartnerProofPhoto(profile.id, photo.contentType, photo.bytes);
+      const result = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/submit_partner_proof',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_partner_profile_id: profile.id,
+            p_assignment_id: req.body.assignmentId,
+            p_site_id: req.body.siteId,
+            p_photo_path: photoPath,
+            p_note: note,
+            p_latitude: latitude,
+            p_longitude: longitude,
+          }),
+        },
+      ));
+      res.status(201).json({ submitted: true, proofId: result });
+    } catch (error) {
+      if (photoPath) {
+        try {
+          await removePartnerProofPhoto(photoPath);
+        } catch (cleanupError) {
+          console.error('[NearGrow Ads] Failed to remove an unclaimed partner proof photo:', cleanupError);
+        }
+      }
+      console.error('[NearGrow Ads] Partner proof submission failed:', error);
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      const knownMessage = [
+        'Campaign is not active today',
+        'The selected shop is not part of this campaign',
+        'Daily proof target reached',
+        'No active campaign assignment found',
+      ].find((message) => providerMessage.includes(message));
+      res.status(knownMessage ? 400 : 503).json({
+        message: knownMessage || 'Your proof could not be submitted. Please try again.',
+      });
+    }
+  });
+
+  app.post('/api/partners/campaign-requests', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Campaign requests must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const requestType = req.body?.requestType;
+    const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
+    if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
+      !['additional_stock', 'update_locality', 'material_clarification'].includes(requestType) ||
+      details.length < 3 || details.length > 1000) {
+      res.status(400).json({ message: 'Choose a request type and enter details.' });
+      return;
+    }
+    try {
+      const assignment = await readPartnerWorkspaceTable<{ id: string }>('partner_campaign_assignments', {
+        id: `eq.${req.body.assignmentId}`,
+        partner_profile_id: `eq.${profile.id}`,
+        active: 'eq.true',
+        select: 'id',
+        limit: '1',
+      });
+      if (!assignment.length) {
+        res.status(404).json({ message: 'That campaign is not assigned to your account.' });
         return;
       }
-      res.json({
-        authenticated: true,
-        user: profile,
-        campaigns: [],
-        earnings: [],
-      });
+      await readSupabaseJson<unknown>(await supabaseAdminRequest('rest/v1/partner_campaign_requests', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          assignment_id: req.body.assignmentId,
+          partner_profile_id: profile.id,
+          request_type: requestType,
+          details,
+        }),
+      }));
+      res.status(201).json({ submitted: true });
     } catch (error) {
-      res.status(503).json({ authenticated: false, message: 'The partner dashboard could not be loaded.' });
+      console.error('[NearGrow Ads] Partner campaign request failed:', error);
+      res.status(503).json({ message: 'Your campaign request could not be submitted.' });
+    }
+  });
+
+  app.post('/api/partners/damage-reports', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Damage reports must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const issueType = req.body?.issueType;
+    const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
+    const cardId = typeof req.body?.cardId === 'string' ? req.body.cardId.trim() : '';
+    if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
+      !['damaged', 'lost', 'unusable', 'other'].includes(issueType) ||
+      cardId.length > 80 || details.length > 1000) {
+      res.status(400).json({ message: 'Check the card ID, issue type, and report details.' });
+      return;
+    }
+    try {
+      const assignment = await readPartnerWorkspaceTable<{ id: string }>('partner_campaign_assignments', {
+        id: `eq.${req.body.assignmentId}`,
+        partner_profile_id: `eq.${profile.id}`,
+        active: 'eq.true',
+        select: 'id',
+        limit: '1',
+      });
+      if (!assignment.length) {
+        res.status(404).json({ message: 'That campaign is not assigned to your account.' });
+        return;
+      }
+      await readSupabaseJson<unknown>(await supabaseAdminRequest('rest/v1/partner_damage_reports', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          assignment_id: req.body.assignmentId,
+          partner_profile_id: profile.id,
+          card_id: cardId,
+          issue_type: issueType,
+          details,
+        }),
+      }));
+      res.status(201).json({ submitted: true });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner damage report failed:', error);
+      res.status(503).json({ message: 'Your damage report could not be submitted.' });
+    }
+  });
+
+  app.post('/api/partners/withdrawals', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Withdrawal requests must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const amount = Number(req.body?.amount);
+    if (!Number.isSafeInteger(amount) || amount < 100000) {
+      res.status(400).json({ message: 'The minimum withdrawal is 100000 NGA Coins.' });
+      return;
+    }
+    try {
+      const requestId = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/request_partner_withdrawal',
+        { method: 'POST', body: JSON.stringify({ p_partner_profile_id: profile.id, p_amount: amount }) },
+      ));
+      res.status(201).json({ requested: true, requestId });
+    } catch (error) {
+      console.error('[NearGrow Ads] Partner withdrawal request failed:', error);
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      const message = providerMessage.includes('Insufficient available NGA Coins')
+        ? 'There are not enough available coins for this withdrawal.'
+        : providerMessage.includes('minimum withdrawal')
+          ? 'The minimum withdrawal is 100000 NGA Coins.'
+          : 'Your withdrawal request could not be submitted.';
+      res.status(providerMessage ? 400 : 503).json({ message });
+    }
+  });
+
+  app.get('/api/admin/partner-workspace/review-queue', async (req: Request, res: Response): Promise<void> => {
+    if (!requireOwner(req, res)) return;
+    try {
+      const [proofs, withdrawals, requests, damageReports] = await Promise.all([
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; campaign_id: string; site_id: string;
+          photo_path: string; note: string; coins: number; submitted_at: string;
+        }>('partner_proofs', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,campaign_id,site_id,photo_path,note,coins,submitted_at',
+          order: 'submitted_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; amount: number; created_at: string;
+        }>('partner_withdrawal_requests', {
+          status: 'eq.requested',
+          select: 'id,partner_profile_id,amount,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; request_type: string;
+          details: string; created_at: string;
+        }>('partner_campaign_requests', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,request_type,details,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+        readPartnerWorkspaceTable<{
+          id: string; partner_profile_id: string; assignment_id: string; card_id: string;
+          issue_type: string; details: string; created_at: string;
+        }>('partner_damage_reports', {
+          status: 'eq.pending',
+          select: 'id,partner_profile_id,assignment_id,card_id,issue_type,details,created_at',
+          order: 'created_at.asc',
+          limit: '100',
+        }),
+      ]);
+      const proofViews = await Promise.all(proofs.map(async (proof) => ({
+        ...proof,
+        photoUrl: await getPartnerProofPhotoUrl(proof.photo_path),
+      })));
+      res.json({ proofs: proofViews, withdrawals, requests, damageReports });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner review queue failed:', error);
+      res.status(503).json({ message: 'The partner review queue could not be loaded.' });
+    }
+  });
+
+  app.post('/api/admin/partner-assignments', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Partner campaign assignments must be created from this website.' });
+      return;
+    }
+    if (!requireOwner(req, res)) return;
+    const sites = req.body?.sites;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+    const area = typeof req.body?.area === 'string' ? req.body.area.trim() : '';
+    const partnerProfileId = req.body?.partnerProfileId;
+    const startDate = req.body?.startDate;
+    const endDate = req.body?.endDate;
+    const dailyTarget = Number(req.body?.dailyTarget);
+    const coinsPerProof = Number(req.body?.coinsPerProof);
+    const initialStock = Number(req.body?.initialStock);
+    const mapLatitude = req.body?.mapCenterLatitude === null || req.body?.mapCenterLatitude === undefined
+      ? null : Number(req.body.mapCenterLatitude);
+    const mapLongitude = req.body?.mapCenterLongitude === null || req.body?.mapCenterLongitude === undefined
+      ? null : Number(req.body.mapCenterLongitude);
+    if (typeof partnerProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(partnerProfileId) ||
+      name.length < 2 || name.length > 120 || description.length > 1000 ||
+      area.length < 2 || area.length > 160 ||
+      typeof startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+      typeof endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
+      !Number.isInteger(dailyTarget) || dailyTarget < 1 || dailyTarget > 1000 ||
+      !Number.isInteger(coinsPerProof) || coinsPerProof < 1 || coinsPerProof > 1000000 ||
+      !Number.isInteger(initialStock) || initialStock < 0 || initialStock > 1000000 ||
+      ((mapLatitude === null) !== (mapLongitude === null)) ||
+      (mapLatitude !== null && (!Number.isFinite(mapLatitude) || mapLatitude < -90 || mapLatitude > 90 ||
+        !Number.isFinite(mapLongitude) || mapLongitude! < -180 || mapLongitude! > 180)) ||
+      !Array.isArray(sites) || sites.length < 1 || sites.length > 100 ||
+      sites.some((site: unknown) => !site || typeof site !== 'object' ||
+        typeof (site as Record<string, unknown>).name !== 'string' ||
+        (site as Record<string, unknown>).name!.toString().trim().length < 2 ||
+        (site as Record<string, unknown>).name!.toString().trim().length > 120 ||
+        typeof (site as Record<string, unknown>).address !== 'string' ||
+        (site as Record<string, unknown>).address!.toString().trim().length < 2 ||
+        (site as Record<string, unknown>).address!.toString().trim().length > 240)) {
+      res.status(400).json({ message: 'Enter valid campaign details, target, reward, stock, and at least one shop.' });
+      return;
+    }
+    try {
+      const assignmentId = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/create_partner_campaign_assignment',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_partner_profile_id: partnerProfileId,
+            p_name: name,
+            p_description: description,
+            p_area: area,
+            p_start_date: startDate,
+            p_end_date: endDate,
+            p_daily_target: dailyTarget,
+            p_coins_per_proof: coinsPerProof,
+            p_initial_stock: initialStock,
+            p_map_center_latitude: mapLatitude,
+            p_map_center_longitude: mapLongitude,
+            p_sites: sites.map((site: { name: string; address: string }) => ({
+              name: site.name.trim(),
+              address: site.address.trim(),
+            })),
+            p_owner_id: currentAdmin(res)!.id,
+          }),
+        },
+      ));
+      res.status(201).json({ assigned: true, assignmentId });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner campaign assignment failed:', error);
+      res.status(503).json({ message: 'The campaign could not be assigned. Check the partner and campaign dates.' });
+    }
+  });
+
+  app.post('/api/admin/partner-proofs/:proofId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Proof reviews must be submitted from this website.' });
+      return;
+    }
+    if (!requireOwner(req, res)) return;
+    const { proofId } = req.params;
+    const decision = req.body?.decision;
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    if (!/^[0-9a-f-]{36}$/i.test(proofId) ||
+      !['approved', 'needs_correction', 'rejected'].includes(decision) || reviewNote.length > 500) {
+      res.status(400).json({ message: 'Select a valid proof review outcome and enter a note of 500 characters or fewer.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest('rest/v1/rpc/review_partner_proof', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_proof_id: proofId,
+          p_owner_id: currentAdmin(res)!.id,
+          p_decision: decision,
+          p_review_note: reviewNote,
+        }),
+      }));
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner proof review failed:', error);
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      res.status(providerMessage.includes('No campaign stock is available') ? 409 : 503).json({
+        message: providerMessage.includes('No campaign stock is available')
+          ? 'No stock is available for this campaign. Issue stock before approving the proof.'
+          : 'The proof could not be reviewed.',
+      });
+    }
+  });
+
+  app.post('/api/admin/partner-withdrawals/:requestId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Withdrawal reviews must be submitted from this website.' });
+      return;
+    }
+    if (!requireOwner(req, res)) return;
+    const { requestId } = req.params;
+    const decision = req.body?.decision;
+    const reference = typeof req.body?.reference === 'string' ? req.body.reference.trim() : '';
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    if (!/^[0-9a-f-]{36}$/i.test(requestId) || !['settled', 'rejected'].includes(decision) ||
+      reference.length > 120 || reviewNote.length > 500) {
+      res.status(400).json({ message: 'Select a valid settlement outcome and enter a reference of 120 characters or fewer.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest('rest/v1/rpc/review_partner_withdrawal', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_request_id: requestId,
+          p_owner_id: currentAdmin(res)!.id,
+          p_decision: decision,
+          p_reference: reference,
+          p_review_note: reviewNote,
+        }),
+      }));
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner withdrawal review failed:', error);
+      res.status(503).json({ message: 'The withdrawal could not be settled.' });
+    }
+  });
+
+  app.post('/api/admin/partner-campaign-requests/:requestId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Campaign requests must be reviewed from this website.' });
+      return;
+    }
+    if (!requireOwner(req, res)) return;
+    const { requestId } = req.params;
+    const decision = req.body?.decision;
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    const stockQuantity = Number(req.body?.stockQuantity ?? 0);
+    if (!/^[0-9a-f-]{36}$/i.test(requestId) || !['approved', 'rejected'].includes(decision) ||
+      reviewNote.length > 500 || !Number.isInteger(stockQuantity) ||
+      stockQuantity < 0 || stockQuantity > 1000000) {
+      res.status(400).json({ message: 'Enter a valid request decision, note, and stock quantity.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/review_partner_campaign_request',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_request_id: requestId,
+            p_owner_id: currentAdmin(res)!.id,
+            p_decision: decision,
+            p_review_note: reviewNote,
+            p_stock_quantity: stockQuantity,
+          }),
+        },
+      ));
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner campaign request review failed:', error);
+      res.status(503).json({ message: 'The campaign request could not be reviewed.' });
+    }
+  });
+
+  app.post('/api/admin/partner-damage-reports/:reportId/review', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Damage reports must be reviewed from this website.' });
+      return;
+    }
+    if (!requireOwner(req, res)) return;
+    const { reportId } = req.params;
+    const decision = req.body?.decision;
+    if (!/^[0-9a-f-]{36}$/i.test(reportId) || !['resolved', 'rejected'].includes(decision)) {
+      res.status(400).json({ message: 'Select a valid damage report outcome.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/review_partner_damage_report',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_report_id: reportId,
+            p_owner_id: currentAdmin(res)!.id,
+            p_decision: decision,
+          }),
+        },
+      ));
+      res.json({ reviewed: true, status });
+    } catch (error) {
+      console.error('[NearGrow Ads] Owner partner damage report review failed:', error);
+      res.status(503).json({ message: 'The damage report could not be reviewed.' });
     }
   });
 

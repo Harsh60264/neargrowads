@@ -175,6 +175,40 @@ The exact Cashfree Vercel variables are `CASHFREE_MODE`, `CASHFREE_SANDBOX_ENABL
 
 For rollback, disable the Cashfree environment opt-in and Primary Owner toggle; do not drop the migration, delete attempt/ledger rows, or alter existing Razorpay constraints to roll back application code. If a migration or webhook processing failure occurs, keep checkout disabled and use a forward-only repair after reviewing the schema and failed event metadata. Never run these migrations against Production or Staging without an independently approved rollout.
 
+### Partner Workspace Production migration
+
+The one-time partner workspace migration is `supabase/migrations/20261126120000_create_partner_workspace.sql`, pinned by `scripts/apply-production-partner-workspace-migration.ps1` to SHA-256 `93C004F7B3D4BF772FEBF12804B5C508956AF0CB3C7CABEBB78D9E1239FEE756` and Production project `axbjzmdokfoftzfgwiql`. The process does not create, insert, or modify Supabase migration-history rows; reports must continue to label Migration 20261126120000 history **UNVERIFIED**.
+
+The Free Plan has no scheduled Dashboard backups, so the partner release uses a manual PostgreSQL custom-format archive and a local restore drill; no paid-plan upgrade is required. First run `scripts/backup-production-partner-workspace.ps1 -ProjectRef 'axbjzmdokfoftzfgwiql'`. It prompts privately for the database password, uses TLS hostname verification, stores the timestamped archive outside the repository with a restricted Windows ACL, calculates SHA-256, checks the archive TOC, and restores the entire dump into a disposable PostgreSQL 18 instance listening only on `127.0.0.1`. It records the archive path and verification results in `backup-evidence.json`. The normal release gate requires the full restore to pass; a TOC listing alone is not restore evidence.
+
+```powershell
+pwsh -NoProfile -File .\scripts\backup-production-partner-workspace.ps1 `
+  -ProjectRef 'axbjzmdokfoftzfgwiql'
+```
+
+The archive includes database schemas/data available to `pg_dump`, including `auth.users`, `auth.identities`, their Auth table data, and Storage bucket/object metadata. PostgreSQL archives do not include Storage object bytes, cluster-global roles/memberships/tablespaces, Supabase project settings or Auth provider secrets, API keys, edge-function secrets, or external provider configuration. Recover those separately through their authorized storage/provider/secret-management procedures. The local restore drill verifies database-level recoverability only; it does not prove a full Supabase project can be reconstructed from this archive.
+
+If the local restore fails because the archive requires Supabase-only extensions, do not install extensions, skip them, or edit the archive. Keep the evidence status `FAIL`. A narrowly scoped alternative is available only for this additive partner migration: `-AcknowledgeUnrestoredBackup -Apply` independently verifies the existing archive's age, ACL, SHA-256, TOC coverage and full payload decoding, but prints a distinct **ARCHIVE PASS / RESTORE FAILED** result. It never satisfies or changes the normal full-restore gate. It additionally requires explicit archive review, coverage acknowledgement, an authorized incident route, and a migration-specific `RECOVERY RISK ACKNOWLEDGED` confirmation. The migration history remains **UNVERIFIED**.
+
+The normal `-Apply` path requires full-restore PASS evidence. Both paths preserve the pinned migration hash, TLS/ref guards, read-only schema preflight, exact project and migration confirmations, same-transaction write guard, `lock_timeout`, `statement_timeout`, `ON_ERROR_STOP`, and independent read-only post-verifier. The alternate path is justified only because this migration adds nine partner tables, seven service-role-only RPCs and a private bucket; it does not write existing Auth, Admin, customer, order or payment rows. SQL errors roll back the complete transaction. If the commit outcome is uncertain, run the independent post-verifier and never retry. If verification passes but deployment or runtime later fails, roll the application back to its previous Vercel release and leave the additive database objects and any partner data intact; do not drop tables or restore the archive. No deployment occurs unless the post-verifier passes and separate final approval is given.
+
+PostgreSQL 18 tools and `%APPDATA%\postgresql\root.crt` are required; the database password is entered only at the private `psql` prompt. The default migration-runner mode exits without DDL.
+
+Example read-only preflight, after the backup script prints its evidence path:
+
+```powershell
+pwsh -NoProfile -File .\scripts\apply-production-partner-workspace-migration.ps1 `
+  -ProjectRef 'axbjzmdokfoftzfgwiql' `
+  -BackupEvidencePath '<full path to backup-evidence.json>'
+```
+
+Independent post-migration verification command:
+
+```powershell
+pwsh -NoProfile -File .\scripts\verify-production-partner-workspace-post-migration.ps1 `
+  -ProjectRef 'axbjzmdokfoftzfgwiql'
+```
+
 ## 6. Hosting and deployment
 
 ### Production permanent-delete release preparation
