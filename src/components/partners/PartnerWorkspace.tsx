@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  Activity,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -40,6 +41,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { PartnerProfile } from './partnerTypes';
+import { buildPartnerWorkspaceActivity } from './partnerWorkspaceActivity';
 import './partnerPortalPreview.css';
 
 const sections = [
@@ -272,13 +274,19 @@ function campaignName(data: PartnerWorkspaceData, campaignId: string | null): st
   return data.campaigns.find((assignment) => assignment.campaign.id === campaignId)?.campaign.name || 'Partner activity';
 }
 
+function getInitials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'P';
+}
+
 function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; onNavigate: (section: SectionId) => void }) {
-  const campaign = data.campaigns[0];
+  const campaign = data.campaigns.find((item) => item.campaign.status === 'active') || data.campaigns[0];
   const approved = data.proofs.filter((proof) => proof.status === 'approved');
   const pending = data.proofs.filter((proof) => proof.status === 'pending');
   const dailyTarget = campaign?.dailyTarget || 0;
-  const dailyPercent = dailyTarget ? Math.min(100, Math.round((campaign.deliveriesToday / dailyTarget) * 100)) : 0;
+  const dailyPercent = dailyTarget > 0 ? Math.min(100, Math.round((campaign.deliveriesToday / dailyTarget) * 100)) : 0;
   const recent = data.proofs.slice(0, 5);
+  const activity = useMemo(() => buildPartnerWorkspaceActivity(data).slice(0, 6), [data]);
+  const coinProgress = Math.min(100, Math.round((data.coinSummary.balance / 100000) * 100));
   return (
     <section className="nwg-screen nwg-dashboard-screen" aria-labelledby="partner-workspace-page-title">
       <PageHeading eyebrow="Dashboard" title={`Welcome, ${data.user.fullName.split(/\s+/)[0] || 'Partner'}`}
@@ -302,10 +310,14 @@ function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; on
           <div className="nwg-progress-heading"><div className="nwg-inline-heading"><Gauge size={21} /><strong>Daily progress</strong></div>
             <div className="nwg-progress-numbers"><strong>{campaign ? `${campaign.deliveriesToday} / ${dailyTarget}` : '—'}</strong><span>Deliveries today</span></div>
           </div>
-          <div className="nwg-progress-track" role="progressbar" aria-label="Daily delivery target"
-            aria-valuenow={campaign?.deliveriesToday || 0} aria-valuemin={0} aria-valuemax={dailyTarget || 1}>
-            <span style={{ width: `${dailyPercent}%` }} />
-          </div>
+          {campaign && dailyTarget > 0
+            ? <div className="nwg-progress-track" role="progressbar" aria-label="Daily delivery target"
+              aria-valuenow={campaign.deliveriesToday} aria-valuemin={0} aria-valuemax={dailyTarget}>
+              <span style={{ width: `${dailyPercent}%` }} />
+            </div>
+            : <p className="nwg-muted">{campaign
+              ? 'No daily delivery target is configured for this assignment.'
+              : 'Your daily progress will appear after a campaign is assigned.'}</p>}
           {campaign && campaign.submissionsToday > campaign.deliveriesToday &&
             <p className="nwg-muted">{campaign.submissionsToday - campaign.deliveriesToday} submission(s) awaiting review.</p>}
         </article>
@@ -316,38 +328,91 @@ function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; on
           detail="Available deliveries" tone="soft" />
         <MetricCard icon={CheckCircle2} label="Approved" value={formatNumber(approved.length)} detail="Proofs approved" />
         <MetricCard icon={Clock3} label="Pending" value={formatNumber(pending.length)} detail="Proofs under review" />
-        <div className="nwg-submit-prompt">
-          <button type="button" className="nwg-button nwg-button-primary" onClick={() => onNavigate('proof')}>
-            <Camera size={19} />Submit proof<ArrowRight size={19} />
-          </button>
-          <p>Upload your delivery proof for review and approval.</p>
-        </div>
+        <MetricCard icon={Coins} label="NGA Coins" value={formatNumber(data.coinSummary.balance)} detail="Available balance" />
+      </div>
+      <div className="nwg-dashboard-submit">
+        <div><strong>Finished a WildCard handover?</strong><span>Submit a clear proof photo for campaign-owner review.</span></div>
+        <button type="button" className="nwg-button nwg-button-primary" onClick={() => onNavigate('proof')}>
+          <Camera size={16} />Submit proof<ArrowRight size={15} />
+        </button>
       </div>
 
-      <section className="nwg-card nwg-table-card">
-        <CardHeading icon={Layers} title="Recent deliveries"
-          trailing={<button type="button" className="nwg-link-button" onClick={() => onNavigate('proof')}>View all <ArrowRight size={15} /></button>} />
-        {recent.length ? <div className="nwg-table-scroll"><table className="nwg-table">
-          <thead><tr><th>Delivery ID</th><th>Task / Shop</th><th>Date submitted</th><th>Status</th><th>Reviewed on</th><th>Photo</th></tr></thead>
-          <tbody>{recent.map((proof) => {
-            const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
-            return <tr key={proof.id}>
-              <td><strong>{proof.id.slice(0, 8).toUpperCase()}</strong></td>
-              <td>{site?.name || campaignName(data, proof.campaign_id)}</td>
-              <td>{formatDate(proof.submitted_at)}</td>
-              <td><StatusPill status={proof.status} /></td>
-              <td>{formatDate(proof.reviewed_at)}</td>
-              <td><a className="nwg-photo-link" href={proof.photoUrl} target="_blank" rel="noreferrer">View photo</a></td>
-            </tr>;
-          })}</tbody>
-        </table></div> : <EmptyState icon={FileCheck2} title="No deliveries submitted yet"
-          detail="Submit a proof after completing an assigned campaign delivery." />}
+      <div className="nwg-dashboard-lower">
+        <section className="nwg-card nwg-table-card nwg-recent-deliveries">
+          <CardHeading icon={Layers} title="Recent deliveries"
+            trailing={<button type="button" className="nwg-link-button" onClick={() => onNavigate('proof')}>View all <ArrowRight size={15} /></button>} />
+          {recent.length ? <>
+            <div className="nwg-table-scroll"><table className="nwg-table">
+              <thead><tr><th>Delivery ID</th><th>Task / Shop</th><th>Date submitted</th><th>Status</th><th>Reviewed on</th><th>Photo</th></tr></thead>
+              <tbody>{recent.map((proof) => {
+                const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
+                return <tr key={proof.id}>
+                  <td><strong>{proof.id.slice(0, 8).toUpperCase()}</strong></td>
+                  <td>{site?.name || campaignName(data, proof.campaign_id)}</td>
+                  <td>{formatDate(proof.submitted_at)}</td>
+                  <td><StatusPill status={proof.status} /></td>
+                  <td>{formatDate(proof.reviewed_at)}</td>
+                  <td><a className="nwg-photo-link" href={proof.photoUrl} target="_blank" rel="noreferrer">View photo</a></td>
+                </tr>;
+              })}</tbody>
+            </table></div>
+            <div className="nwg-delivery-cards">{recent.map((proof) => {
+              const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
+              return <article className="nwg-delivery-card" key={proof.id}>
+                <div><strong>{site?.name || campaignName(data, proof.campaign_id)}</strong><StatusPill status={proof.status} /></div>
+                <small>{proof.id.slice(0, 8).toUpperCase()} · {formatDate(proof.submitted_at)}</small>
+                <a className="nwg-photo-link" href={proof.photoUrl} target="_blank" rel="noreferrer">View private proof photo</a>
+              </article>;
+            })}</div>
+          </> : <EmptyState icon={FileCheck2} title="No deliveries submitted yet"
+            detail="Submit a proof after completing an assigned campaign delivery." />}
+        </section>
+        <aside className="nwg-card nwg-quick-summary">
+          <CardHeading icon={BarChart3} title="Quick summary"
+            description="Your current partner workspace totals." />
+          <div className="nwg-summary-balance">
+            <span>Available NGA Coins</span>
+            <strong><Coins size={18} />{formatNumber(data.coinSummary.balance)}</strong>
+            <div className="nwg-summary-progress" role="progressbar" aria-label="Withdrawal threshold progress"
+              aria-valuenow={coinProgress} aria-valuemin={0} aria-valuemax={100}>
+              <span style={{ width: `${coinProgress}%` }} />
+            </div>
+            <small>{coinProgress}% of the 100,000 coin minimum withdrawal threshold</small>
+          </div>
+          <dl className="nwg-summary-list">
+            <div><dt>Total earned</dt><dd>{formatNumber(data.coinSummary.totalEarned)}</dd></div>
+            <div><dt>Pending coin approval</dt><dd>{formatNumber(data.coinSummary.pendingApproval)}</dd></div>
+            <div><dt>Active assignments</dt><dd>{formatNumber(data.campaigns.filter((item) => item.campaign.status === 'active').length)}</dd></div>
+          </dl>
+          <button type="button" className="nwg-button nwg-button-primary nwg-summary-link" onClick={() => onNavigate('earnings')}>
+            <Wallet size={16} />View earnings <ArrowRight size={15} />
+          </button>
+        </aside>
+      </div>
+
+      <section className="nwg-card nwg-activity-card">
+        <CardHeading icon={Activity} title="Recent activity"
+          description="Latest proof, stock, request, damage, and coin ledger updates." />
+        {activity.length ? <div className="nwg-activity-list">{activity.map((item) => (
+          <article className="nwg-activity-row" key={item.id}>
+            <span className="nwg-activity-icon"><Activity size={16} /></span>
+            <div className="nwg-activity-copy"><strong>{item.type}</strong><span>{item.details}</span></div>
+            <time>{formatDate(item.createdAt)}</time><StatusPill status={item.status} />
+          </article>
+        ))}</div> : <EmptyState icon={Activity} title="No activity yet"
+          detail="Your actual proof submissions, stock movements, requests, and coin activity will appear here." />}
       </section>
     </section>
   );
 }
 
 function MapPanel({ campaign }: { campaign?: PartnerCampaign }) {
+  if (!campaign) {
+    return <section className="nwg-card nwg-map-card">
+      <EmptyState icon={MapPin} title="No assigned locations"
+        detail="A campaign map and assigned shops will appear here after an assignment is made." />
+    </section>;
+  }
   const latitude = campaign?.campaign.map_center_latitude;
   const longitude = campaign?.campaign.map_center_longitude;
   const hasMapCenter = typeof latitude === 'number' && typeof longitude === 'number';
@@ -383,6 +448,41 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const campaign = data.campaigns.find((item) => item.assignmentId === selectedId) || data.campaigns[0];
+  const campaignRequests = campaign
+    ? data.requests.filter((request) => request.assignment_id === campaign.assignmentId)
+    : [];
+  const campaignDamageReports = campaign
+    ? data.damageReports.filter((report) => report.assignment_id === campaign.assignmentId)
+    : [];
+  const campaignStockHistory = campaign
+    ? data.stockHistory.filter((movement) => movement.assignment_id === campaign.assignmentId)
+    : [];
+  const pendingCampaignProofs = campaign
+    ? data.proofs.filter((proof) => proof.assignment_id === campaign.assignmentId && proof.status === 'pending').length
+    : 0;
+  const dailyProgress = campaign?.dailyTarget
+    ? Math.min(100, Math.round(campaign.deliveriesToday / campaign.dailyTarget * 100))
+    : 0;
+  const targetMetricValue = campaign
+    ? campaign.dailyTarget > 0 ? `${campaign.deliveriesToday} / ${campaign.dailyTarget}` : formatNumber(campaign.deliveriesToday)
+    : '—';
+  const targetMetricDetail = campaign
+    ? campaign.dailyTarget > 0 ? 'Deliveries today' : 'No target configured'
+    : 'No assigned campaign';
+  const stockRows = useMemo(() => {
+    let balance = 0;
+    return [...campaignStockHistory]
+      .sort((left, right) => {
+        const timeDifference = Date.parse(left.created_at) - Date.parse(right.created_at);
+        return (Number.isNaN(timeDifference) ? 0 : timeDifference) || left.id.localeCompare(right.id);
+      })
+      .map((movement) => {
+        balance += movement.quantity;
+        return { ...movement, balance };
+      })
+      .reverse()
+      .slice(0, 30);
+  }, [campaignStockHistory]);
 
   const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -428,6 +528,15 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
           {data.campaigns.map((item) => <option key={item.assignmentId} value={item.assignmentId}>{item.campaign.name}</option>)}
         </select><ChevronDown size={16} />
       </label>}
+      <div className="nwg-campaign-metrics">
+        <MetricCard icon={Gauge} label="Daily target" value={targetMetricValue} detail={targetMetricDetail} />
+        <MetricCard icon={Package} label="Available stock" value={campaign ? formatNumber(campaign.stockAvailable) : '—'}
+          detail="Physical WildCards" tone="soft" />
+        <MetricCard icon={Store} label="Assigned shops" value={campaign ? formatNumber(campaign.sites.length) : '—'}
+          detail="Approved locations" />
+        <MetricCard icon={Clock3} label="Pending proofs" value={formatNumber(pendingCampaignProofs)}
+          detail="Awaiting review" />
+      </div>
       <div className="nwg-campaign-overview">
         <section className="nwg-card nwg-assignment-card">
           {campaign ? <>
@@ -438,10 +547,21 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
             </div>
             <div className="nwg-assignment-details">
               <div><MapPin size={19} /><span>Locality<strong>{campaign.campaign.area}</strong></span></div>
-              <div><CalendarDays size={19} /><span>Daily target<strong>{campaign.deliveriesToday} / {campaign.dailyTarget}</strong>
-                <span className="nwg-progress-track"><span style={{ width: `${Math.min(100, campaign.deliveriesToday / campaign.dailyTarget * 100)}%` }} /></span></span></div>
+              <div><CalendarDays size={19} /><span>Daily target<strong>{campaign.dailyTarget > 0
+                ? `${campaign.deliveriesToday} / ${campaign.dailyTarget}` : 'Not configured'}</strong>
+                {campaign.dailyTarget > 0 && <span className="nwg-progress-track" role="progressbar"
+                  aria-label="Campaign daily target" aria-valuenow={campaign.deliveriesToday}
+                  aria-valuemin={0} aria-valuemax={campaign.dailyTarget}>
+                  <span style={{ width: `${dailyProgress}%` }} />
+                </span>}</span></div>
               <div><Package size={19} /><span>Stock (WildCards)<strong>{campaign.stockAvailable} available</strong>
                 <small>{campaign.deliveriesToday} delivered today</small></span></div>
+            </div>
+            <div className="nwg-campaign-sites">
+              <strong>Assigned shops ({campaign.sites.length})</strong>
+              {campaign.sites.length ? campaign.sites.map((site) => (
+                <span key={site.id}><MapPin size={14} /><span><strong>{site.name}</strong>{site.address ? ` · ${site.address}` : ''}</span></span>
+              )) : <p>No shops have been assigned to this campaign.</p>}
             </div>
           </> : <EmptyState icon={Megaphone} title="No active campaign assigned"
             detail="Your campaign assignment and delivery locations will show here when they are available." />}
@@ -451,20 +571,20 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
 
       <div className="nwg-campaign-tools">
         <section className="nwg-card nwg-requests-card">
-          <CardHeading icon={Package} title={`Requests (${data.requests.length})`}
+          <CardHeading icon={Package} title={`Requests (${campaignRequests.length})`}
             description="Partner or team requests related to your assigned campaign."
             trailing={campaign && <button type="button" className="nwg-link-button"
               aria-expanded={requestFormOpen} aria-controls="nwg-campaign-request-form"
               onClick={() => setRequestFormOpen((open) => !open)}>
               {requestFormOpen ? 'Cancel' : 'New request'}
             </button>} />
-          {data.requests.length ? <div className="nwg-request-list">{data.requests.slice(0, 5).map((request) => (
+          {campaignRequests.length ? <div className="nwg-request-list">{campaignRequests.slice(0, 5).map((request) => (
             <article key={request.id} className="nwg-request-row">
               <span className="nwg-request-icon">{request.request_type === 'additional_stock' ? <Package size={18} /> : <FileCheck2 size={18} />}</span>
               <div><strong>{request.request_type.replaceAll('_', ' ')}</strong><p>{request.details}</p></div>
               <time>{formatDate(request.created_at)}</time><StatusPill status={request.status} />
             </article>
-          ))}</div> : <p className="nwg-muted nwg-no-records">No requests have been submitted for this campaign.</p>}
+          ))}</div> : campaign && <p className="nwg-muted nwg-no-records">No requests have been submitted for this campaign.</p>}
           {campaign && requestFormOpen && <form id="nwg-campaign-request-form" className="nwg-inline-form"
             onSubmit={(event) => void submitRequest(event)}>
             <label>New request
@@ -480,13 +600,14 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
               <Send size={15} />Send request
             </button>
           </form>}
+          {!campaign && <p className="nwg-muted nwg-no-records">Requests will appear here after you receive a campaign assignment.</p>}
         </section>
 
         <section className="nwg-card nwg-damage-card">
           <CardHeading icon={AlertTriangle} title="Report Damage"
             description="Report a damaged, lost, or unusable WildCard." />
-          {data.damageReports.length > 0 && <div className="nwg-damage-history">
-            {data.damageReports.slice(0, 3).map((report) => <div key={report.id}>
+          {campaignDamageReports.length > 0 && <div className="nwg-damage-history">
+            {campaignDamageReports.slice(0, 3).map((report) => <div key={report.id}>
               <span>{report.card_id || report.issue_type.replaceAll('_', ' ')}</span><StatusPill status={report.status} />
             </div>)}
           </div>}
@@ -511,22 +632,32 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
 
       <section className="nwg-card nwg-table-card nwg-stock-history">
         <CardHeading icon={Package} title="Stock History"
-          description="Track issued, distributed, adjusted, and returned stock for your campaigns." />
-        {data.stockHistory.length ? <div className="nwg-table-scroll"><table className="nwg-table">
+          description={campaign ? `Stock movements for ${campaign.campaign.name}.` : 'Stock movements for your assigned campaigns.'} />
+        {stockRows.length ? <>
+          <div className="nwg-table-scroll"><table className="nwg-table">
           <thead><tr><th>Date & time</th><th>Activity</th><th>Quantity</th><th>Stock balance</th><th>Notes</th></tr></thead>
-          <tbody>{data.stockHistory.slice(0, 30).map((movement) => {
-            const balance = data.stockHistory.filter((item) => item.assignment_id === movement.assignment_id &&
-              item.created_at <= movement.created_at).reduce((sum, item) => sum + item.quantity, 0);
-            return <tr key={movement.id}>
+          <tbody>{stockRows.map((movement) => (
+            <tr key={movement.id}>
               <td>{formatDate(movement.created_at)}</td>
               <td>{movement.movement_type.replaceAll('_', ' ')}</td>
               <td className={movement.quantity < 0 ? 'nwg-negative' : 'nwg-positive'}>
                 {movement.quantity > 0 ? '+' : ''}{movement.quantity}</td>
-              <td>{balance}</td><td>{movement.notes || '—'}</td>
-            </tr>;
-          })}</tbody>
-        </table></div> : <EmptyState icon={Package} title="Stock history is empty"
-          detail="Stock issues and approved deliveries will be recorded here." />}
+              <td>{movement.balance}</td><td>{movement.notes || '—'}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+          <div className="nwg-stock-cards">{stockRows.map((movement) => (
+            <article className="nwg-stock-card" key={movement.id}>
+              <div><strong>{movement.movement_type.replaceAll('_', ' ')}</strong><time>{formatDate(movement.created_at)}</time></div>
+              <p>{movement.notes || 'Stock movement recorded'}</p>
+              <span className={movement.quantity < 0 ? 'nwg-negative' : 'nwg-positive'}>
+                {movement.quantity > 0 ? '+' : ''}{movement.quantity} cards · balance {movement.balance}
+              </span>
+            </article>
+          ))}</div>
+        </> : <EmptyState icon={Package} title="Stock history is empty"
+          detail={campaign ? 'Stock issues and approved deliveries for this campaign will be recorded here.'
+            : 'Stock history will appear when a campaign assignment is available.'} />}
       </section>
     </section>
   );
@@ -858,16 +989,29 @@ function EarningsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRe
         <CardHeading icon={Coins} title="Coin Ledger" description="A record of your recent coin activity."
           trailing={<label className="nwg-search"><Search size={16} /><input type="search" value={query}
             onChange={(event) => setQuery(event.target.value)} placeholder="Search by campaign or note…" /></label>} />
-        {filteredLedger.length ? <div className="nwg-table-scroll"><table className="nwg-table">
+        {filteredLedger.length ? <>
+          <div className="nwg-table-scroll"><table className="nwg-table">
           <thead><tr><th>Date & time</th><th>Activity</th><th>Campaign / reference</th><th>Coins</th><th>Status</th><th>Notes</th></tr></thead>
-          <tbody>{filteredLedger.slice(0, 5).map((entry) => <tr key={entry.id}>
+          <tbody>{filteredLedger.slice(0, 15).map((entry) => <tr key={entry.id}>
             <td>{formatDate(entry.created_at)}</td><td className={entry.amount >= 0 ? 'nwg-positive' : 'nwg-negative'}>
               {entry.amount >= 0 ? <ArrowUp size={14} /> : <ArrowDown size={14} />}{entry.entry_type === 'adjustment' ? 'administrator adjustment' : entry.entry_type}</td>
             <td>{entry.reference || campaignName(data, entry.campaign_id)}</td>
             <td className={entry.amount < 0 ? 'nwg-negative' : 'nwg-positive'}>{entry.amount > 0 ? '+' : ''}{formatNumber(entry.amount)}</td>
             <td><StatusPill status={entry.status} /></td><td>{entry.notes || '—'}</td>
           </tr>)}</tbody>
-        </table></div> : <EmptyState icon={Coins} title={query ? 'No matching ledger entries' : 'No coin activity yet'}
+        </table></div>
+          <div className="nwg-ledger-cards">{filteredLedger.slice(0, 15).map((entry) => (
+            <article className="nwg-ledger-card-row" key={entry.id}>
+              <div><strong>{entry.entry_type === 'adjustment' ? 'Administrator adjustment' : entry.entry_type}</strong>
+                <StatusPill status={entry.status} /></div>
+              <p>{entry.reference || campaignName(data, entry.campaign_id)}</p>
+              <small>{formatDate(entry.created_at)}{entry.notes ? ` · ${entry.notes}` : ''}</small>
+              <b className={entry.amount < 0 ? 'nwg-negative' : 'nwg-positive'}>
+                {entry.amount > 0 ? '+' : ''}{formatNumber(entry.amount)} NGA Coins
+              </b>
+            </article>
+          ))}</div>
+        </> : <EmptyState icon={Coins} title={query ? 'No matching ledger entries' : 'No coin activity yet'}
           detail={query ? 'Try another search term.' : 'Approved proof rewards and withdrawal activity will appear here.'} />}
       </section>
     </section>
@@ -904,7 +1048,7 @@ function ProfileSection({ data, onProfileUpdated }: {
         description="Manage your partner profile, get help, and follow the handover guide for smooth campaign execution." />
       <div className="nwg-profile-top">
         <section className="nwg-card nwg-profile-summary">
-          <span className="nwg-profile-avatar"><UserRound size={31} /></span>
+          <span className="nwg-profile-avatar" aria-hidden="true">{getInitials(data.user.fullName)}</span>
           <div><h2>{data.user.fullName}</h2><p>Partner ID: {data.user.id.slice(0, 8).toUpperCase()}
             <span className="nwg-separator">|</span><StatusPill status={data.user.status} /></p></div>
           <button className="nwg-button nwg-button-secondary" type="button" onClick={() => { setEditing((current) => !current); setError(''); }}>
@@ -973,6 +1117,7 @@ function ProfileSection({ data, onProfileUpdated }: {
 }
 
 export function PartnerWorkspace({
+  profile,
   logoutError,
   onLogout,
   busy,
@@ -996,7 +1141,9 @@ export function PartnerWorkspace({
     try {
       const data = await partnerApi<PartnerWorkspaceData & PartnerApiResponse>('/api/partners/dashboard');
       if (!Array.isArray(data.campaigns) || !Array.isArray(data.proofs) ||
-        !Array.isArray(data.ledger) || !data.coinSummary || !data.user) {
+        !Array.isArray(data.stockHistory) || !Array.isArray(data.requests) ||
+        !Array.isArray(data.damageReports) || !Array.isArray(data.ledger) ||
+        !Array.isArray(data.withdrawals) || !data.coinSummary || !data.user) {
         throw new Error('The partner workspace response was incomplete.');
       }
       setWorkspace(data);
@@ -1111,6 +1258,15 @@ export function PartnerWorkspace({
             <div className="partner-workspace-topline-brand">
               <span className="partner-preview-app-name">NearGrow <strong>WildCard</strong></span>
               <span className="partner-preview-app-caption">Partner workspace</span>
+            </div>
+            <div className="partner-workspace-account">
+              <span className="partner-workspace-account-avatar" aria-hidden="true">
+                {getInitials(workspace?.user.fullName || profile.fullName)}
+              </span>
+              <span className="partner-workspace-account-copy">
+                <strong>{workspace?.user.fullName || profile.fullName}</strong>
+                <small>Delivery partner</small>
+              </span>
             </div>
             <button type="button" onClick={onLogout} disabled={busy} className="partner-workspace-logout">
               <LogOut aria-hidden="true" size={15} /> Log out
