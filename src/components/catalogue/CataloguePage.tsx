@@ -41,6 +41,7 @@ import type { CustomerLocation } from '../../data/customerLocation';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../../data/siteContent';
 import { resolveCanonicalPageOrigin } from '../../data/siteCanonical';
 import { publicText } from '../../data/publicCopy';
+import { loadCashfreeCheckout } from '../../data/cashfreeSdk';
 import {
   cashfreeCustomerPaymentStatus,
   cashfreeAvailabilityMode,
@@ -99,25 +100,13 @@ interface RazorpayCheckoutOptions {
   modal: { ondismiss: () => void };
 }
 
-interface CashfreeCheckoutResult {
-  error?: { message?: string };
-  redirect?: boolean;
-  paymentDetails?: Record<string, unknown>;
-}
-
-interface CashfreeCheckoutClient {
-  checkout(options: { paymentSessionId: string; redirectTarget: '_modal' }): Promise<CashfreeCheckoutResult>;
-}
-
 declare global {
   interface Window {
     Razorpay?: new (options: RazorpayCheckoutOptions) => { open: () => void };
-    Cashfree?: (options: { mode: CashfreeCheckoutMode }) => CashfreeCheckoutClient;
   }
 }
 
 let razorpayScriptPromise: Promise<void> | null = null;
-let cashfreeScriptPromise: Promise<void> | null = null;
 
 function loadRazorpayCheckout(): Promise<void> {
   if (window.Razorpay) return Promise.resolve();
@@ -135,24 +124,6 @@ function loadRazorpayCheckout(): Promise<void> {
     throw error;
   });
   return razorpayScriptPromise;
-}
-
-function loadCashfreeCheckout(): Promise<void> {
-  if (window.Cashfree) return Promise.resolve();
-  if (cashfreeScriptPromise) return cashfreeScriptPromise;
-  const loading = new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
-    script.async = true;
-    script.onload = () => window.Cashfree ? resolve() : reject(new Error('Cashfree checkout did not initialize.'));
-    script.onerror = () => reject(new Error('Cashfree checkout could not be loaded. Please try again.'));
-    document.head.append(script);
-  });
-  cashfreeScriptPromise = loading.catch((error: unknown) => {
-    cashfreeScriptPromise = null;
-    throw error;
-  });
-  return cashfreeScriptPromise;
 }
 
 interface CashfreeReturnState {

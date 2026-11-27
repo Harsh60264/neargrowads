@@ -8,7 +8,11 @@ import {
   createCashfreeOrderHandler,
   createCashfreeWebhookHandler,
 } from './server/cashfreePaymentRoutes.ts';
-import { enrichCashfreeAdminOrders, readCashfreeGatewayReadiness } from './server/cashfreeAdmin.ts';
+import {
+  enrichCashfreeAdminOrders,
+  isCashfreeProductionCheckoutReady,
+  readCashfreeGatewayReadiness,
+} from './server/cashfreeAdmin.ts';
 import {
   inspectCashfreeEnvironment,
   resolveCashfreeEnvironment,
@@ -20,6 +24,15 @@ import {
   validateServiceOrder,
   type ServiceOrderInput,
 } from './server/serviceOrders.ts';
+import {
+  LOCALDROP_WILDCARD_AMOUNT_PAISE,
+  LOCALDROP_WILDCARD_PACKAGE_CODE,
+  LOCALDROP_WILDCARD_QUANTITY,
+  isLocalDropWildcardLineItems,
+  prepareLocalDropBusinessPurchase,
+  persistLocalDropBusinessOrder,
+  sendLocalDropBusinessOrderConfirmation,
+} from './server/localDropBusinessOrders.ts';
 import { validateCustomerLocation, type CustomerLocation } from './src/data/customerLocation';
 import {
   getGtmNoscriptRedirectLocation,
@@ -4574,6 +4587,8 @@ function requiredAdminPermission(req: Request): { section: AdminSection; action:
   if (pathName === '/delivery-team/overview' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
   if (pathName === '/delivery-team/partners' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
   if (/^\/delivery-team\/partners\/[0-9a-f-]+$/i.test(pathName) && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (pathName === '/delivery-team/business-orders' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (/^\/delivery-team\/business-orders\/[0-9a-f-]+\/fulfillment$/i.test(pathName) && req.method === 'PATCH') return { section: 'deliveryTeam', action: 'edit' };
   if (/^\/delivery-team\/partners\/[0-9a-f-]+\/coins$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (pathName === '/delivery-team/stock' && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (pathName === '/delivery-team/campaigns' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
@@ -7083,6 +7098,163 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       console.error('[NearGrow Ads] Delivery Team campaigns failed:', error);
       res.status(503).json({ message: 'WildCard campaigns could not be loaded.' });
+    }
+  });
+
+  app.get('/api/admin/delivery-team/business-orders', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const searchTerm = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100).toLowerCase() : '';
+    const paymentStatus = typeof req.query.paymentStatus === 'string' ? req.query.paymentStatus : 'all';
+    if (!['all', 'pending', 'paid', 'failed', 'refunded'].includes(paymentStatus)) {
+      res.status(400).json({ message: 'Choose a valid business order payment status.' });
+      return;
+    }
+    try {
+      const businessRows = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(
+          'rest/v1/wildcard_business_orders?select=id,service_order_id,business_address,preferred_promotion_areas,purchase_terms_version,purchase_terms_accepted_at,fulfillment_status,confirmation_email_sent_at,created_at,updated_at&order=created_at.desc&limit=1000',
+        ),
+      );
+      const serviceOrderIds = businessRows
+        .map((row) => row.service_order_id)
+        .filter((id): id is string => typeof id === 'string' && isUuid(id));
+      const orders = serviceOrderIds.length
+        ? await servicePackageResponse<Record<string, unknown>[]>(
+          await supabaseAdminRequest(`rest/v1/service_orders?${new URLSearchParams({
+            select: 'id,order_reference,customer_name,customer_email,customer_phone,customer_business_name,customer_onboarding_notes,line_items,total_amount_paise,currency,provider,provider_mode,provider_order_id,cashfree_order_id,provider_payment_id,payment_status,paid_at,created_at,customer_location_latitude,customer_location_longitude,customer_location_accuracy_meters,customer_location_captured_at,customer_location_consent',
+            id: `in.(${serviceOrderIds.join(',')})`,
+            limit: '1000',
+          })}`),
+        )
+        : [];
+      const ordersById = new Map(orders.map((order) => [String(order.id), order]));
+      let businessOrders = businessRows.flatMap((businessOrder) => {
+        const serviceOrderId = typeof businessOrder.service_order_id === 'string'
+          ? businessOrder.service_order_id
+          : '';
+        const order = ordersById.get(serviceOrderId);
+        const lineItems = Array.isArray(order?.line_items) ? order.line_items : [];
+        const amountPaise = Number(order?.total_amount_paise);
+        if (!order || order.provider !== 'cashfree' || order.currency !== 'INR' ||
+          amountPaise !== LOCALDROP_WILDCARD_AMOUNT_PAISE ||
+          !isLocalDropWildcardLineItems(lineItems) ||
+          typeof businessOrder.id !== 'string' ||
+          typeof businessOrder.business_address !== 'string') return [];
+        const payment = ['pending', 'paid', 'failed', 'refunded'].includes(String(order.payment_status))
+          ? String(order.payment_status)
+          : 'pending';
+        const result = {
+          id: businessOrder.id,
+          orderReference: String(order.order_reference || ''),
+          customerName: String(order.customer_name || ''),
+          businessName: String(order.customer_business_name || ''),
+          email: String(order.customer_email || ''),
+          mobileNumber: String(order.customer_phone || ''),
+          businessAddress: businessOrder.business_address,
+          location: readCustomerLocation(order) || null,
+          preferredPromotionAreas: String(businessOrder.preferred_promotion_areas || ''),
+          quantity: LOCALDROP_WILDCARD_QUANTITY,
+          amountPaise,
+          providerOrderReference: String(order.provider_order_id || ''),
+          cashfreeOrderId: typeof order.cashfree_order_id === 'string' ? order.cashfree_order_id : null,
+          cashfreePaymentReference: typeof order.provider_payment_id === 'string' ? order.provider_payment_id : null,
+          paymentStatus: payment,
+          providerMode: String(order.provider_mode || ''),
+          fulfillmentStatus: String(businessOrder.fulfillment_status || 'pending'),
+          purchaseTermsVersion: String(businessOrder.purchase_terms_version || ''),
+          purchaseTermsAcceptedAt: String(businessOrder.purchase_terms_accepted_at || ''),
+          confirmationEmailSentAt: typeof businessOrder.confirmation_email_sent_at === 'string'
+            ? businessOrder.confirmation_email_sent_at
+            : null,
+          createdAt: String(order.created_at || businessOrder.created_at || ''),
+          paidAt: typeof order.paid_at === 'string' ? order.paid_at : null,
+          additionalNote: String(order.customer_onboarding_notes || ''),
+        };
+        if (paymentStatus !== 'all' && result.paymentStatus !== paymentStatus) return [];
+        if (searchTerm && ![
+          result.orderReference,
+          result.customerName,
+          result.businessName,
+          result.email,
+          result.mobileNumber,
+          result.businessAddress,
+          result.preferredPromotionAreas,
+          result.additionalNote,
+        ].some((value) => value.toLowerCase().includes(searchTerm))) return [];
+        return [result];
+      });
+      businessOrders = businessOrders.slice(0, 1000);
+      res.json({ orders: businessOrders });
+    } catch (error) {
+      console.error('[NearGrow Ads] WildCard business orders could not be loaded.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'WildCard Business Orders could not be loaded.' });
+    }
+  });
+
+  app.patch('/api/admin/delivery-team/business-orders/:id/fulfillment', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Business order fulfilment must be changed from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    const businessOrderId = req.params.id;
+    const fulfillmentStatus = req.body?.fulfillmentStatus;
+    if (!isUuid(businessOrderId) || typeof fulfillmentStatus !== 'string' ||
+      !['pending', 'processing', 'in_distribution', 'completed'].includes(fulfillmentStatus)) {
+      res.status(400).json({ message: 'Choose a valid WildCard business order and fulfilment status.' });
+      return;
+    }
+    try {
+      const previousRows = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/wildcard_business_orders?${new URLSearchParams({
+          select: 'id,service_order_id,fulfillment_status',
+          id: `eq.${businessOrderId}`,
+          limit: '1',
+        })}`),
+      );
+      const previous = previousRows[0];
+      if (!previous || typeof previous.service_order_id !== 'string') {
+        res.status(404).json({ message: 'WildCard business order could not be found.' });
+        return;
+      }
+      const updatedStatus = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_update_localdrop_business_order_fulfillment',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_business_order_id: businessOrderId,
+            p_fulfillment_status: fulfillmentStatus,
+          }),
+        },
+      ));
+      await writeAdminAudit(identity.id, 'wildcard_business_order.fulfillment_updated', 'deliveryTeam', businessOrderId, {
+        oldStatus: previous.fulfillment_status,
+        newStatus: updatedStatus,
+      });
+      res.json({ updated: true, fulfillmentStatus: updatedStatus });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] WildCard business order fulfilment update failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(providerMessage ? 409 : 503).json({
+        message: providerMessage
+          ? 'Only verified Production payments may enter fulfilment. Refresh the order and try again.'
+          : 'Business order fulfilment status could not be updated.',
+      });
     }
   });
 
@@ -12188,6 +12360,194 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     allowOrder: (req, res) => serviceOrderRateLimit(req as Request, res as Response),
   }));
 
+  app.post('/api/partners/localdrop/cashfree/orders', createCashfreeOrderHandler({
+    getConfig: () => getCashfreeConfig(),
+    getReadiness: cashfreeGatewayReadiness,
+    getReturnUrl: (orderReference) => {
+      const returnUrl = new URL('/partners/localdrop', canonicalSiteOrigin());
+      returnUrl.searchParams.set('cashfree_business_order_id', orderReference);
+      return returnUrl.toString();
+    },
+    returnUrlPath: '/partners/localdrop',
+    returnUrlQueryParameter: 'cashfree_business_order_id',
+    providerOrderNote: 'NearGrow WildCard Business Package',
+    databaseRequest: supabaseAdminRequest,
+    allowOrder: (req, res) => {
+      if (!isSameOriginRequest(req as Request)) {
+        res.status(403).json({ message: 'WildCard checkout must be started from this website.' });
+        return false;
+      }
+      return serviceOrderRateLimit(req as Request, res as Response);
+    },
+    prepareOrder: (value) => {
+      const purchase = prepareLocalDropBusinessPurchase(value);
+      if (!purchase) return undefined;
+      return {
+        input: purchase.orderInput,
+        lineItems: purchase.lineItems,
+        amountPaise: purchase.amountPaise,
+        fingerprint: purchase.fingerprint,
+        persistDetails: (serviceOrderId) =>
+          persistLocalDropBusinessOrder(serviceOrderId, purchase, supabaseAdminRequest),
+      };
+    },
+  }));
+
+  app.post('/api/partners/localdrop/orders/:reference/track', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const reference = req.params.reference;
+    const token = req.body?.trackingToken;
+    if (!isSameOriginRequest(req) || !/^NGO-[A-F0-9]{24}$/.test(reference) ||
+      typeof token !== 'string' || !/^[A-Za-z0-9_-]{32,100}$/.test(token)) {
+      res.status(404).json({ message: 'Order tracking details are invalid or unavailable.' });
+      return;
+    }
+    if (!serviceOrderRateLimit(req, res)) return;
+    try {
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const orderParams = new URLSearchParams({
+        select: 'id,order_reference,provider,provider_mode,payment_status,total_amount_paise,currency,line_items,created_at,paid_at',
+        order_reference: `eq.${reference}`,
+        tracking_token_hash: `eq.${tokenHash}`,
+        limit: '1',
+      });
+      const orders = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/service_orders?${orderParams}`),
+      );
+      const order = orders[0];
+      const lineItems = Array.isArray(order?.line_items) ? order.line_items : [];
+      const item = lineItems[0] && typeof lineItems[0] === 'object'
+        ? lineItems[0] as Record<string, unknown>
+        : undefined;
+      if (!order || order.provider !== 'cashfree' || order.currency !== 'INR' ||
+        Number(order.total_amount_paise) !== LOCALDROP_WILDCARD_AMOUNT_PAISE ||
+        lineItems.length !== 1 || item?.packageCode !== LOCALDROP_WILDCARD_PACKAGE_CODE ||
+        item.quantity !== LOCALDROP_WILDCARD_QUANTITY) {
+        res.status(404).json({ message: 'Order tracking details are invalid or unavailable.' });
+        return;
+      }
+      const businessParams = new URLSearchParams({
+        select: 'fulfillment_status',
+        service_order_id: `eq.${String(order.id)}`,
+        limit: '1',
+      });
+      const businessRows = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/wildcard_business_orders?${businessParams}`),
+      );
+      if (!businessRows[0]) {
+        res.status(404).json({ message: 'Order tracking details are invalid or unavailable.' });
+        return;
+      }
+      let attemptStatus: string | null = null;
+      if (order.payment_status === 'pending') {
+        const attemptParams = new URLSearchParams({
+          select: 'payment_status',
+          service_order_id: `eq.${String(order.id)}`,
+          order: 'last_seen_at.desc,id.desc',
+          limit: '1',
+        });
+        const attempts = await servicePackageResponse<Record<string, unknown>[]>(
+          await supabaseAdminRequest(`rest/v1/cashfree_payment_attempts?${attemptParams}`),
+        );
+        attemptStatus = typeof attempts[0]?.payment_status === 'string'
+          ? attempts[0].payment_status
+          : null;
+      }
+      res.json({
+        orderReference: reference,
+        providerMode: order.provider_mode,
+        paymentStatus: order.payment_status,
+        cashfreeAttemptStatus: attemptStatus,
+        quantity: LOCALDROP_WILDCARD_QUANTITY,
+        amountPaise: LOCALDROP_WILDCARD_AMOUNT_PAISE,
+        currency: 'INR',
+        fulfillmentStatus: businessRows[0].fulfillment_status,
+        createdAt: order.created_at,
+        paidAt: order.paid_at,
+      });
+    } catch (error) {
+      console.error('[NearGrow Ads] WildCard business order status lookup failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'Order status is temporarily unavailable.' });
+    }
+  });
+
+  app.post('/api/partners/localdrop/orders/:reference/checkout-session', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    const reference = req.params.reference;
+    const token = req.body?.trackingToken;
+    if (!isSameOriginRequest(req) || !/^NGO-[A-F0-9]{24}$/.test(reference) ||
+      typeof token !== 'string' || !/^[A-Za-z0-9_-]{32,100}$/.test(token)) {
+      res.status(404).json({ message: 'Checkout recovery details are invalid or unavailable.' });
+      return;
+    }
+    if (!serviceOrderRateLimit(req, res)) return;
+    try {
+      const config = getCashfreeConfig('production');
+      const readiness = await cashfreeGatewayReadiness();
+      if (!config || !isCashfreeProductionCheckoutReady(readiness)) {
+        res.status(503).json({ message: 'Cashfree Production checkout is unavailable. Check the order status again later.' });
+        return;
+      }
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const orderParams = new URLSearchParams({
+        select: 'id,order_reference,provider,provider_mode,payment_status,total_amount_paise,line_items,payment_session_id,tracking_token_hash',
+        order_reference: `eq.${reference}`,
+        tracking_token_hash: `eq.${tokenHash}`,
+        limit: '1',
+      });
+      const orders = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/service_orders?${orderParams}`),
+      );
+      const order = orders[0];
+      if (!order || order.provider !== 'cashfree' || order.provider_mode !== 'live' ||
+        order.payment_status !== 'pending' ||
+        Number(order.total_amount_paise) !== LOCALDROP_WILDCARD_AMOUNT_PAISE ||
+        !isLocalDropWildcardLineItems(order.line_items) ||
+        typeof order.payment_session_id !== 'string' || !order.payment_session_id.trim()) {
+        res.status(409).json({ message: 'This order is not eligible to resume checkout. Refresh the payment status.' });
+        return;
+      }
+      const businessParams = new URLSearchParams({
+        select: 'id',
+        service_order_id: `eq.${String(order.id)}`,
+        limit: '1',
+      });
+      const businessRows = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/wildcard_business_orders?${businessParams}`),
+      );
+      if (!businessRows[0]) {
+        res.status(404).json({ message: 'Checkout recovery details are invalid or unavailable.' });
+        return;
+      }
+      const attemptParams = new URLSearchParams({
+        select: 'payment_status',
+        service_order_id: `eq.${String(order.id)}`,
+        order: 'last_seen_at.desc,id.desc',
+        limit: '1',
+      });
+      const attempts = await servicePackageResponse<Record<string, unknown>[]>(
+        await supabaseAdminRequest(`rest/v1/cashfree_payment_attempts?${attemptParams}`),
+      );
+      if (['SUCCESS', 'PENDING'].includes(String(attempts[0]?.payment_status || ''))) {
+        res.status(409).json({ message: 'A payment attempt may still be processing. Check the order status before retrying.' });
+        return;
+      }
+      res.json({
+        orderReference: reference,
+        paymentSessionId: order.payment_session_id,
+        mode: 'production',
+        realPaymentsEnabled: true,
+      });
+    } catch (error) {
+      console.error('[NearGrow Ads] WildCard business checkout recovery failed.', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      res.status(503).json({ message: 'The existing checkout could not be resumed. Check the order status before retrying.' });
+    }
+  });
+
   app.post('/api/catalogue/orders/:reference/track', async (req: Request, res: Response): Promise<void> => {
     const reference = req.params.reference;
     const token = req.body?.trackingToken;
@@ -12303,15 +12663,73 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  const sendVerifiedLocalDropBusinessOrderEmail = async (verified: {
+    id: string;
+    orderReference: string;
+    providerMode: string;
+    lineItems: unknown;
+    amountPaise: number;
+  }): Promise<void> => {
+    if (verified.providerMode !== 'live' || !isLocalDropWildcardLineItems(verified.lineItems) ||
+      verified.amountPaise !== LOCALDROP_WILDCARD_AMOUNT_PAISE) return;
+    const businessParams = new URLSearchParams({
+      select: 'id,confirmation_email_sent_at',
+      service_order_id: `eq.${verified.id}`,
+      limit: '1',
+    });
+    const businessRows = await servicePackageResponse<Record<string, unknown>[]>(
+      await supabaseAdminRequest(`rest/v1/wildcard_business_orders?${businessParams}`),
+    );
+    const businessOrder = businessRows[0];
+    if (!businessOrder || typeof businessOrder.id !== 'string') {
+      throw new Error('Verified WildCard business order details are unavailable.');
+    }
+    if (typeof businessOrder.confirmation_email_sent_at === 'string') return;
+
+    const orderParams = new URLSearchParams({
+      select: 'order_reference,customer_name,customer_email,customer_business_name,payment_status,provider_mode,total_amount_paise',
+      id: `eq.${verified.id}`,
+      limit: '1',
+    });
+    const orders = await servicePackageResponse<Record<string, unknown>[]>(
+      await supabaseAdminRequest(`rest/v1/service_orders?${orderParams}`),
+    );
+    const order = orders[0];
+    if (!order || order.order_reference !== verified.orderReference ||
+      order.payment_status !== 'paid' || order.provider_mode !== 'live' ||
+      Number(order.total_amount_paise) !== LOCALDROP_WILDCARD_AMOUNT_PAISE ||
+      typeof order.customer_name !== 'string' || typeof order.customer_email !== 'string' ||
+      typeof order.customer_business_name !== 'string') {
+      throw new Error('The verified WildCard business order does not match the payment.');
+    }
+    await sendLocalDropBusinessOrderConfirmation({
+      orderReference: verified.orderReference,
+      customerName: order.customer_name,
+      customerEmail: order.customer_email,
+      businessName: order.customer_business_name,
+    }, process.env.RESEND_API_KEY || '',
+    process.env.ORDER_CONFIRMATION_EMAIL_FROM || process.env.ADMIN_INVITATION_EMAIL_FROM || '');
+    const markSentResponse = await supabaseAdminRequest(
+      `rest/v1/wildcard_business_orders?id=eq.${encodeURIComponent(businessOrder.id)}&confirmation_email_sent_at=is.null`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ confirmation_email_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+      },
+    );
+    if (!markSentResponse.ok) throw new Error('Purchase confirmation email status could not be saved.');
+  };
+
   app.post('/api/payments/cashfree/test-webhook', createCashfreeWebhookHandler({
     mode: 'sandbox',
     getConfig: () => getCashfreeConfig('sandbox'),
     databaseRequest: supabaseAdminRequest,
+    onPaymentVerified: sendVerifiedLocalDropBusinessOrderEmail,
   }));
   app.post('/api/payments/cashfree/production-webhook', createCashfreeWebhookHandler({
     mode: 'production',
     getConfig: () => getCashfreeConfig('production'),
     databaseRequest: supabaseAdminRequest,
+    onPaymentVerified: sendVerifiedLocalDropBusinessOrderEmail,
   }));
 
   app.get('/api/admin/payment-settings', async (req: Request, res: Response): Promise<void> => {

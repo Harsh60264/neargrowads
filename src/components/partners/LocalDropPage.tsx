@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, CircleHelp, Layers3, MapPin, Play, RotateCcw, Truck, UploadCloud, Wallet } from 'lucide-react';
 import { getLeadTracking } from '../../data/leadTracking';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
+import { LocalDropBusinessPurchase } from './LocalDropBusinessPurchase';
 import './localDrop.css';
 
 interface LocalDropPageProps {
@@ -191,8 +192,10 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
               <button type="button" aria-pressed={interestKind === 'partner'} onClick={() => setInterestKind('partner')}>Delivery partner</button>
               <button type="button" aria-pressed={interestKind === 'business'} onClick={() => setInterestKind('business')}>Local business</button>
             </div>
-            <h3>{interestKind === 'partner' ? 'Become a delivery partner' : 'Explore a local campaign'}</h3>
-            <InterestForm key={interestKind} kind={interestKind} />
+            <h3>{interestKind === 'partner' ? 'Become a delivery partner' : 'Grow Your Business with NearGrow WildCard'}</h3>
+            {interestKind === 'partner'
+              ? <InterestForm key={interestKind} kind={interestKind} />
+              : <LocalDropBusinessPurchase />}
           </div>
         </div>
       </section>

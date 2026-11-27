@@ -2392,3 +2392,110 @@
     width: 56px;
   }
 }
+
+.dt-business-orders-heading {
+  align-items: flex-start;
+}
+
+.dt-business-order-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.dt-business-order-list {
+  display: grid;
+  gap: 14px;
+}
+
+.dt-business-order-card {
+  min-width: 0;
+  border: 1px solid var(--dt-border);
+  border-radius: 14px;
+  background: var(--dt-elevated);
+  padding: 18px;
+}
+
+.dt-business-order-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--dt-border);
+}
+
+.dt-business-order-card-heading > div,
+.dt-business-order-grid > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.dt-business-order-card-heading strong,
+.dt-business-order-grid strong {
+  overflow-wrap: anywhere;
+  color: var(--dt-text);
+}
+
+.dt-business-order-card-heading > div > span,
+.dt-business-order-grid > div > span:not(.dt-business-order-label),
+.dt-business-order-fulfillment small {
+  color: var(--dt-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.dt-business-order-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding-top: 16px;
+}
+
+.dt-business-order-label {
+  color: var(--dt-muted);
+  font-size: 0.67rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dt-business-order-location,
+.dt-business-order-note {
+  grid-column: 1 / -1;
+}
+
+.dt-business-order-location .dt-link-button {
+  justify-self: start;
+}
+
+.dt-business-order-fulfillment .dt-field select {
+  width: 100%;
+}
+
+.dt-business-order-fulfillment small {
+  display: block;
+}
+
+.dt-business-order-note p {
+  margin: 0;
+  color: var(--dt-secondary);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .dt-business-order-filters,
+  .dt-business-order-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dt-business-order-location,
+  .dt-business-order-note {
+    grid-column: auto;
+  }
+}

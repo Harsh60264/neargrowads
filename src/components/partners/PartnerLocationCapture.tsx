@@ -11,6 +11,11 @@ interface PartnerLocationCaptureProps {
   onChange: (location: PartnerLocationSubmission | null) => void;
   consentRequired?: boolean;
   onDetectedState?: (state: string) => void;
+  addressLabel?: string;
+  addressRequired?: boolean;
+  detectButtonLabel?: string;
+  refreshButtonLabel?: string;
+  helperText?: string;
 }
 
 interface GeocodeResponse {
@@ -50,6 +55,11 @@ export function PartnerLocationCapture({
   onChange,
   consentRequired = false,
   onDetectedState,
+  addressLabel = 'Location / address (optional)',
+  addressRequired = false,
+  detectButtonLabel = 'Detect my location',
+  refreshButtonLabel = 'Retry / refresh location',
+  helperText = 'GPS is optional. If detection is unavailable, you may enter an address manually or leave this blank.',
 }: PartnerLocationCaptureProps) {
   const [address, setAddress] = useState(value?.address ?? '');
   const [capturedGps, setCapturedGps] = useState<CapturedGps | null>(() =>
@@ -202,11 +212,12 @@ export function PartnerLocationCapture({
         </label>
       )}
       <label className="partner-location-address" htmlFor={`${idPrefix}-address`}>
-        Location / address (optional)
+        {addressLabel}
         <input
           id={`${idPrefix}-address`}
           autoComplete="street-address"
           maxLength={500}
+          required={addressRequired}
           value={address}
           onChange={(event) => updateManualAddress(event.target.value)}
           placeholder="Detected address or enter your locality, city, and PIN code"
@@ -219,10 +230,10 @@ export function PartnerLocationCapture({
         onClick={detectLocation}
       >
         {busy ? <RefreshCw size={15} className="is-spinning" aria-hidden="true" /> : <LocateFixed size={15} aria-hidden="true" />}
-        {busy ? 'Detecting location…' : detectedByGps ? 'Retry / refresh location' : 'Detect my location'}
+        {busy ? 'Detecting location…' : detectedByGps ? refreshButtonLabel : detectButtonLabel}
       </button>
       <small className="partner-location-help">
-        GPS is optional. If detection is unavailable, you may enter an address manually or leave this blank.
+        {helperText}
       </small>
       {error && <p className="partner-location-error" role="alert">{error}</p>}
       {value && (

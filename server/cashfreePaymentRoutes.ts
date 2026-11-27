@@ -22,6 +22,7 @@ import {
   InvalidServiceEnquiryError,
   validateServiceOrder,
   type ServiceOrderInput,
+  type ServiceOrderLine,
   type ServiceOrderPackage,
 } from './serviceOrders.ts';
 
@@ -55,12 +56,24 @@ export interface CashfreeOrderDependencies {
   getConfig(): CashfreeServerConfig | undefined;
   getReadiness(): Promise<CashfreeGatewayReadiness>;
   getReturnUrl(orderReference: string): string;
-  readPublishedPackages(): Promise<ServiceOrderPackage[]>;
+  readPublishedPackages?(): Promise<ServiceOrderPackage[]>;
   databaseRequest(path: string, init?: RequestInit): Promise<globalThis.Response>;
   allowOrder(req: CashfreeHttpRequest, res: CashfreeHttpResponse): boolean;
+  prepareOrder?(value: unknown): CashfreePreparedOrder | undefined;
+  returnUrlPath?: string;
+  returnUrlQueryParameter?: string;
+  providerOrderNote?: string;
   fetcher?: typeof fetch;
   createId?: () => string;
   now?: () => number;
+}
+
+export interface CashfreePreparedOrder {
+  input: ServiceOrderInput;
+  lineItems: ServiceOrderLine[];
+  amountPaise: number;
+  fingerprint: unknown;
+  persistDetails?: (serviceOrderId: string) => Promise<void>;
 }
 
 export interface CashfreeAvailabilityDependencies {
@@ -72,6 +85,14 @@ export interface CashfreeWebhookDependencies {
   mode?: CashfreePaymentMode;
   getConfig(): CashfreeServerConfig | undefined;
   databaseRequest(path: string, init?: RequestInit): Promise<globalThis.Response>;
+  onPaymentVerified?(order: {
+    id: string;
+    orderReference: string;
+    providerPaymentId: string;
+    amountPaise: number;
+    providerMode: string;
+    lineItems: unknown;
+  }): Promise<void>;
   fetcher?: typeof fetch;
 }
 
@@ -187,7 +208,8 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
   const now = deps.now || Date.now;
   return async (req, res): Promise<void> => {
     if (!deps.allowOrder(req, res)) return;
-    const input = validateServiceOrder(req.body);
+    const preparedOrder = deps.prepareOrder?.(req.body);
+    const input = preparedOrder?.input ?? (deps.prepareOrder ? undefined : validateServiceOrder(req.body));
     if (!input) {
       res.status(400).json({ message: 'Enter valid customer details, select eligible published packages, and accept the privacy notice.' });
       return;
@@ -221,7 +243,7 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
       }
       const requestFingerprint = createHash('sha256')
         .update(mode === 'production' ? 'cashfree-production\0' : '')
-        .update(JSON.stringify({
+        .update(JSON.stringify(preparedOrder?.fingerprint ?? {
         customerName: input.customerName,
         customerEmail: input.customerEmail,
         customerPhone: input.customerPhone,
@@ -266,9 +288,9 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
       );
       let claim = await claimIntent();
       if (claim.status === 'missing') {
-        const packages = await deps.readPublishedPackages();
-        const lines = buildServiceOrderLines(input, packages);
-        const amountPaise = inrAmount(lines);
+        const lines = preparedOrder?.lineItems ??
+          buildServiceOrderLines(input, await (deps.readPublishedPackages?.() ?? Promise.resolve([])));
+        const amountPaise = preparedOrder?.amountPaise ?? inrAmount(lines);
         if (!amountPaise) {
           res.status(400).json({ message: 'The checkout total must be at least ₹1.00.' });
           return;
@@ -339,7 +361,9 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
         claimToken: claim.claim_token,
         createAttemptCount: Number(claim.create_attempt_count || 0),
       };
-      if (input.location) {
+      if (preparedOrder?.persistDetails) {
+        await preparedOrder.persistDetails(intent.serviceOrderId);
+      } else if (input.location) {
         const locationResponse = await deps.databaseRequest(`rest/v1/service_orders?id=eq.${encodeURIComponent(intent.serviceOrderId)}&select=id`, {
           method: 'PATCH',
           headers: { Prefer: 'return=representation' },
@@ -425,10 +449,10 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
             ['localhost', '127.0.0.1', '[::1]'].includes(parsedReturnUrl.hostname);
           if ((parsedReturnUrl.protocol !== 'https:' && !localHttpOrigin) ||
             parsedReturnUrl.username || parsedReturnUrl.password ||
-            parsedReturnUrl.pathname !== '/catalogue' ||
+            parsedReturnUrl.pathname !== (deps.returnUrlPath || '/catalogue') ||
             parsedReturnUrl.searchParams.size !== 1 ||
             parsedReturnUrl.hash !== '' ||
-            parsedReturnUrl.searchParams.get('cashfree_order_id') !== intent.orderReference) {
+            parsedReturnUrl.searchParams.get(deps.returnUrlQueryParameter || 'cashfree_order_id') !== intent.orderReference) {
             throw new Error('Invalid Cashfree return URL.');
           }
         } catch {
@@ -462,7 +486,7 @@ export function createCashfreeOrderHandler(deps: CashfreeOrderDependencies): Cas
                 customer_phone: claimedPhoneDigits,
               },
               order_meta: { return_url: parsedReturnUrl.toString() },
-              order_note: 'NearGrow Ads service order',
+              order_note: deps.providerOrderNote || 'NearGrow Ads service order',
             }),
             signal: AbortSignal.timeout(10_000),
           });
@@ -649,7 +673,7 @@ export function createCashfreeWebhookHandler(deps: CashfreeWebhookDependencies):
 
     try {
       const orderQuery = new URLSearchParams({
-        select: 'id,provider_order_id,cashfree_order_id,total_amount_paise,currency,provider_mode',
+        select: 'id,provider_order_id,cashfree_order_id,total_amount_paise,currency,provider_mode,line_items',
         provider: 'eq.cashfree',
         provider_order_id: `eq.${event.providerOrderId}`,
         limit: '1',
@@ -726,6 +750,16 @@ export function createCashfreeWebhookHandler(deps: CashfreeWebhookDependencies):
       ].includes(result)) throw new Error('cashfree_webhook_processing_failed');
       if (['amount_mismatch', 'payment_identifier_conflict', 'confirmation_rejected'].includes(result)) {
         console.error(`[NearGrow Ads] Cashfree ${config?.mode || 'sandbox'} webhook requires reconciliation.`, { result });
+      }
+      if (['paid', 'already_paid', 'additional_successful_attempt'].includes(result)) {
+        await deps.onPaymentVerified?.({
+          id: String(order.id),
+          orderReference: event.providerOrderId,
+          providerPaymentId: verifiedPayment.providerPaymentId,
+          amountPaise: verifiedPayment.amountPaise,
+          providerMode: String(order.provider_mode ?? 'test'),
+          lineItems: order.line_items,
+        });
       }
       res.status(200).json({ received: true });
     } catch (error) {

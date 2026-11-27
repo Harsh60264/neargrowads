@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity, ArrowDown, BadgeCheck, Bell, Boxes, BriefcaseBusiness, Check, ChevronLeft,
-  ChevronRight, CircleAlert, Coins, LoaderCircle, MapPin, Minus, PackageCheck, Plus, RefreshCw, Search,
+  ChevronRight, CircleAlert, Coins, ExternalLink, LoaderCircle, MapPin, Minus, PackageCheck, Plus, RefreshCw, Search, ShoppingBag,
   Settings2, ShieldCheck, UsersRound, X,
 } from 'lucide-react';
 import './adminDeliveryTeam.css';
@@ -138,6 +138,39 @@ interface DeliveryTeamCampaign {
   assigned_partners: number;
 }
 
+interface WildcardBusinessOrder {
+  id: string;
+  orderReference: string;
+  customerName: string;
+  businessName: string;
+  email: string;
+  mobileNumber: string;
+  businessAddress: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters: number;
+    capturedAt: string;
+    consent: true;
+    locality?: string;
+  } | null;
+  preferredPromotionAreas: string;
+  quantity: number;
+  amountPaise: number;
+  providerOrderReference: string;
+  cashfreeOrderId: string | null;
+  cashfreePaymentReference: string | null;
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  providerMode: string;
+  fulfillmentStatus: 'pending' | 'processing' | 'in_distribution' | 'completed';
+  purchaseTermsVersion: string;
+  purchaseTermsAcceptedAt: string;
+  confirmationEmailSentAt: string | null;
+  createdAt: string;
+  paidAt: string | null;
+  additionalNote: string;
+}
+
 interface DeliveryTeamQueues {
   proofs: Array<{
     id: string;
@@ -195,7 +228,7 @@ interface DeliveryTeamQueues {
   }>;
 }
 
-type TeamTab = 'deliveryBoys' | 'activity' | 'requests' | 'campaigns' | 'settings';
+type TeamTab = 'deliveryBoys' | 'activity' | 'requests' | 'campaigns' | 'businessOrders' | 'settings';
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -221,6 +254,14 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('en-IN').format(value);
+}
+
+function formatInrPaise(value: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(value / 100);
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -398,6 +439,12 @@ export function AdminDeliveryTeam({
   const [campaigns, setCampaigns] = useState<DeliveryTeamCampaign[]>([]);
   const [queues, setQueues] = useState<DeliveryTeamQueues | null>(null);
   const [activity, setActivity] = useState<DeliveryTeamActivity[]>([]);
+  const [businessOrders, setBusinessOrders] = useState<WildcardBusinessOrder[]>([]);
+  const [businessOrderSearch, setBusinessOrderSearch] = useState('');
+  const [businessOrderPaymentFilter, setBusinessOrderPaymentFilter] = useState('all');
+  const [businessOrdersLoading, setBusinessOrdersLoading] = useState(false);
+  const [businessOrderError, setBusinessOrderError] = useState('');
+  const [businessOrderBusyId, setBusinessOrderBusyId] = useState('');
   const [lowStockThreshold, setLowStockThreshold] = useState('5');
   const thresholdInitialized = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -467,6 +514,27 @@ export function AdminDeliveryTeam({
     setQueues(response);
   }, []);
 
+  const fetchBusinessOrders = useCallback(async () => {
+    setBusinessOrdersLoading(true);
+    setBusinessOrderError('');
+    try {
+      const params = new URLSearchParams({
+        search: businessOrderSearch.trim(),
+        paymentStatus: businessOrderPaymentFilter,
+      });
+      const response = await requestJson<{ orders: WildcardBusinessOrder[] }>(
+        `/api/admin/delivery-team/business-orders?${params.toString()}`,
+      );
+      setBusinessOrders(response.orders);
+    } catch (requestError) {
+      setBusinessOrderError(requestError instanceof Error
+        ? requestError.message
+        : 'WildCard Business Orders could not be loaded.');
+    } finally {
+      setBusinessOrdersLoading(false);
+    }
+  }, [businessOrderPaymentFilter, businessOrderSearch]);
+
   const refresh = useCallback(async () => {
     if (refreshPending.current) return;
     refreshPending.current = true;
@@ -510,6 +578,13 @@ export function AdminDeliveryTeam({
       });
     return () => { active = false; };
   }, [campaignPartnerSearch, tab]);
+
+  useEffect(() => {
+    if (tab !== 'businessOrders') return;
+    void fetchBusinessOrders();
+    const timer = window.setInterval(() => void fetchBusinessOrders(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [fetchBusinessOrders, tab]);
 
   useEffect(() => {
     setPage(1);
@@ -559,6 +634,29 @@ export function AdminDeliveryTeam({
       setActionBusy(false);
     }
   }, [refresh, selectedPartner]);
+
+  const updateBusinessOrderFulfillment = useCallback(async (
+    order: WildcardBusinessOrder,
+    fulfillmentStatus: WildcardBusinessOrder['fulfillmentStatus'],
+  ) => {
+    setBusinessOrderBusyId(order.id);
+    setBusinessOrderError('');
+    setNotice('');
+    try {
+      await requestJson(`/api/admin/delivery-team/business-orders/${encodeURIComponent(order.id)}/fulfillment`, {
+        method: 'PATCH',
+        body: JSON.stringify({ fulfillmentStatus }),
+      });
+      setNotice(`Order ${order.orderReference} fulfilment updated.`);
+      await fetchBusinessOrders();
+    } catch (requestError) {
+      setBusinessOrderError(requestError instanceof Error
+        ? requestError.message
+        : 'Business order fulfilment status could not be updated.');
+    } finally {
+      setBusinessOrderBusyId('');
+    }
+  }, [fetchBusinessOrders]);
 
   const adjustCoins = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -787,6 +885,7 @@ export function AdminDeliveryTeam({
     { key: 'activity', label: 'Activity Feed', icon: <Activity size={16} /> },
     { key: 'requests', label: 'Requests & Proofs', icon: <Bell size={16} /> },
     { key: 'campaigns', label: 'Campaigns & Stock', icon: <Boxes size={16} /> },
+    { key: 'businessOrders', label: 'Business Orders', icon: <ShoppingBag size={16} /> },
     { key: 'settings', label: 'Settings', icon: <Settings2 size={16} /> },
   ];
 
@@ -1179,6 +1278,74 @@ export function AdminDeliveryTeam({
           </article>) : <p className="dt-empty">No withdrawal requests are awaiting review.</p>}
         </div>
       </>}
+    </section>}
+
+    {tab === 'businessOrders' && <section className="dt-panel dt-business-orders" aria-labelledby="dt-business-orders-title">
+      <div className="dt-panel-heading dt-business-orders-heading">
+        <div><h3 id="dt-business-orders-title">WildCard Business Orders</h3><p>Verified Cashfree purchases. Customer orders remain separate from partner stock and NGA Coin ledgers.</p></div>
+        <button type="button" className="dt-button dt-button--quiet" onClick={() => void fetchBusinessOrders()} disabled={businessOrdersLoading}>
+          <RefreshCw size={14} className={businessOrdersLoading ? 'dt-spin' : undefined} /> Refresh orders
+        </button>
+      </div>
+      <div className="dt-business-order-filters">
+        <label className="dt-search"><Search size={15} /><span className="dt-sr-only">Search WildCard business orders</span>
+          <input value={businessOrderSearch} onChange={(event) => setBusinessOrderSearch(event.target.value)} placeholder="Search order, name, business, email, mobile or address" />
+        </label>
+        <label className="dt-select-wrap"><span className="dt-sr-only">Filter business orders by payment status</span>
+          <select value={businessOrderPaymentFilter} onChange={(event) => setBusinessOrderPaymentFilter(event.target.value)}>
+            <option value="all">All payment statuses</option>
+            <option value="pending">Pending payment</option>
+            <option value="paid">Paid</option>
+            <option value="failed">Failed</option>
+            <option value="refunded">Refunded</option>
+          </select>
+        </label>
+      </div>
+      {businessOrderError && <p className="dt-error" role="alert">{businessOrderError}</p>}
+      {businessOrdersLoading && !businessOrders.length
+        ? <p className="dt-loading"><LoaderCircle size={16} className="dt-spin" /> Loading business orders…</p>
+        : businessOrders.length ? <div className="dt-business-order-list">{businessOrders.map((order) => {
+          const canFulfill = order.paymentStatus === 'paid' && order.providerMode === 'live';
+          const mapUrl = order.location
+            ? `https://www.google.com/maps?q=${order.location.latitude},${order.location.longitude}`
+            : '';
+          return <article className="dt-business-order-card" key={order.id}>
+            <div className="dt-business-order-card-heading">
+              <div><strong>{order.orderReference}</strong><span>{formatDate(order.createdAt)}</span></div>
+              <span className={`dt-status dt-status--${order.paymentStatus}`}>{order.paymentStatus}</span>
+            </div>
+            <div className="dt-business-order-grid">
+              <div><span className="dt-business-order-label">Customer</span><strong>{order.customerName}</strong><span>{order.email || 'Email unavailable'}</span><span>{order.mobileNumber || 'Mobile unavailable'}</span></div>
+              <div><span className="dt-business-order-label">Business</span><strong>{order.businessName}</strong><span>{order.quantity.toLocaleString('en-IN')} WildCards</span><span>Amount paid: {order.paymentStatus === 'paid' ? formatInrPaise(order.amountPaise) : 'Not paid'}</span></div>
+              <div className="dt-business-order-location">
+                <span className="dt-business-order-label">Business location</span>
+                <strong>{order.businessAddress}</strong>
+                {order.preferredPromotionAreas && <span>Preferred promotion areas: {order.preferredPromotionAreas}</span>}
+                {order.location && <span>GPS {order.location.latitude.toFixed(6)}, {order.location.longitude.toFixed(6)} · Accuracy ±{Math.round(order.location.accuracyMeters)} m · {formatDate(order.location.capturedAt)}</span>}
+                {mapUrl && <a className="dt-link-button" href={mapUrl} target="_blank" rel="noreferrer">Open location <ExternalLink size={13} /></a>}
+              </div>
+              <div><span className="dt-business-order-label">Cashfree references</span><span>Order: {order.cashfreeOrderId || order.providerOrderReference || 'Pending'}</span><span>Payment: {order.cashfreePaymentReference || 'Not paid'}</span><span>{order.paidAt ? `Paid ${formatDate(order.paidAt)}` : 'Payment not confirmed'}</span></div>
+              <div className="dt-business-order-fulfillment">
+                <label className="dt-field"><span>Fulfilment status</span>
+                  <select
+                    value={order.fulfillmentStatus}
+                    disabled={!canEdit || !canFulfill || businessOrderBusyId === order.id}
+                    onChange={(event) => void updateBusinessOrderFulfillment(order, event.target.value as WildcardBusinessOrder['fulfillmentStatus'])}
+                    aria-label={`Fulfilment status for ${order.orderReference}`}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="in_distribution">In Distribution</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </label>
+                {!canFulfill && <small>Fulfilment is enabled only after a verified Production payment.</small>}
+                {!canEdit && <small>Your role has view-only access to fulfilment.</small>}
+              </div>
+              {order.additionalNote && <div className="dt-business-order-note"><span className="dt-business-order-label">Additional note</span><p>{order.additionalNote}</p></div>}
+            </div>
+          </article>;
+        })}</div> : <p className="dt-empty">No WildCard Business Orders match these filters.</p>}
     </section>}
 
     {tab === 'campaigns' && <div className="dt-campaign-layout">

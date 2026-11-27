@@ -16,6 +16,7 @@ import {
 import type { CashfreeGatewayReadiness } from './cashfreeAdmin.ts';
 import type { ServiceOrderPackage } from './serviceOrders.ts';
 import { canAccessServiceStoreAction, serviceStoreAdminAction } from './serviceStoreAuthorization.ts';
+import { prepareLocalDropBusinessPurchase } from './localDropBusinessOrders.ts';
 
 const webhookSecret = 'sandbox-webhook-secret';
 const servicePackageId = '123e4567-e89b-42d3-a456-426614174000';
@@ -99,6 +100,16 @@ const validOrderBody = {
   consent: true,
   packages: [{ packageId: servicePackageId, quantity: 2, priceInr: 0.01 }],
 };
+const validLocalDropOrderBody = {
+  fullName: 'Ada Lovelace',
+  businessName: 'Analytical Engines',
+  email: 'ada@example.com',
+  mobileNumber: '+91 98765 43210',
+  businessAddress: '12 Main Road, Noida, India',
+  preferredPromotionAreas: '',
+  additionalNote: '',
+  consent: true,
+};
 
 const publishedPackage: ServiceOrderPackage = {
   id: servicePackageId,
@@ -118,6 +129,7 @@ function sequentialIds(): () => string {
 function makeOrderHandler(
   overrides: Partial<Parameters<typeof createCashfreeOrderHandler>[0]> = {},
   locationPatchResponse: Response = jsonResponse([{ id: 'database-order-id' }]),
+  cashfreeOrderAmount = 150.5,
 ) {
   const calls: { url: string; init?: RequestInit }[] = [];
   const databaseCalls: { path: string; init?: RequestInit }[] = [];
@@ -126,7 +138,7 @@ function makeOrderHandler(
     return jsonResponse({
       cf_order_id: cashfreeOrderId,
       order_id: providerOrderId,
-      order_amount: 150.5,
+      order_amount: cashfreeOrderAmount,
       order_currency: 'INR',
       order_status: 'ACTIVE',
       payment_session_id: 'sandbox-session-token',
@@ -198,6 +210,7 @@ interface WebhookFixtureOptions {
   fetcher?: typeof fetch;
   config?: CashfreeServerConfig;
   mode?: 'sandbox' | 'production';
+  onPaymentVerified?: Parameters<typeof createCashfreeWebhookHandler>[0]['onPaymentVerified'];
 }
 
 function webhookPayload(paymentId = '987654321') {
@@ -267,6 +280,7 @@ function createWebhookFixture(options: WebhookFixtureOptions = {}) {
       }),
       databaseRequest,
       fetcher,
+      onPaymentVerified: options.onPaymentVerified,
     }),
     calls,
     databaseCalls,
@@ -309,6 +323,44 @@ test('Create Order uses published discounted prices, validates INR paise, and pe
   assert.equal((result.body as Record<string, unknown>).paymentSessionId, 'sandbox-session-token');
   assert.equal((result.body as Record<string, unknown>).trackingToken, checkoutIdempotencyKey);
   assert.equal(result.headers.get('cache-control'), 'no-store');
+});
+
+test('fixed WildCard checkout persists the server-priced 2,100-card package and uses its return URL', async () => {
+  const purchase = prepareLocalDropBusinessPurchase(validLocalDropOrderBody);
+  assert.ok(purchase);
+  let persistedOrderId = '';
+  const { handler, calls, databaseCalls } = makeOrderHandler({
+    prepareOrder: () => ({
+      input: purchase.orderInput,
+      lineItems: purchase.lineItems,
+      amountPaise: purchase.amountPaise,
+      fingerprint: purchase.fingerprint,
+      persistDetails: async (serviceOrderId) => { persistedOrderId = serviceOrderId; },
+    }),
+    readPublishedPackages: async () => {
+      throw new Error('Fixed WildCard orders must not use client-selected catalogue packages.');
+    },
+    getReturnUrl: (reference) => `https://neargrowads.com/partners/localdrop?cashfree_business_order_id=${reference}`,
+    returnUrlPath: '/partners/localdrop',
+    returnUrlQueryParameter: 'cashfree_business_order_id',
+  }, undefined, 10_000);
+  const result = await invoke(handler, request(validLocalDropOrderBody));
+  const providerRequest = JSON.parse(String(calls[0]?.init?.body)) as {
+    order_amount: number;
+    order_meta: { return_url: string };
+  };
+  const claimPayload = JSON.parse(String(databaseCalls[1]?.init?.body)) as {
+    p_total_amount_paise: number;
+    p_line_items: Array<{ packageCode: string; quantity: number }>;
+  };
+
+  assert.equal(result.statusCode, 201);
+  assert.equal(providerRequest.order_amount, 10_000);
+  assert.equal(providerRequest.order_meta.return_url,
+    `https://neargrowads.com/partners/localdrop?cashfree_business_order_id=${providerOrderId}`);
+  assert.equal(claimPayload.p_total_amount_paise, 1_000_000);
+  assert.equal(claimPayload.p_line_items[0]?.quantity, 2_100);
+  assert.equal(persistedOrderId, 'database-order-id');
 });
 
 test('Production Create Order uses only the live API, mode-bound persistence RPCs and server-verified INR response', async () => {
@@ -1262,6 +1314,51 @@ test('webhook independently verifies order, payment state, amount and INR before
       assert.equal(fixture.databaseCalls.filter((call) => call.path.includes('process_cashfree')).length, 0);
     });
   }
+});
+
+test('webhook invokes purchase confirmation only after the database confirms a captured payment', async () => {
+  const confirmations: unknown[] = [];
+  const fixture = createWebhookFixture({
+    payment: {
+      cf_payment_id: '987654321',
+      order_id: providerOrderId,
+      order_amount: 10_000,
+      order_currency: 'INR',
+      payment_amount: 10_000,
+      payment_currency: 'INR',
+      payment_status: 'SUCCESS',
+      is_captured: true,
+    },
+    order: {
+      id: 'database-order-id',
+      provider_order_id: providerOrderId,
+      cashfree_order_id: cashfreeOrderId,
+      total_amount_paise: 1_000_000,
+      currency: 'INR',
+      provider_mode: 'live',
+      line_items: [{ packageCode: 'WILDCARD-BUSINESS-2100', quantity: 2100, lineSubtotalInr: 10000 }],
+    },
+    config: {
+      mode: 'production',
+      apiBaseUrl: 'https://api.cashfree.com/pg',
+      clientId: 'production-client-id',
+      clientSecret: webhookSecret,
+    },
+    mode: 'production',
+    onPaymentVerified: async (order) => { confirmations.push(order); },
+  });
+  const result = await invoke(fixture.handler, signedWebhook(webhookPayload()));
+
+  assert.equal(result.statusCode, 200);
+  assert.equal(confirmations.length, 1);
+  assert.deepEqual(confirmations[0], {
+    id: 'database-order-id',
+    orderReference: providerOrderId,
+    providerPaymentId: '987654321',
+    amountPaise: 1_000_000,
+    providerMode: 'live',
+    lineItems: [{ packageCode: 'WILDCARD-BUSINESS-2100', quantity: 2100, lineSubtotalInr: 10000 }],
+  });
 });
 
 test('webhook mismatched stored order details are never confirmed', async (t) => {
