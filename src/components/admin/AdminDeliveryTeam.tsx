@@ -101,6 +101,24 @@ interface DeliveryTeamPartnerDetail {
     campaign_status: string;
     area: string;
   }>;
+  proofHistory: Array<{
+    id: string;
+    business_name: string;
+    business_category: string;
+    delivery_address: string;
+    address_detail: string;
+    photoUrl: string;
+    latitude: number | null;
+    longitude: number | null;
+    location_accuracy_meters: number | null;
+    location_captured_at: string | null;
+    location_address_source: string;
+    coins: number;
+    status: string;
+    review_note: string;
+    submitted_at: string;
+    reviewed_at: string | null;
+  }>;
 }
 
 interface DeliveryTeamCampaign {
@@ -121,6 +139,13 @@ interface DeliveryTeamQueues {
     partnerName: string;
     campaignName: string;
     siteName: string;
+    businessName: string;
+    businessCategory: string;
+    deliveryAddress: string;
+    addressDetail: string;
+    locationAddressSource: string;
+    locationAccuracyMeters: number | null;
+    locationCapturedAt: string | null;
     photoUrl: string;
     note: string;
     latitude: number | null;
@@ -149,7 +174,7 @@ interface DeliveryTeamQueues {
   damageReports: Array<{
     id: string;
     partnerName: string;
-    assignmentId: string;
+    assignmentId: string | null;
     campaignName: string;
     cardId: string;
     issueType: string;
@@ -972,6 +997,31 @@ export function AdminDeliveryTeam({
                 ? <div className="dt-history-list">{selectedPartner.stockHistory.map((entry) => <article key={entry.id}><div><strong>{entry.movement_type.replace('_', ' ')} · {entry.campaign_name || 'Partner-wide inventory'}</strong><span>{entry.notes} · {formatDate(entry.created_at)}</span>{entry.previous_balance !== null && entry.previous_balance !== undefined && <small>Stock {entry.previous_balance} → {entry.resulting_balance}</small>}</div><b className={entry.quantity < 0 ? 'is-negative' : ''}>{entry.quantity > 0 ? '+' : ''}{formatNumber(entry.quantity)}</b></article>)}</div>
                 : <p className="dt-empty">No stock transactions recorded.</p>}
             </details>
+            <details className="dt-history-details">
+              <summary>Delivery proof history <ChevronRight size={14} /></summary>
+              {selectedPartner.proofHistory.length
+                ? <div className="dt-delivery-history">{selectedPartner.proofHistory.map((proof) => <article key={proof.id}>
+                  <a href={proof.photoUrl} target="_blank" rel="noreferrer">
+                    <img src={proof.photoUrl} alt={`Delivery proof for ${proof.business_name || 'historical delivery'}`} loading="lazy" />
+                  </a>
+                  <div><strong>{proof.business_name || 'Historical delivery'}</strong>
+                    <span>{[proof.business_category, formatDate(proof.submitted_at), proof.status].filter(Boolean).join(' · ')}</span>
+                    <p>{proof.delivery_address || 'Address not provided in legacy record'}</p>
+                    {proof.address_detail && <small>{proof.address_detail}</small>}
+                    {proof.review_note && <small>Owner note: {proof.review_note}</small>}
+                    <b>{proof.status === 'approved' ? `${formatNumber(proof.coins)} NGA Coins awarded` : 'No coins awarded'}</b>
+                    {proof.latitude !== null && proof.longitude !== null && <>
+                      <small>GPS {proof.latitude.toFixed(6)}, {proof.longitude.toFixed(6)}
+                        {proof.location_accuracy_meters !== null && ` · ±${Math.round(proof.location_accuracy_meters)} m`}
+                        {proof.location_captured_at && ` · ${formatDate(proof.location_captured_at)}`}
+                      </small>
+                      <a className="dt-link-button" href={`https://www.google.com/maps?q=${proof.latitude},${proof.longitude}`}
+                        target="_blank" rel="noreferrer">Open location</a>
+                    </>}
+                  </div>
+                </article>)}</div>
+                : <p className="dt-empty">No delivery proofs recorded.</p>}
+            </details>
           </> : <div className="dt-quick-empty">
             <UsersRound size={24} aria-hidden="true" />
             <strong>Select a delivery partner</strong>
@@ -1004,9 +1054,23 @@ export function AdminDeliveryTeam({
         <div className="dt-queue-section"><h4>Proof submissions <span>{queues.proofs.length}</span></h4>
           {queues.proofs.length ? queues.proofs.map((proof) => <article className="dt-proof-card" key={proof.id}>
             <img src={proof.photoUrl} alt={`Private proof submitted by ${proof.partnerName}`} loading="lazy" />
-            <div className="dt-proof-copy"><strong>{proof.partnerName} · {proof.campaignName}</strong><span>{proof.siteName} · {formatDate(proof.submittedAt)}</span>
+            <div className="dt-proof-copy"><strong>{proof.partnerName} · {proof.businessName || proof.campaignName || 'Historical delivery'}</strong>
+              <span>{[proof.businessCategory, proof.campaignName, proof.siteName].filter(Boolean).join(' · ') || 'Independent distribution'} · {formatDate(proof.submittedAt)}</span>
+              {proof.deliveryAddress && <p className="dt-delivery-address"><MapPin size={14} />{proof.deliveryAddress}</p>}
+              {proof.addressDetail && <p className="dt-delivery-address-detail">Additional detail: {proof.addressDetail}</p>}
               <p>{proof.note || 'No partner note supplied.'}</p>
-              {proof.latitude !== null && proof.longitude !== null && <span className="dt-location"><MapPin size={14} /> {proof.latitude.toFixed(5)}, {proof.longitude.toFixed(5)}</span>}
+              {proof.latitude !== null && proof.longitude !== null && <div className="dt-proof-location">
+                <span className="dt-location"><MapPin size={14} /> GPS {proof.latitude.toFixed(6)}, {proof.longitude.toFixed(6)}</span>
+                <span className="dt-location-meta">
+                  {proof.locationAccuracyMeters !== null && `Accuracy ±${Math.round(proof.locationAccuracyMeters)} m`}
+                  {proof.locationCapturedAt && ` · Captured ${formatDate(proof.locationCapturedAt)}`}
+                  {proof.locationAddressSource === 'gps_reverse_geocoded' ? ' · Address detected' :
+                    proof.locationAddressSource === 'gps_manual' ? ' · Address entered manually' :
+                      proof.locationAddressSource === 'manual_no_gps' ? ' · No GPS evidence captured' : ''}
+                </span>
+                <a className="dt-button dt-button--quiet dt-map-link" href={`https://www.google.com/maps?q=${proof.latitude},${proof.longitude}`}
+                  target="_blank" rel="noreferrer">Open in Google Maps</a>
+              </div>}
               <span className="dt-muted">Reward on approval: {formatNumber(proof.coins)} NGA Coins</span>
               <label className="dt-field"><span>Review note</span><textarea rows={2} maxLength={500} value={proofNotes[proof.id] || ''} onChange={(event) => setProofNotes((current) => ({ ...current, [proof.id]: event.target.value }))} placeholder="Required for rejection or correction" /></label>
               {canEdit && <div className="dt-actions">

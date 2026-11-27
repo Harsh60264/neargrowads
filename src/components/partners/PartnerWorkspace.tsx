@@ -46,8 +46,8 @@ import './partnerPortalPreview.css';
 
 const sections = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'campaigns', label: 'Campaigns & Daily Targets', icon: Megaphone },
-  { id: 'proof', label: 'Proof Submissions', icon: Camera },
+  { id: 'inventory', label: 'WildCard Inventory', icon: Package },
+  { id: 'proof', label: 'Delivery & Proofs', icon: Camera },
   { id: 'earnings', label: 'Earnings & Progress', icon: Wallet },
   { id: 'profile', label: 'Profile & Support', icon: UserRound },
 ] as const;
@@ -85,11 +85,18 @@ interface PartnerCampaign {
 
 interface PartnerProof {
   id: string;
-  assignment_id: string;
-  campaign_id: string;
-  site_id: string;
+  assignment_id: string | null;
+  campaign_id: string | null;
+  site_id: string | null;
   photoUrl: string;
   note: string;
+  business_name: string;
+  business_category: string;
+  delivery_address: string;
+  address_detail: string;
+  location_address_source: string;
+  location_accuracy_meters: number | null;
+  location_captured_at: string | null;
   latitude: number | null;
   longitude: number | null;
   coins: number;
@@ -101,7 +108,7 @@ interface PartnerProof {
 
 interface StockMovement {
   id: string;
-  assignment_id: string;
+  assignment_id: string | null;
   movement_type: string;
   quantity: number;
   notes: string;
@@ -133,7 +140,7 @@ interface PartnerInventory {
 
 interface DamageReport {
   id: string;
-  assignment_id: string;
+  assignment_id: string | null;
   card_id: string;
   issue_type: string;
   details: string;
@@ -177,6 +184,7 @@ interface PartnerWorkspaceData {
     totalWithdrawn: number;
     pendingApproval: number;
   };
+  deliveriesToday: number;
 }
 
 interface PartnerApiResponse {
@@ -286,57 +294,59 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function campaignName(data: PartnerWorkspaceData, campaignId: string | null): string {
-  return data.campaigns.find((assignment) => assignment.campaign.id === campaignId)?.campaign.name || 'Partner activity';
+  return data.campaigns.find((assignment) => assignment.campaign.id === campaignId)?.campaign.name || 'Independent delivery';
 }
 
 function getInitials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'P';
 }
 
-function DashboardSection({ data, onNavigate, onRefresh }: {
+function DashboardSection({ data, onNavigate }: {
   data: PartnerWorkspaceData;
   onNavigate: (section: SectionId) => void;
-  onRefresh: () => Promise<void>;
 }) {
-  const campaign = data.campaigns.find((item) => item.campaign.status === 'active') || data.campaigns[0];
-  const dailyTarget = campaign?.dailyTarget || 0;
-  const dailyPercent = dailyTarget > 0 ? Math.min(100, Math.round((campaign.deliveriesToday / dailyTarget) * 100)) : 0;
   const recent = data.proofs.slice(0, 5);
   const activity = useMemo(() => buildPartnerWorkspaceActivity(data).slice(0, 6), [data]);
   const coinProgress = Math.min(100, Math.round((data.coinSummary.balance / 100000) * 100));
   return (
     <section className="nwg-screen nwg-dashboard-screen" aria-labelledby="partner-workspace-page-title">
       <PageHeading eyebrow="Dashboard" title={`Welcome, ${data.user.fullName.split(/\s+/)[0] || 'Partner'}`}
-        description="Here’s your campaign progress, delivery stock, and latest activity in your NearGrow WildCard workspace." />
+        description="Your WildCard inventory, independent deliveries, proof reviews, and NGA Coin activity." />
       <div className="nwg-dashboard-hero">
-        <article className="nwg-active-campaign">
-          <div className="nwg-inline-heading"><Megaphone size={21} /><strong>Active campaign</strong>
-            {campaign && <StatusPill status={campaign.campaign.status} />}
+        <article className="nwg-active-campaign nwg-independent-overview">
+          <div className="nwg-inline-heading"><Package size={21} /><strong>WildCard Inventory</strong>
+            <StatusPill status={data.inventory.available === 0 ? 'out_of_stock' :
+              data.inventory.available <= 10 ? 'low_stock' : 'active'} />
           </div>
-          {campaign ? <>
-            <h2>{campaign.campaign.name}</h2>
-            <p>{campaign.campaign.description || `Build local awareness across ${campaign.campaign.area}.`}</p>
-            <div className="nwg-campaign-meta">
-              <span><CalendarDays size={16} />{campaign.campaign.start_date} – {campaign.campaign.end_date}</span>
-              <span><MapPin size={16} />{campaign.campaign.area}</span>
-            </div>
-          </> : <div className="nwg-empty nwg-empty-inverse"><strong>No campaign assigned</strong>
-            <p>Your active assignments will appear here when the owner assigns a campaign.</p></div>}
+          <div className="nwg-independent-stock">
+            <span>Available WildCards</span><strong>{formatNumber(data.inventory.available)}</strong>
+          </div>
+          <div className="nwg-independent-overview-metrics">
+            <span>Reserved<strong>{formatNumber(data.inventory.reserved)}</strong></span>
+            <span>Total received<strong>{formatNumber(data.inventory.totalReceived)}</strong></span>
+            <span>Approved deliveries<strong>{formatNumber(data.inventory.delivered)}</strong></span>
+          </div>
+          <div className="nwg-independent-actions">
+            <button type="button" className="nwg-button nwg-button-light" onClick={() => onNavigate('proof')}>
+              <Camera size={15} />Submit Delivery Proof
+            </button>
+            <button type="button" className="nwg-button nwg-button-secondary" onClick={() => onNavigate('inventory')}>
+              <Package size={15} />Request Restock
+            </button>
+          </div>
         </article>
         <article className="nwg-card nwg-daily-progress">
-          <div className="nwg-progress-heading"><div className="nwg-inline-heading"><Gauge size={21} /><strong>Daily progress</strong></div>
-            <div className="nwg-progress-numbers"><strong>{campaign ? `${campaign.deliveriesToday} / ${dailyTarget}` : '—'}</strong><span>Deliveries today</span></div>
+          <div className="nwg-progress-heading"><div className="nwg-inline-heading"><CheckCircle2 size={21} /><strong>Delivery & earnings</strong></div>
+            <div className="nwg-progress-numbers"><strong>{formatNumber(data.deliveriesToday)}</strong><span>Deliveries completed today</span></div>
           </div>
-          {campaign && dailyTarget > 0
-            ? <div className="nwg-progress-track" role="progressbar" aria-label="Daily delivery target"
-              aria-valuenow={campaign.deliveriesToday} aria-valuemin={0} aria-valuemax={dailyTarget}>
-              <span style={{ width: `${dailyPercent}%` }} />
-            </div>
-            : <p className="nwg-muted">{campaign
-              ? 'No daily delivery target is configured for this assignment.'
-              : 'Your daily progress will appear after a campaign is assigned.'}</p>}
-          {campaign && campaign.submissionsToday > campaign.deliveriesToday &&
-            <p className="nwg-muted">{campaign.submissionsToday - campaign.deliveriesToday} submission(s) awaiting review.</p>}
+          <div className="nwg-summary-balance">
+            <span>Available NGA Coins</span>
+            <strong><Coins size={18} />{formatNumber(data.coinSummary.balance)}</strong>
+            <small>{formatNumber(data.proofs.filter((proof) => proof.status === 'pending').length)} proof(s) awaiting owner review</small>
+          </div>
+          <div className="nwg-dashboard-restock-status">
+            Restock status: <strong>{data.requests.find((request) => request.request_type === 'additional_stock')?.status || 'No request'}</strong>
+          </div>
         </article>
       </div>
 
@@ -347,9 +357,8 @@ function DashboardSection({ data, onNavigate, onRefresh }: {
         <MetricCard icon={Clock3} label="Pending" value={formatNumber(data.inventory.reserved)} detail="Cards reserved for review" />
         <MetricCard icon={Coins} label="NGA Coins" value={formatNumber(data.coinSummary.balance)} detail="Available balance" />
       </div>
-      <PartnerInventorySection data={data} onRefresh={onRefresh} onNavigate={onNavigate} />
       <div className="nwg-dashboard-submit">
-        <div><strong>Finished a WildCard handover?</strong><span>Submit a clear proof photo for campaign-owner review.</span></div>
+        <div><strong>Finished a WildCard delivery?</strong><span>Submit a clear proof photo for owner review and receive 1,000 NGA Coins after approval.</span></div>
         <button type="button" className="nwg-button nwg-button-primary" onClick={() => onNavigate('proof')}>
           <Camera size={16} />Submit proof<ArrowRight size={15} />
         </button>
@@ -361,29 +370,33 @@ function DashboardSection({ data, onNavigate, onRefresh }: {
             trailing={<button type="button" className="nwg-link-button" onClick={() => onNavigate('proof')}>View all <ArrowRight size={15} /></button>} />
           {recent.length ? <>
             <div className="nwg-table-scroll"><table className="nwg-table">
-              <thead><tr><th>Delivery ID</th><th>Task / Shop</th><th>Date submitted</th><th>Status</th><th>Reviewed on</th><th>Photo</th></tr></thead>
+              <thead><tr><th>Business</th><th>Delivery address</th><th>Date submitted</th><th>Status</th><th>NGA Coins</th><th>Location</th><th>Photo</th></tr></thead>
               <tbody>{recent.map((proof) => {
-                const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
                 return <tr key={proof.id}>
-                  <td><strong>{proof.id.slice(0, 8).toUpperCase()}</strong></td>
-                  <td>{site?.name || campaignName(data, proof.campaign_id)}</td>
+                  <td><strong>{proof.business_name || campaignName(data, proof.campaign_id)}</strong></td>
+                  <td>{proof.delivery_address || campaignName(data, proof.campaign_id)}</td>
                   <td>{formatDate(proof.submitted_at)}</td>
                   <td><StatusPill status={proof.status} /></td>
-                  <td>{formatDate(proof.reviewed_at)}</td>
+                  <td>{proof.status === 'approved' ? `${formatNumber(proof.coins)} NGA Coins` : '—'}</td>
+                  <td>{proof.latitude !== null && proof.longitude !== null
+                    ? <a className="nwg-photo-link" href={`https://www.google.com/maps?q=${proof.latitude},${proof.longitude}`}
+                      target="_blank" rel="noreferrer">View Location</a> : '—'}</td>
                   <td><a className="nwg-photo-link" href={proof.photoUrl} target="_blank" rel="noreferrer">View photo</a></td>
                 </tr>;
               })}</tbody>
             </table></div>
             <div className="nwg-delivery-cards">{recent.map((proof) => {
-              const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
               return <article className="nwg-delivery-card" key={proof.id}>
-                <div><strong>{site?.name || campaignName(data, proof.campaign_id)}</strong><StatusPill status={proof.status} /></div>
-                <small>{proof.id.slice(0, 8).toUpperCase()} · {formatDate(proof.submitted_at)}</small>
+                <div><strong>{proof.business_name || campaignName(data, proof.campaign_id)}</strong><StatusPill status={proof.status} /></div>
+                <small>{proof.delivery_address || 'Address not provided in legacy record'} · {formatDate(proof.submitted_at)}</small>
+                {proof.status === 'approved' && <b>{formatNumber(proof.coins)} NGA Coins earned</b>}
+                {proof.latitude !== null && proof.longitude !== null && <a className="nwg-photo-link"
+                  href={`https://www.google.com/maps?q=${proof.latitude},${proof.longitude}`} target="_blank" rel="noreferrer">View location</a>}
                 <a className="nwg-photo-link" href={proof.photoUrl} target="_blank" rel="noreferrer">View private proof photo</a>
               </article>;
             })}</div>
           </> : <EmptyState icon={FileCheck2} title="No deliveries submitted yet"
-            detail="Submit a proof after completing an assigned campaign delivery." />}
+            detail="Submit your delivery details and photo. The owner reviews each proof before the reward is credited." />}
         </section>
         <aside className="nwg-card nwg-quick-summary">
           <CardHeading icon={BarChart3} title="Quick summary"
@@ -400,7 +413,7 @@ function DashboardSection({ data, onNavigate, onRefresh }: {
           <dl className="nwg-summary-list">
             <div><dt>Total earned</dt><dd>{formatNumber(data.coinSummary.totalEarned)}</dd></div>
             <div><dt>Pending coin approval</dt><dd>{formatNumber(data.coinSummary.pendingApproval)}</dd></div>
-            <div><dt>Active assignments</dt><dd>{formatNumber(data.campaigns.filter((item) => item.campaign.status === 'active').length)}</dd></div>
+            <div><dt>Pending proofs</dt><dd>{formatNumber(data.proofs.filter((proof) => proof.status === 'pending').length)}</dd></div>
           </dl>
           <button type="button" className="nwg-button nwg-button-primary nwg-summary-link" onClick={() => onNavigate('earnings')}>
             <Wallet size={16} />View earnings <ArrowRight size={15} />
@@ -532,6 +545,119 @@ function PartnerInventorySection({
         <time>{formatDate(request.created_at)}</time><StatusPill status={request.status} />
       </article>) : <p className="nwg-muted nwg-no-records">No restock requests yet.</p>}
     </div>
+  </section>;
+}
+
+function IndependentInventorySection({ data, onNavigate, onRefresh }: {
+  data: PartnerWorkspaceData;
+  onNavigate: (section: SectionId) => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [damageCardId, setDamageCardId] = useState('');
+  const [damageType, setDamageType] = useState('damaged');
+  const [damageDetails, setDamageDetails] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const submitDamage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await partnerApi('/api/partners/damage-reports', {
+        method: 'POST',
+        body: JSON.stringify({ cardId: damageCardId, issueType: damageType, details: damageDetails }),
+      });
+      setDamageCardId('');
+      setDamageDetails('');
+      setMessage('Your damage or loss report was sent to the owner.');
+      await onRefresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The report could not be submitted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stockRows = useMemo(() => {
+    let balance = 0;
+    return [...data.stockHistory].sort((left, right) =>
+      Date.parse(left.created_at) - Date.parse(right.created_at) || left.id.localeCompare(right.id))
+      .map((movement) => {
+        balance += movement.quantity;
+        return { ...movement, balance };
+      }).reverse().slice(0, 100);
+  }, [data.stockHistory]);
+  const restockRequests = data.requests.filter((request) => request.request_type === 'additional_stock');
+
+  return <section className="nwg-screen nwg-inventory-screen" aria-labelledby="partner-workspace-page-title">
+    <PageHeading eyebrow="WildCard inventory" title="WildCard Inventory"
+      description="Track your physical cards, request a restock, report damage, and review stock history." />
+    <PartnerInventorySection data={data} onRefresh={onRefresh} onNavigate={onNavigate} />
+    <section className="nwg-card nwg-table-card nwg-stock-history">
+      <CardHeading icon={Package} title="Stock Movement History"
+        description="Audited issues, restocks, deliveries, returns, and adjustments." />
+      {stockRows.length ? <>
+        <div className="nwg-table-scroll"><table className="nwg-table">
+          <thead><tr><th>Date & time</th><th>Activity</th><th>Quantity</th><th>Balance</th><th>Notes</th></tr></thead>
+          <tbody>{stockRows.map((movement) => <tr key={movement.id}>
+            <td>{formatDate(movement.created_at)}</td><td>{movement.movement_type.replaceAll('_', ' ')}</td>
+            <td className={movement.quantity < 0 ? 'nwg-negative' : 'nwg-positive'}>
+              {movement.quantity > 0 ? '+' : ''}{movement.quantity}</td>
+            <td>{movement.balance}</td><td>{movement.notes || '—'}</td>
+          </tr>)}</tbody>
+        </table></div>
+        <div className="nwg-stock-cards">{stockRows.slice(0, 20).map((movement) => <article className="nwg-stock-card" key={movement.id}>
+          <div><strong>{movement.movement_type.replaceAll('_', ' ')}</strong><time>{formatDate(movement.created_at)}</time></div>
+          <p>{movement.notes || 'Stock movement recorded'}</p>
+          <span className={movement.quantity < 0 ? 'nwg-negative' : 'nwg-positive'}>
+            {movement.quantity > 0 ? '+' : ''}{movement.quantity} cards · balance {movement.balance}
+          </span>
+        </article>)}</div>
+      </> : <EmptyState icon={Package} title="No stock movements yet"
+        detail="Real stock issues, delivery consumption, and adjustments will appear here." />}
+    </section>
+    <section className="nwg-card nwg-damage-card">
+      <CardHeading icon={AlertTriangle} title="Report Damaged or Lost Cards"
+        description="Submit a report without a campaign or assigned area. The owner will review it before stock is adjusted." />
+      {data.damageReports.length > 0 && <div className="nwg-damage-history">
+        {data.damageReports.slice(0, 5).map((report) => <div key={report.id}>
+          <span>{report.card_id || report.issue_type.replaceAll('_', ' ')}</span><StatusPill status={report.status} />
+        </div>)}
+      </div>}
+      <form className="nwg-form" onSubmit={(event) => void submitDamage(event)}>
+        <div className="nwg-form-two">
+          <label>Card ID (optional)<input value={damageCardId} maxLength={80}
+            onChange={(event) => setDamageCardId(event.target.value)} placeholder="e.g., WC-04217" /></label>
+          <label>Issue type<select value={damageType} onChange={(event) => setDamageType(event.target.value)}>
+            <option value="damaged">Damaged</option><option value="lost">Lost</option>
+            <option value="unusable">Unusable</option><option value="other">Other</option>
+          </select></label>
+        </div>
+        <label>Details (optional)<textarea value={damageDetails} maxLength={1000}
+          onChange={(event) => setDamageDetails(event.target.value)} placeholder="Share a brief note about the issue." /></label>
+        <button type="submit" className="nwg-button nwg-button-primary" disabled={busy}>
+          <Send size={15} />{busy ? 'Submitting…' : 'Submit report'}
+        </button>
+      </form>
+      {(error || message) && <p className={`nwg-feedback${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
+    </section>
+    <details className="nwg-card nwg-historical-campaigns">
+      <summary>Historical campaign activity</summary>
+      <p>Existing campaign assignments and records are retained for reference. Independent deliveries, inventory, and restocks do not require campaign participation.</p>
+      <CampaignsSection data={data} onRefresh={onRefresh} />
+      <div className="nwg-restock-history">
+        <strong>Restock request history</strong>
+        {restockRequests.length ? restockRequests.map((request) => <article key={request.id} className="nwg-request-row">
+          <span className="nwg-request-icon"><Package size={18} /></span>
+          <div><strong>{request.stock_quantity === null ? 'Restock request' : `${formatNumber(request.stock_quantity)} cards requested`}</strong>
+            <p>{request.details}</p>{request.review_note && <small>Owner response: {request.review_note}</small>}</div>
+          <time>{formatDate(request.created_at)}</time><StatusPill status={request.status} />
+        </article>) : <p className="nwg-muted nwg-no-records">No restock requests yet.</p>}
+      </div>
+    </details>
   </section>;
 }
 
@@ -791,11 +917,22 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
 }
 
 function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefresh: () => Promise<void> }) {
-  const [assignmentId, setAssignmentId] = useState('');
-  const [siteId, setSiteId] = useState('');
   const [photoDataUrl, setPhotoDataUrl] = useState('');
   const [note, setNote] = useState('');
-  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [businessName, setBusinessName] = useState('');
+  const [businessCategory, setBusinessCategory] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [addressDetail, setAddressDetail] = useState('');
+  const [location, setLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    capturedAt: string;
+  } | null>(null);
+  const [locationToken, setLocationToken] = useState('');
+  const [locationSource, setLocationSource] = useState<'gps_reverse_geocoded' | 'gps_manual' | 'manual_no_gps'>('manual_no_gps');
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState('');
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -806,9 +943,6 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
   const [selectedProof, setSelectedProof] = useState<PartnerProof | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const assignment = data.campaigns.find((item) => item.assignmentId === assignmentId) || data.campaigns[0];
-  const sites = assignment?.sites || [];
-
   useEffect(() => {
     if (cameraStream && videoRef.current) videoRef.current.srcObject = cameraStream;
   }, [cameraStream]);
@@ -857,20 +991,68 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
   };
   const captureLocation = () => {
     setError('');
+    setLocationError('');
+    setLocation(null);
+    setLocationToken('');
+    setLocationSource('manual_no_gps');
+    setDeliveryAddress('');
     if (!navigator.geolocation) {
-      setError('Location access is not available in this browser.');
+      setLocationError('Location access is not available in this browser. Enter the delivery address manually.');
       return;
     }
+    setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => setLocation({ latitude: coords.latitude, longitude: coords.longitude }),
-      (reason) => setError(reason.message || 'Location permission was denied. Allow location and retry.'),
+      async ({ coords, timestamp }) => {
+        const capturedAt = new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString();
+        const captured = {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy,
+          capturedAt,
+        };
+        setLocation(captured);
+        setLocationToken('');
+        setLocationSource('gps_manual');
+        setDeliveryAddress('');
+        try {
+          const result = await partnerApi<{ address: string; token: string }>('/api/partners/reverse-geocode', {
+            method: 'POST',
+            body: JSON.stringify({
+              latitude: captured.latitude,
+              longitude: captured.longitude,
+              accuracy: captured.accuracy,
+              capturedAt: captured.capturedAt,
+            }),
+          });
+          setDeliveryAddress(result.address);
+          setLocationToken(result.token);
+          setLocationSource('gps_reverse_geocoded');
+        } catch (reason) {
+          setLocationError(reason instanceof Error
+            ? `${reason.message} Your coordinates are retained; enter the address manually or retry.`
+            : 'Address lookup failed. Your coordinates are retained; enter the address manually or retry.');
+        } finally {
+          setLocationLoading(false);
+        }
+      },
+      (reason) => {
+        setLocationLoading(false);
+        setLocationToken('');
+        setLocationSource('manual_no_gps');
+        const message = reason.code === reason.PERMISSION_DENIED
+          ? 'Location permission was denied. Enable location access for this site in your browser settings, then retry. You can enter the address manually.'
+          : reason.code === reason.POSITION_UNAVAILABLE
+            ? 'Your device could not determine a location. Check device location services and retry, or enter the address manually.'
+            : 'Location capture timed out. Retry or enter the address manually.';
+        setLocationError(message);
+      },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
     );
   };
   const submitProof = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!assignment || !siteId || !photoDataUrl) {
-      setError('Choose an assigned shop and capture a proof photo before submitting.');
+    if (businessName.trim().length < 2 || deliveryAddress.trim().length < 3 || !photoDataUrl) {
+      setError('Enter the business name and delivery address, and capture or choose a proof photo.');
       return;
     }
     setBusy(true); setError(''); setMessage('');
@@ -878,16 +1060,33 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
       await partnerApi('/api/partners/proofs', {
         method: 'POST',
         body: JSON.stringify({
-          assignmentId: assignment.assignmentId,
-          siteId,
+          businessName: businessName.trim(),
+          businessCategory: businessCategory.trim(),
+          deliveryAddress: deliveryAddress.trim(),
+          addressDetail: addressDetail.trim(),
           photoDataUrl,
           note,
           latitude: location?.latitude ?? null,
           longitude: location?.longitude ?? null,
+          accuracy: location?.accuracy ?? null,
+          capturedAt: location?.capturedAt ?? null,
+          locationAddressSource: location
+            ? locationSource
+            : 'manual_no_gps',
+          locationToken,
         }),
       });
-      setPhotoDataUrl(''); setNote(''); setLocation(null);
-      setMessage('Your captured proof was submitted for owner review.');
+      setPhotoDataUrl('');
+      setNote('');
+      setBusinessName('');
+      setBusinessCategory('');
+      setDeliveryAddress('');
+      setAddressDetail('');
+      setLocation(null);
+      setLocationToken('');
+      setLocationSource('manual_no_gps');
+      setLocationError('');
+      setMessage('Your delivery proof was submitted for owner review.');
       await onRefresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The proof could not be submitted.'); }
     finally { setBusy(false); }
@@ -897,33 +1096,61 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
   const visibleHistory = showAllHistory ? history : history.slice(0, 3);
   return (
     <section className="nwg-screen nwg-proof-screen" aria-labelledby="partner-workspace-page-title">
-      <PageHeading eyebrow="Proof submissions" title="Proof Submissions"
-        description="Capture a live photo as proof of in-store promotion. Include the shop location and an optional note, then submit for review." />
+      <PageHeading eyebrow="Delivery & proofs" title="Delivery & Proofs"
+        description="Visit any local business, record the delivery location, and submit a clear photo for owner review." />
       <div className="nwg-proof-layout">
         <section className="nwg-card nwg-capture-card">
           <CardHeading icon={Camera} title="Capture proof" />
           <form onSubmit={(event) => void submitProof(event)} className="nwg-form">
-            {data.campaigns.length > 1 && <label>Campaign <span className="nwg-required">*</span>
-              <select value={assignment?.assignmentId || ''} required
-                onChange={(event) => { setAssignmentId(event.target.value); setSiteId(''); }}>
-                {data.campaigns.map((item) => <option key={item.assignmentId} value={item.assignmentId}>
-                  {item.campaign.name} · {item.campaign.area}
-                </option>)}
+            <label>Business / Shop Name <span className="nwg-required">*</span>
+              <input required minLength={2} maxLength={120} value={businessName}
+                onChange={(event) => setBusinessName(event.target.value)} placeholder="Enter the business name" />
+            </label>
+            <label>Business Category (optional)
+              <select value={businessCategory} onChange={(event) => setBusinessCategory(event.target.value)}>
+                <option value="">Select a category (optional)</option>
+                <option value="Retail">Retail</option><option value="Food & Beverage">Food &amp; Beverage</option>
+                <option value="Health & Wellness">Health &amp; Wellness</option><option value="Services">Services</option>
+                <option value="Education">Education</option><option value="Other">Other</option>
               </select>
-            </label>}
-            <div className="nwg-location-picker">
-              <label>Capture location <span className="nwg-required">*</span>
-                <select value={siteId} onChange={(event) => setSiteId(event.target.value)} required disabled={!sites.length}>
-                  <option value="">Select an assigned shop</option>
-                  {sites.map((site) => <option key={site.id} value={site.id}>{site.name} – {site.address}</option>)}
-                </select>
+            </label>
+            <div className="nwg-location-picker nwg-delivery-location">
+              <label>Current Delivery Location <span className="nwg-required">*</span>
+                <textarea required minLength={3} maxLength={500} value={deliveryAddress}
+                  onChange={(event) => {
+                    setDeliveryAddress(event.target.value);
+                    setLocationToken('');
+                    setLocationSource(location ? 'gps_manual' : 'manual_no_gps');
+                  }} placeholder="Detected address will appear here. You can also enter it manually." />
               </label>
-              <button type="button" className="nwg-location-button" onClick={captureLocation}>
-                <LocateFixed size={16} />{location ? 'Location captured' : 'Use my location'}
-                {location && <span>{location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}</span>}
+              <button type="button" className="nwg-location-button" onClick={captureLocation} disabled={locationLoading}>
+                <LocateFixed size={16} />{locationLoading ? 'Detecting address…' : location ? 'Refresh Location' : 'Use My Location'}
               </button>
-              <small>Select the assigned shop where the promotion was done.</small>
+              <small>Location is captured only when requested. Coordinates are sent to OpenStreetMap Nominatim to resolve the address and stored with this proof.</small>
             </div>
+            {locationError && <p className="nwg-feedback is-error" role="alert">{locationError}</p>}
+            {location && <section className="nwg-location-confirmation" aria-label="GPS location evidence">
+              <div className="nwg-location-confirmation-heading">
+                <CheckCircle2 size={18} />
+                <strong>{locationSource === 'gps_reverse_geocoded' ? 'Location captured successfully' : 'GPS captured · address needs confirmation'}</strong>
+              </div>
+              <p>{deliveryAddress || 'Address lookup failed. Enter the delivery address above or retry location detection.'}</p>
+              <dl>
+                <div><dt>GPS coordinates</dt><dd>{location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}</dd></div>
+                <div><dt>Accuracy</dt><dd>±{Math.round(location.accuracy)} m</dd></div>
+                <div><dt>Captured</dt><dd>{formatDate(location.capturedAt)}</dd></div>
+              </dl>
+              <iframe title="Delivery location map preview"
+                src={`https://www.openstreetmap.org/export/embed.html?bbox=${location.longitude - 0.006}%2C${location.latitude - 0.004}%2C${location.longitude + 0.006}%2C${location.latitude + 0.004}&layer=mapnik&marker=${location.latitude}%2C${location.longitude}`}
+                loading="lazy" referrerPolicy="no-referrer" />
+              <small>© OpenStreetMap contributors</small>
+            </section>}
+            <label>Additional address detail or landmark (optional)
+              <input maxLength={240} value={addressDetail}
+                onChange={(event) => setAddressDetail(event.target.value)}
+                placeholder="Floor, nearby landmark, or directions" />
+              <small>This is stored separately and does not change your GPS evidence or detected address.</small>
+            </label>
             <div className="nwg-camera-frame">
               {photoDataUrl ? <img src={photoDataUrl} alt="Captured partner proof preview" /> :
                 cameraStream ? <video ref={videoRef} autoPlay muted playsInline aria-label="Live camera preview" /> :
@@ -950,17 +1177,18 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
               </div>
             </div>
             {cameraError && <p className="nwg-feedback is-error" role="alert">{cameraError}</p>}
-            <label>Note (optional)<textarea value={note} maxLength={200}
+            <label>Additional note (optional)<textarea value={note} maxLength={200}
               onChange={(event) => setNote(event.target.value)} placeholder="Add a short note for the reviewer." />
               <small className="nwg-char-count">{note.length} / 200</small>
             </label>
             <div className="nwg-form-end">
               <span className="nwg-muted">{data.inventory.available > 0
-                ? 'One card is reserved when submitted. 1,000 NGA Coins are credited only after approval.'
+                ? 'No campaign or shop assignment is required. One card is reserved on submit; 1,000 NGA Coins are credited only after approval.'
                 : 'No unreserved WildCards are available. Request a restock before submitting.'}</span>
               <button type="submit" className="nwg-button nwg-button-primary"
-                disabled={busy || !assignment || !siteId || !photoDataUrl || data.inventory.available <= 0}>
-                <Send size={15} />{busy ? 'Submitting…' : 'Submit proof'}
+                disabled={busy || !businessName.trim() || deliveryAddress.trim().length < 3 ||
+                  !photoDataUrl || data.inventory.available <= 0}>
+                <Send size={15} />{busy ? 'Submitting…' : 'Submit Delivery Proof'}
               </button>
             </div>
           </form>
@@ -973,20 +1201,21 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
             trailing={<select aria-label="Filter proof history" value={filter} onChange={(event) => {
               setFilter(event.target.value); setShowAllHistory(false);
             }}>
-              <option value="all">All campaigns</option><option value="pending">Pending</option>
+              <option value="all">All deliveries</option><option value="pending">Pending</option>
               <option value="approved">Approved</option><option value="needs_correction">Needs correction</option>
             </select>} />
           {history.length ? <div className="nwg-proof-history">
             {visibleHistory.map((proof) => {
-              const site = data.campaigns.flatMap((item) => item.sites).find((item) => item.id === proof.site_id);
               return <button type="button" key={proof.id} className="nwg-proof-history-row" onClick={() => setSelectedProof(proof)}>
                 <img src={proof.photoUrl} alt="" loading="lazy" />
                 <span className="nwg-proof-history-copy">
                   <strong>{proof.id.slice(0, 8).toUpperCase()}</strong>
-                  <span>{site?.name || campaignName(data, proof.campaign_id)}</span>
+                  <span>{proof.business_name || campaignName(data, proof.campaign_id)}</span>
+                  <small>{proof.delivery_address || 'Address not provided in legacy record'}</small>
                   <small><CalendarDays size={13} />{formatDate(proof.submitted_at)}</small>
                 </span>
-                <StatusPill status={proof.status} /><ArrowRight size={17} />
+                <span className="nwg-proof-history-status"><StatusPill status={proof.status} />
+                  <small>{proof.status === 'approved' ? `${formatNumber(proof.coins)} NGA Coins` : 'No coins yet'}</small></span><ArrowRight size={17} />
               </button>;
             })}
           </div> : <EmptyState icon={FileCheck2} title="No proof history yet"
@@ -995,7 +1224,7 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
             onClick={() => setShowAllHistory((showAll) => !showAll)}>
             {showAllHistory ? 'Show latest submissions' : 'View older submissions'} <ArrowRight size={14} />
           </button>}
-          <p className="nwg-history-note"><ShieldCheck size={15} />Photos are private to the assigned partner and campaign owner.</p>
+          <p className="nwg-history-note"><ShieldCheck size={15} />Proof photos are private and available only to you and authorized NearGrow reviewers.</p>
         </section>
       </div>
       {selectedProof && <div className="nwg-modal-backdrop" role="presentation" onClick={() => setSelectedProof(null)}>
@@ -1003,10 +1232,18 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
           onClick={(event) => event.stopPropagation()}>
           <button type="button" className="nwg-modal-close" onClick={() => setSelectedProof(null)} aria-label="Close proof details"><X size={20} /></button>
           <img src={selectedProof.photoUrl} alt="Partner submitted proof" />
-          <h2>{campaignName(data, selectedProof.campaign_id)}</h2>
+          <h2>{selectedProof.business_name || campaignName(data, selectedProof.campaign_id)}</h2>
+          {selectedProof.business_category && <p>{selectedProof.business_category}</p>}
+          <p>{selectedProof.delivery_address || 'Address not provided in legacy record'}</p>
+          {selectedProof.address_detail && <p>{selectedProof.address_detail}</p>}
+          <p>{formatDate(selectedProof.submitted_at)} · {selectedProof.status === 'approved'
+            ? `${formatNumber(selectedProof.coins)} NGA Coins earned` : 'No reward credited'}</p>
           <StatusPill status={selectedProof.status} />
           <p>{selectedProof.note || 'No note added.'}</p>
           {selectedProof.review_note && <p className="nwg-review-note"><strong>Owner note:</strong> {selectedProof.review_note}</p>}
+          {selectedProof.latitude !== null && selectedProof.longitude !== null &&
+            <a className="nwg-button nwg-button-secondary" href={`https://www.google.com/maps?q=${selectedProof.latitude},${selectedProof.longitude}`}
+              target="_blank" rel="noreferrer">View Location</a>}
         </section>
       </div>}
     </section>
@@ -1175,7 +1412,7 @@ function ProfileSection({ data, onProfileUpdated }: {
   return (
     <section className="nwg-screen nwg-profile-screen" aria-labelledby="partner-workspace-page-title">
       <PageHeading eyebrow="Profile & support" title={`Profile & Support — ${data.user.fullName.split(/\s+/)[0]}`}
-        description="Manage your partner profile, get help, and follow the handover guide for smooth campaign execution." />
+        description="Manage your partner profile, get help, and follow the independent WildCard delivery guide." />
       <div className="nwg-profile-top">
         <section className="nwg-card nwg-profile-summary">
           <span className="nwg-profile-avatar" aria-hidden="true">{getInitials(data.user.fullName)}</span>
@@ -1196,7 +1433,7 @@ function ProfileSection({ data, onProfileUpdated }: {
             <button type="submit" className="nwg-button nwg-button-primary" disabled={busy}><Check size={15} />{busy ? 'Saving…' : 'Save changes'}</button>
           </form>
         </section> : <section className="nwg-card nwg-support-card">
-          <div><h2>Need help?</h2><p>Contact our support team about campaigns, proofs, or earnings.</p></div>
+          <div><h2>Need help?</h2><p>Contact our support team about WildCard deliveries, inventory, proofs, or earnings.</p></div>
           <a href="mailto:info@neargrowads.in" className="nwg-button nwg-button-primary"><MailCheck size={16} />Email support</a>
           <a href="tel:+919289810149" className="nwg-button nwg-button-secondary"><Phone size={16} />Call support</a>
         </section>}
@@ -1204,16 +1441,16 @@ function ProfileSection({ data, onProfileUpdated }: {
       {(error || message) && <p className={`nwg-feedback${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}>{error || message}</p>}
       <section className="nwg-card nwg-handover-guide">
         <CardHeading icon={LifeBuoy} title="Three Step Handover Guide"
-          description="Follow these steps at every site to complete a successful handover and submit valid proof." />
+          description="Visit local businesses independently, capture delivery evidence, and submit your proof for owner review." />
         <div className="nwg-guide-steps">
-          <article><MapPin size={27} /><span className="nwg-step-number">1</span><div><strong>Go to the site</strong>
-            <p>Use the assigned site address from your campaign.</p></div></article>
+          <article><MapPin size={27} /><span className="nwg-step-number">1</span><div><strong>Visit any local business</strong>
+            <p>Introduce NearGrow WildCard to a legitimate local business. No campaign or area assignment is required.</p></div></article>
           <ArrowRight className="nwg-step-arrow" size={22} />
-          <article><Camera size={27} /><span className="nwg-step-number">2</span><div><strong>Capture proof</strong>
-            <p>Take clear, well-lit photos of the completed handover.</p></div></article>
+          <article><Camera size={27} /><span className="nwg-step-number">2</span><div><strong>Deliver and capture</strong>
+            <p>Deliver the WildCard, capture the current location, and take a clear proof photo.</p></div></article>
           <ArrowRight className="nwg-step-arrow" size={22} />
-          <article><Upload size={27} /><span className="nwg-step-number">3</span><div><strong>Submit & confirm</strong>
-            <p>Upload in Proof Submissions and check your review history.</p></div></article>
+          <article><Upload size={27} /><span className="nwg-step-number">3</span><div><strong>Submit and earn</strong>
+            <p>Submit your proof. Receive 1,000 NGA Coins after owner approval.</p></div></article>
         </div>
       </section>
       <div className="nwg-examples-layout">
@@ -1233,13 +1470,13 @@ function ProfileSection({ data, onProfileUpdated }: {
           <CardHeading icon={CircleHelp} title="Sample Data — Reference Only"
             description="Illustrative handover details; not a live campaign or partner record." />
           <dl>
-            <div><dt><Crosshair size={16} />Campaign</dt><dd>GC-104 · Store Signage</dd></div>
-            <div><dt><Store size={16} />Site / Store</dt><dd>GreenCart Mart</dd></div>
-            <div><dt><MapPin size={16} />Location</dt><dd>Sector 62, Noida</dd></div>
-            <div><dt><CalendarDays size={16} />Handover date</dt><dd>10 Jan 2025</dd></div>
-            <div><dt><Camera size={16} />Proof photos</dt><dd>2 (front view, close-up)</dd></div>
+            <div><dt><Store size={16} />Business</dt><dd>Sample local grocery store</dd></div>
+            <div><dt><MapPin size={16} />Delivery address</dt><dd>Example Street, Noida, India</dd></div>
+            <div><dt><CalendarDays size={16} />Handover date</dt><dd>Reference only · not a live delivery</dd></div>
+            <div><dt><Camera size={16} />Proof photo</dt><dd>One clear delivery photo</dd></div>
+            <div><dt><Coins size={16} />Reward</dt><dd>1,000 NGA Coins after owner approval</dd></div>
           </dl>
-          <p className="nwg-sample-warning"><ShieldCheck size={14} />Live assignments and submissions are never populated from this sample.</p>
+          <p className="nwg-sample-warning"><ShieldCheck size={14} />Reference example only. This is not a live business, address, assignment, or partner record.</p>
         </section>
       </div>
     </section>
@@ -1270,12 +1507,14 @@ export function PartnerWorkspace({
     setWorkspaceError('');
     try {
       const data = await partnerApi<PartnerWorkspaceData & PartnerApiResponse>('/api/partners/dashboard');
+      const inventoryValues = data.inventory ? Object.values(data.inventory) : [];
       if (!Array.isArray(data.campaigns) || !Array.isArray(data.proofs) ||
         !Array.isArray(data.stockHistory) || !Array.isArray(data.requests) ||
         !Array.isArray(data.damageReports) || !Array.isArray(data.ledger) ||
         !Array.isArray(data.withdrawals) || !data.coinSummary || !data.user ||
-        !data.inventory || !Number.isSafeInteger(data.inventory.available) ||
-        !Number.isSafeInteger(data.inventory.reserved) || !Number.isSafeInteger(data.inventory.delivered)) {
+        !data.inventory || inventoryValues.some((value) => !Number.isSafeInteger(value) || value < 0) ||
+        data.inventory.progressPercent > 100 ||
+        !Number.isSafeInteger(data.deliveriesToday) || data.deliveriesToday < 0) {
         throw new Error('The partner workspace response was incomplete.');
       }
       setWorkspace(data);
@@ -1422,8 +1661,8 @@ export function PartnerWorkspace({
                 </button></div>
             </section>}
             {!workspaceBusy && !workspaceError && workspace && <>
-              {section === 'dashboard' && <DashboardSection data={workspace} onNavigate={setSection} onRefresh={refreshWorkspace} />}
-              {section === 'campaigns' && <CampaignsSection data={workspace} onRefresh={refreshWorkspace} />}
+              {section === 'dashboard' && <DashboardSection data={workspace} onNavigate={setSection} />}
+              {section === 'inventory' && <IndependentInventorySection data={workspace} onNavigate={setSection} onRefresh={refreshWorkspace} />}
               {section === 'proof' && <ProofSection data={workspace} onRefresh={refreshWorkspace} />}
               {section === 'earnings' && <EarningsSection data={workspace} onRefresh={refreshWorkspace} />}
               {section === 'profile' && <ProfileSection data={workspace} onProfileUpdated={(user) => {

@@ -6,8 +6,10 @@ export interface PartnerWorkspaceActivityData {
   }>;
   proofs: Array<{
     id: string;
-    campaign_id: string;
-    site_id: string;
+    campaign_id: string | null;
+    site_id: string | null;
+    business_name: string;
+    delivery_address: string;
     status: string;
     submitted_at: string;
   }>;
@@ -29,7 +31,7 @@ export interface PartnerWorkspaceActivityData {
   }>;
   damageReports: Array<{
     id: string;
-    assignment_id: string;
+    assignment_id: string | null;
     issue_type: string;
     details: string;
     status: string;
@@ -71,7 +73,7 @@ export function buildPartnerWorkspaceActivity(data: PartnerWorkspaceActivityData
       id: `proof:${proof.id}`,
       createdAt: proof.submitted_at,
       type: 'Proof submission',
-      details: `${siteById.get(proof.site_id) || 'Assigned shop'} · ${campaignById.get(proof.campaign_id) || 'Campaign'}`,
+      details: `${proof.business_name || siteById.get(proof.site_id || '') || 'Historical delivery'} · ${proof.delivery_address || campaignById.get(proof.campaign_id || '') || 'Address not provided in legacy record'}`,
       status: proof.status,
     })),
     ...data.stockHistory.map((movement) => ({
@@ -96,7 +98,9 @@ export function buildPartnerWorkspaceActivity(data: PartnerWorkspaceActivityData
       id: `damage:${report.id}`,
       createdAt: report.created_at,
       type: 'Damage report',
-      details: `${campaignByAssignmentId.get(report.assignment_id) || 'Campaign'} · ${report.issue_type.replaceAll('_', ' ')}${report.details ? ` · ${report.details}` : ''}`,
+      details: `${report.assignment_id
+        ? campaignByAssignmentId.get(report.assignment_id) || 'Historical campaign'
+        : 'Independent distribution'} · ${report.issue_type.replaceAll('_', ' ')}${report.details ? ` · ${report.details}` : ''}`,
       status: report.status,
     })),
     ...data.ledger.map((entry) => ({

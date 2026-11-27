@@ -33,30 +33,16 @@ function Set-RestrictedAcl {
     [Parameter(Mandatory = $true)][bool]$IsDirectory
   )
 
-  $acl = if ($IsDirectory) {
-    [System.Security.AccessControl.DirectorySecurity]::new()
-  } else {
-    [System.Security.AccessControl.FileSecurity]::new()
+  $icaclsPath = Join-Path $env:SystemRoot 'System32\icacls.exe'
+  if (-not (Test-Path -LiteralPath $icaclsPath -PathType Leaf)) {
+    throw 'The Windows ACL utility is unavailable.'
   }
-  $acl.SetAccessRuleProtection($true, $false)
-  $acl.SetOwner($currentSid)
-  $inheritance = if ($IsDirectory) {
-    [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-      [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-  } else {
-    [System.Security.AccessControl.InheritanceFlags]::None
+  $rights = if ($IsDirectory) { '(OI)(CI)F' } else { 'F' }
+  $grantRules = @($allowedSids | ForEach-Object { "*$($_.Value):$rights" })
+  $output = @(& $icaclsPath $TargetPath '/inheritance:r' '/grant:r' @grantRules 2>&1)
+  if ($LASTEXITCODE -ne 0) {
+    throw 'The Windows ACL utility could not apply the restricted password-path permissions.'
   }
-  foreach ($sid in $allowedSids) {
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-      $sid,
-      [System.Security.AccessControl.FileSystemRights]::FullControl,
-      $inheritance,
-      [System.Security.AccessControl.PropagationFlags]::None,
-      [System.Security.AccessControl.AccessControlType]::Allow
-    )
-    [void]$acl.AddAccessRule($rule)
-  }
-  Set-Acl -LiteralPath $TargetPath -AclObject $acl
 }
 
 function Assert-RestrictedAcl {
@@ -71,11 +57,26 @@ function Assert-RestrictedAcl {
     throw 'The password file ACL must be protected from inherited access.'
   }
   foreach ($rule in $acl.Access) {
-    if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
-        $allowedSids -notcontains $rule.IdentityReference.Translate(
-          [System.Security.Principal.SecurityIdentifier]
-        ).Value) {
+    $ruleSid = $rule.IdentityReference.Translate(
+      [System.Security.Principal.SecurityIdentifier]
+    ).Value
+    if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or
+        $allowedSids.Value -notcontains $ruleSid -or
+        $rule.FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl) {
       throw 'The password file ACL contains an unapproved Windows identity.'
+    }
+  }
+  if ($acl.Access.Count -ne $allowedSids.Count) {
+    throw 'The password file ACL does not contain exactly the approved Windows identities.'
+  }
+  foreach ($sid in $allowedSids) {
+    $matchingRules = @($acl.Access | Where-Object {
+      $_.IdentityReference.Translate(
+        [System.Security.Principal.SecurityIdentifier]
+      ).Value -eq $sid.Value
+    })
+    if ($matchingRules.Count -ne 1) {
+      throw 'The password file ACL is missing an approved Windows identity.'
     }
   }
 }

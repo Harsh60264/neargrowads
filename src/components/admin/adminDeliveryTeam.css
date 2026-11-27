@@ -2226,3 +2226,114 @@
     padding: 7px 6px;
   }
 }
+
+.dt-proof-copy .dt-delivery-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--dt-text);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.dt-proof-copy .dt-delivery-address svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--dt-accent);
+}
+
+.dt-proof-copy .dt-delivery-address-detail {
+  margin: 5px 0;
+  color: var(--dt-secondary);
+  overflow-wrap: anywhere;
+}
+
+.dt-proof-location {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  margin: 6px 0 9px;
+}
+
+.dt-proof-location .dt-location {
+  margin: 0 !important;
+}
+
+.dt-location-meta {
+  color: var(--dt-muted);
+  font-size: 0.65rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dt-proof-location .dt-map-link {
+  min-height: 30px;
+  margin-top: 3px;
+  padding: 5px 8px;
+  text-decoration: none;
+}
+
+.dt-delivery-history {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.dt-delivery-history > article {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 9px;
+  border: 1px solid var(--dt-border);
+  border-radius: 9px;
+  padding: 8px;
+}
+
+.dt-delivery-history img {
+  display: block;
+  width: 72px;
+  aspect-ratio: 1;
+  border-radius: 7px;
+  background: var(--dt-elevated);
+  object-fit: cover;
+}
+
+.dt-delivery-history > article > div {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dt-delivery-history strong,
+.dt-delivery-history b {
+  color: var(--dt-text);
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.dt-delivery-history span,
+.dt-delivery-history small,
+.dt-delivery-history p {
+  margin: 0;
+  color: var(--dt-muted);
+  font-size: 0.62rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dt-delivery-history .dt-link-button {
+  min-height: 28px;
+  font-size: 0.63rem;
+}
+
+@media (max-width: 400px) {
+  .dt-delivery-history > article {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .dt-delivery-history img {
+    width: 56px;
+  }
+}

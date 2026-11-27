@@ -11,6 +11,7 @@ test('partner activity merges proof, stock, request, damage, and ledger records 
     }],
     proofs: [{
       id: 'proof-1', campaign_id: 'campaign-1', site_id: 'site-1',
+      business_name: 'GreenCart Mart', delivery_address: '12 Main Road, Noida',
       status: 'pending', submitted_at: '2026-03-05T10:00:00Z',
     }],
     stockHistory: [{
@@ -38,8 +39,29 @@ test('partner activity merges proof, stock, request, damage, and ledger records 
     'stock issued',
     'NGA Coins · earning',
   ]);
-  assert.equal(activity[0].details, 'GreenCart Mart · Local Signage');
+  assert.equal(activity[0].details, 'GreenCart Mart · 12 Main Road, Noida');
   assert.equal(activity[1].details, 'Local Signage · Need more cards');
   assert.equal(activity[3].details, 'Local Signage · +12 WildCards · Approved allocation');
   assert.equal(activity[4].details, '+150 coins · Local Signage');
+});
+
+test('independent delivery and damage records do not require campaign assignments', () => {
+  const activity = buildPartnerWorkspaceActivity({
+    campaigns: [],
+    proofs: [{
+      id: 'proof-independent', campaign_id: null, site_id: null,
+      business_name: 'Independent Shop', delivery_address: 'Market Street, Noida',
+      status: 'pending', submitted_at: '2026-03-05T10:00:00Z',
+    }],
+    stockHistory: [],
+    requests: [],
+    damageReports: [{
+      id: 'damage-independent', assignment_id: null, issue_type: 'damaged',
+      details: 'Card was bent', status: 'pending', created_at: '2026-03-05T11:00:00Z',
+    }],
+    ledger: [],
+  });
+
+  assert.equal(activity[0].details, 'Independent distribution · damaged · Card was bent');
+  assert.equal(activity[1].details, 'Independent Shop · Market Street, Noida');
 });

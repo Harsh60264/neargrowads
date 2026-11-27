@@ -26,6 +26,7 @@ import {
 } from './src/data/marketingAnalytics';
 import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
 import { readCustomerLocation, withCustomerLocation } from './server/customerLocationSerialization.ts';
+import { PartnerReverseGeocoding, ReverseGeocodeError } from './server/partnerReverseGeocoding.ts';
 import {
   fromSupabaseServiceEnquiry,
   type ServiceBillingType,
@@ -188,6 +189,18 @@ const __dirname = path.dirname(__filename);
 const rateLimitMap = new Map<string, number[]>();
 const websiteActivityIpLimiter = new WebsiteActivityRateLimiter();
 const websiteActivityVisitorLimiter = new WebsiteActivityRateLimiter();
+const partnerReverseGeocoder = new PartnerReverseGeocoding(fetch, Date.now, undefined, async () => {
+  const reservedAt = await readSupabaseJson<string>(await supabaseAdminRequest(
+    'rest/v1/rpc/reserve_partner_reverse_geocode_slot',
+    { method: 'POST', body: '{}' },
+  ));
+  const waitMs = Date.parse(reservedAt) - Date.now();
+  if (!Number.isFinite(waitMs) || waitMs > 5000) {
+    throw new ReverseGeocodeError('The address service is busy. Retry shortly or enter the address manually.', 429);
+  }
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+});
+const partnerReverseGeocodeRequestLimiter = new WebsiteActivityRateLimiter();
 let lastWebsiteActivityCleanupAt = 0;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const MAX_REQUESTS_PER_WINDOW = 10;
@@ -3937,14 +3950,17 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       limit: '100',
     }),
     readPartnerWorkspaceTable<{
-      id: string; assignment_id: string; campaign_id: string; site_id: string; photo_path: string;
-      note: string; latitude: number | null; longitude: number | null; coins: number; status: string;
+      id: string; assignment_id: string | null; campaign_id: string | null; site_id: string | null;
+      photo_path: string; note: string; latitude: number | null; longitude: number | null;
+      business_name: string; business_category: string; delivery_address: string; address_detail: string;
+      location_address_source: string; location_accuracy_meters: number | null;
+      location_captured_at: string | null; coins: number; status: string;
       review_note: string; submitted_at: string; reviewed_at: string | null;
     }>('partner_proofs', {
       partner_profile_id: `eq.${partnerId}`,
-      select: 'id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,coins,status,review_note,submitted_at,reviewed_at',
+      select: 'id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,business_name,business_category,delivery_address,address_detail,location_address_source,location_accuracy_meters,location_captured_at,coins,status,review_note,submitted_at,reviewed_at',
       order: 'submitted_at.desc',
-      limit: '100',
+      limit: '1000',
     }),
     readPartnerWorkspaceTable<{
       id: string; assignment_id: string | null; movement_type: string; quantity: number; notes: string; created_at: string;
@@ -3964,7 +3980,7 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       limit: '100',
     }),
     readPartnerWorkspaceTable<{
-      id: string; assignment_id: string; card_id: string; issue_type: string; details: string;
+      id: string; assignment_id: string | null; card_id: string; issue_type: string; details: string;
       status: string; created_at: string;
     }>('partner_damage_reports', {
       partner_profile_id: `eq.${partnerId}`,
@@ -4075,6 +4091,8 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     ledger,
     withdrawals,
     coinSummary,
+    deliveriesToday: proofs.filter((proof) => proof.status === 'approved' &&
+      proof.submitted_at.slice(0, 10) === today).length,
   };
 }
 
@@ -6275,6 +6293,58 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
   });
 
+  app.post('/api/partners/reverse-geocode', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Location lookup must be requested from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const latitude = req.body?.latitude;
+    const longitude = req.body?.longitude;
+    const accuracy = req.body?.accuracy;
+    const capturedAt = req.body?.capturedAt;
+    const capturedAtMs = typeof capturedAt === 'string' ? Date.parse(capturedAt) : NaN;
+    if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+      typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 50_000 ||
+      typeof capturedAt !== 'string' || !Number.isFinite(capturedAtMs) ||
+      new Date(capturedAtMs).toISOString() !== capturedAt ||
+      capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000) {
+      res.status(400).json({ message: 'Capture a fresh location with valid GPS accuracy before looking up its address.' });
+      return;
+    }
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    if (!partnerReverseGeocodeRequestLimiter.allow(`${profile.id}:${clientIp}`, now, {
+      maxRequests: 4,
+      windowMs: 5 * 60_000,
+    })) {
+      res.status(429).json({ message: 'Location lookup is temporarily rate-limited. Wait before retrying.' });
+      return;
+    }
+    try {
+      const address = await partnerReverseGeocoder.reverse(profile.id, latitude, longitude);
+      const evidence = JSON.stringify([profile.id, latitude, longitude, accuracy, capturedAt, address]);
+      const token = createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '')
+        .update(evidence).digest('base64url');
+      res.json({
+        address,
+        token,
+        provider: 'OpenStreetMap Nominatim',
+        attribution: '© OpenStreetMap contributors',
+      });
+    } catch (error) {
+      if (error instanceof ReverseGeocodeError) {
+        res.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.error('[NearGrow Ads] Partner reverse geocoding failed.');
+      res.status(502).json({ message: 'The address service is temporarily unavailable. Retry or enter the address manually.' });
+    }
+  });
+
   app.post('/api/partners/proofs', async (req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
     if (!isSameOriginRequest(req)) {
@@ -6283,28 +6353,59 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     const profile = await requirePartnerSession(req, res);
     if (!profile) return;
-    if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
-      typeof req.body?.siteId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.siteId)) {
-      res.status(400).json({ message: 'Select an assigned campaign and shop.' });
-      return;
-    }
     const photo = parsePartnerProofPhoto(req.body?.photoDataUrl);
     if (!photo) {
       res.status(400).json({ message: 'Capture or select a clear JPEG, PNG, or WebP proof photo up to 2 MB.' });
       return;
     }
+    const businessName = typeof req.body?.businessName === 'string' ? req.body.businessName.trim() : '';
+    const businessCategory = typeof req.body?.businessCategory === 'string' ? req.body.businessCategory.trim() : '';
+    const deliveryAddress = typeof req.body?.deliveryAddress === 'string' ? req.body.deliveryAddress.trim() : '';
+    const addressDetail = typeof req.body?.addressDetail === 'string' ? req.body.addressDetail.trim() : '';
     const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
     const latitude = req.body?.latitude === null || req.body?.latitude === undefined
       ? null
-      : Number(req.body.latitude);
+      : req.body.latitude;
     const longitude = req.body?.longitude === null || req.body?.longitude === undefined
       ? null
-      : Number(req.body.longitude);
-    if (note.length > 200 ||
+      : req.body.longitude;
+    const accuracy = req.body?.accuracy === null || req.body?.accuracy === undefined
+      ? null
+      : req.body.accuracy;
+    const capturedAt = typeof req.body?.capturedAt === 'string' ? req.body.capturedAt : null;
+    const locationAddressSource = req.body?.locationAddressSource;
+    const locationToken = typeof req.body?.locationToken === 'string' ? req.body.locationToken : '';
+    const capturedAtMs = capturedAt ? Date.parse(capturedAt) : NaN;
+    if (businessName.length < 2 || businessName.length > 120 || businessCategory.length > 80 ||
+      deliveryAddress.length < 3 || deliveryAddress.length > 500 || addressDetail.length > 240 ||
+      note.length > 200 ||
       ((latitude === null) !== (longitude === null)) ||
-      (latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
-        !Number.isFinite(longitude) || longitude! < -180 || longitude! > 180))) {
-      res.status(400).json({ message: 'Check the note and captured location, then try again.' });
+      (latitude !== null && (typeof latitude !== 'number' || !Number.isFinite(latitude) ||
+        latitude < -90 || latitude > 90 || typeof longitude !== 'number' ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+        typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 50_000 ||
+        !capturedAt || !Number.isFinite(capturedAtMs) || new Date(capturedAtMs).toISOString() !== capturedAt ||
+        capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000)) ||
+      (latitude === null && (accuracy !== null || capturedAt !== null || locationToken.length > 0)) ||
+      !['gps_reverse_geocoded', 'gps_manual', 'manual_no_gps'].includes(locationAddressSource)) {
+      res.status(400).json({ message: 'Check the business details, address, note, and current location evidence, then try again.' });
+      return;
+    }
+    if ((latitude === null && locationAddressSource !== 'manual_no_gps') ||
+      (latitude !== null && !['gps_reverse_geocoded', 'gps_manual'].includes(locationAddressSource))) {
+      res.status(400).json({ message: 'The location source does not match the submitted GPS evidence.' });
+      return;
+    }
+    if (locationAddressSource === 'gps_reverse_geocoded') {
+      const evidence = JSON.stringify([profile.id, latitude, longitude, accuracy, capturedAt, deliveryAddress]);
+      const expectedToken = createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '')
+        .update(evidence).digest('base64url');
+      if (!locationToken || !safeStringEqual(locationToken, expectedToken)) {
+        res.status(400).json({ message: 'The detected address no longer matches the original GPS lookup. Refresh location or enter the address manually.' });
+        return;
+      }
+    } else if (locationToken) {
+      res.status(400).json({ message: 'Manual address evidence cannot include a geocoding token.' });
       return;
     }
 
@@ -6312,17 +6413,22 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     try {
       photoPath = await createPartnerProofPhoto(profile.id, photo.contentType, photo.bytes);
       const result = await readSupabaseJson<string>(await supabaseAdminRequest(
-        'rest/v1/rpc/submit_partner_proof',
+        'rest/v1/rpc/submit_independent_partner_proof',
         {
           method: 'POST',
           body: JSON.stringify({
             p_partner_profile_id: profile.id,
-            p_assignment_id: req.body.assignmentId,
-            p_site_id: req.body.siteId,
             p_photo_path: photoPath,
+            p_business_name: businessName,
+            p_business_category: businessCategory,
+            p_delivery_address: deliveryAddress,
+            p_address_detail: addressDetail,
             p_note: note,
             p_latitude: latitude,
             p_longitude: longitude,
+            p_accuracy_meters: accuracy,
+            p_captured_at: capturedAt,
+            p_address_source: locationAddressSource,
           }),
         },
       ));
@@ -6338,13 +6444,18 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       console.error('[NearGrow Ads] Partner proof submission failed:', error);
       const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
       const knownMessage = [
-        'Campaign is not active today',
-        'The selected shop is not part of this campaign',
-        'Daily proof target reached',
-        'No active campaign assignment found',
+        'No unreserved WildCard stock is available',
+        'GPS evidence is invalid or too old',
+        'Active partner profile not found',
+        'The captured location is invalid',
+        'Manual address submissions cannot include fabricated GPS evidence',
+        'Enter a valid business name',
+        'The business category is invalid',
+        'Enter a valid delivery address',
+        'The proof note is too long',
       ].find((message) => providerMessage.includes(message));
       res.status(knownMessage ? 400 : 503).json({
-        message: knownMessage || 'Your proof could not be submitted. Please try again.',
+        message: knownMessage || 'Your delivery proof could not be submitted. Please try again.',
       });
     }
   });
@@ -6446,29 +6557,32 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const issueType = req.body?.issueType;
     const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
     const cardId = typeof req.body?.cardId === 'string' ? req.body.cardId.trim() : '';
-    if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
+    const assignmentId = typeof req.body?.assignmentId === 'string' ? req.body.assignmentId : null;
+    if ((assignmentId !== null && !/^[0-9a-f-]{36}$/i.test(assignmentId)) ||
       !['damaged', 'lost', 'unusable', 'other'].includes(issueType) ||
       cardId.length > 80 || details.length > 1000) {
       res.status(400).json({ message: 'Check the card ID, issue type, and report details.' });
       return;
     }
     try {
-      const assignment = await readPartnerWorkspaceTable<{ id: string }>('partner_campaign_assignments', {
-        id: `eq.${req.body.assignmentId}`,
-        partner_profile_id: `eq.${profile.id}`,
-        active: 'eq.true',
-        select: 'id',
-        limit: '1',
-      });
-      if (!assignment.length) {
-        res.status(404).json({ message: 'That campaign is not assigned to your account.' });
-        return;
+      if (assignmentId) {
+        const assignment = await readPartnerWorkspaceTable<{ id: string }>('partner_campaign_assignments', {
+          id: `eq.${assignmentId}`,
+          partner_profile_id: `eq.${profile.id}`,
+          active: 'eq.true',
+          select: 'id',
+          limit: '1',
+        });
+        if (!assignment.length) {
+          res.status(404).json({ message: 'That historical campaign is not assigned to your account.' });
+          return;
+        }
       }
       await readSupabaseJson<unknown>(await supabaseAdminRequest('rest/v1/partner_damage_reports', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
-          assignment_id: req.body.assignmentId,
+          assignment_id: assignmentId,
           partner_profile_id: profile.id,
           card_id: cardId,
           issue_type: issueType,
@@ -6582,11 +6696,29 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const detail = await readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
-        'rest/v1/rpc/get_delivery_team_partner_detail',
-        { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id, p_partner_profile_id: partnerId }) },
-      ));
-      res.json({ detail });
+      const [detail, proofs] = await Promise.all([
+        readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
+          'rest/v1/rpc/get_delivery_team_partner_detail',
+          { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id, p_partner_profile_id: partnerId }) },
+        )),
+        readPartnerWorkspaceTable<{
+          id: string; business_name: string; business_category: string; delivery_address: string;
+          address_detail: string; photo_path: string; latitude: number | null; longitude: number | null;
+          location_accuracy_meters: number | null; location_captured_at: string | null;
+          location_address_source: string; coins: number; status: string; review_note: string;
+          submitted_at: string; reviewed_at: string | null;
+        }>('partner_proofs', {
+          partner_profile_id: `eq.${partnerId}`,
+          select: 'id,business_name,business_category,delivery_address,address_detail,photo_path,latitude,longitude,location_accuracy_meters,location_captured_at,location_address_source,coins,status,review_note,submitted_at,reviewed_at',
+          order: 'submitted_at.desc',
+          limit: '100',
+        }),
+      ]);
+      const proofHistory = await Promise.all(proofs.map(async (proof) => ({
+        ...proof,
+        photoUrl: await getPartnerProofPhotoUrl(proof.photo_path),
+      })));
+      res.json({ detail: { ...detail, proofHistory } });
     } catch (error) {
       console.error('[NearGrow Ads] Delivery Team partner detail failed:', error);
       res.status(503).json({ message: 'The delivery partner details could not be loaded.' });
@@ -6852,15 +6984,28 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
 
   app.get('/api/admin/delivery-team/requests', async (_req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
+    const identity = currentAdmin(res);
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
     try {
+      await readSupabaseJson<DeliveryTeamOverviewItem>(await supabaseAdminRequest(
+        'rest/v1/rpc/get_delivery_team_overview',
+        { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id }) },
+      ));
       const [proofs, requestRows, damageReports, withdrawals] = await Promise.all([
         readPartnerWorkspaceTable<{
-          id: string; partner_profile_id: string; assignment_id: string; campaign_id: string; site_id: string;
+          id: string; partner_profile_id: string; assignment_id: string | null;
+          campaign_id: string | null; site_id: string | null;
           photo_path: string; note: string; latitude: number | null; longitude: number | null;
+          business_name: string; business_category: string; delivery_address: string;
+          address_detail: string; location_address_source: string;
+          location_accuracy_meters: number | null; location_captured_at: string | null;
           coins: number; submitted_at: string;
         }>('partner_proofs', {
           status: 'eq.pending',
-          select: 'id,partner_profile_id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,coins,submitted_at',
+          select: 'id,partner_profile_id,assignment_id,campaign_id,site_id,photo_path,note,latitude,longitude,business_name,business_category,delivery_address,address_detail,location_address_source,location_accuracy_meters,location_captured_at,coins,submitted_at',
           order: 'submitted_at.asc',
           limit: '100',
         }),
@@ -6874,7 +7019,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           limit: '100',
         }),
         readPartnerWorkspaceTable<{
-          id: string; partner_profile_id: string; assignment_id: string; card_id: string;
+          id: string; partner_profile_id: string; assignment_id: string | null; card_id: string;
           issue_type: string; details: string; created_at: string;
         }>('partner_damage_reports', {
           status: 'eq.pending',
@@ -6905,9 +7050,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         ...proofs.map((item) => item.assignment_id),
         ...campaignRequests.map((item) => item.assignment_id).filter((id): id is string => Boolean(id)),
         ...damageReports.map((item) => item.assignment_id),
-      ])];
-      const campaignIds = [...new Set(proofs.map((item) => item.campaign_id))];
-      const siteIds = [...new Set(proofs.map((item) => item.site_id))];
+      ].filter((id): id is string => Boolean(id)))];
+      const campaignIds = [...new Set(proofs.map((item) => item.campaign_id).filter((id): id is string => Boolean(id)))];
+      const siteIds = [...new Set(proofs.map((item) => item.site_id).filter((id): id is string => Boolean(id)))];
       const [profiles, assignments, campaigns, sites, proofViews] = await Promise.all([
         partnerIds.length ? readPartnerWorkspaceTable<{ id: string; full_name: string }>('partner_profiles', {
           id: partnerInFilter(partnerIds), select: 'id,full_name', limit: '1000',
@@ -6934,8 +7079,15 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         proofs: proofViews.map(({ proof, photoUrl }) => ({
           id: proof.id,
           partnerName: profileNames.get(proof.partner_profile_id) || 'Delivery partner',
-          campaignName: campaignById.get(proof.campaign_id) || 'WildCard campaign',
-          siteName: siteById.get(proof.site_id) || 'Assigned shop',
+          campaignName: proof.campaign_id ? campaignById.get(proof.campaign_id) || 'Historical campaign' : '',
+          siteName: proof.site_id ? siteById.get(proof.site_id) || 'Historical shop' : '',
+          businessName: proof.business_name,
+          businessCategory: proof.business_category,
+          deliveryAddress: proof.delivery_address,
+          addressDetail: proof.address_detail,
+          locationAddressSource: proof.location_address_source,
+          locationAccuracyMeters: proof.location_accuracy_meters,
+          locationCapturedAt: proof.location_captured_at,
           photoUrl,
           note: proof.note,
           latitude: proof.latitude,
@@ -6967,7 +7119,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           id: item.id,
           partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
           assignmentId: item.assignment_id,
-          campaignName: campaignByAssignment.get(item.assignment_id) || 'WildCard campaign',
+          campaignName: item.assignment_id ? campaignByAssignment.get(item.assignment_id) || 'Historical campaign' : 'Independent distribution',
           cardId: item.card_id,
           issueType: item.issue_type,
           details: item.details,

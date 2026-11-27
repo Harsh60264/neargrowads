@@ -167,12 +167,60 @@ CREATE TABLE public.admin_users (
     '20261123120000_partner_identity_isolation.sql',
     '20261126120000_create_partner_workspace.sql',
     '20261127120000_admin_delivery_team_management.sql',
-    '20261202120000_wildcard_inventory_restock.sql'
+    '20261202120000_wildcard_inventory_restock.sql',
+    '20261203120000_partner_independent_delivery.sql'
   )
   foreach ($migrationFile in $migrationFiles) {
     $migrationPath = Join-Path $repoRoot "supabase\migrations\$migrationFile"
     if (-not (Test-Path -LiteralPath $migrationPath -PathType Leaf)) {
       throw "Required migration file not found: $migrationFile"
+    }
+    if ($migrationFile -ceq '20261203120000_partner_independent_delivery.sql') {
+      $legacyProofSeedPath = Join-Path $runRoot 'legacy-proof-before-independent-migration.sql'
+      [System.IO.File]::WriteAllText($legacyProofSeedPath, @'
+DO $seed$
+DECLARE
+  v_owner_id constant uuid := 'a2000000-0000-4000-8000-000000000001';
+  v_partner_id constant uuid := 'a2000000-0000-4000-8000-000000000012';
+  v_campaign_id uuid;
+  v_assignment_id uuid;
+  v_site_id uuid;
+BEGIN
+  INSERT INTO auth.users (id, email) VALUES
+    (v_owner_id, 'legacy-gps-owner@example.test'),
+    (v_partner_id, 'legacy-gps-partner@example.test');
+  INSERT INTO public.admin_users (id, email, role, status, is_primary_owner, permissions)
+  VALUES (v_owner_id, 'legacy-gps-owner@example.test', 'owner', 'active', true, '{}'::jsonb);
+  INSERT INTO public.partner_profiles (id, email, full_name, mobile_number, status)
+  VALUES (v_partner_id, 'legacy-gps-partner@example.test', 'Legacy GPS Fixture', '+10000000012', 'active');
+  INSERT INTO public.partner_campaigns (
+    name, description, area, start_date, end_date, daily_target, coins_per_proof
+  ) VALUES (
+    'Legacy GPS compatibility fixture', '', 'Fixture area',
+    current_date, current_date + 7, 100, 37
+  ) RETURNING id INTO v_campaign_id;
+  INSERT INTO public.partner_campaign_assignments (
+    campaign_id, partner_profile_id, daily_target
+  ) VALUES (v_campaign_id, v_partner_id, 100)
+  RETURNING id INTO v_assignment_id;
+  INSERT INTO public.partner_campaign_sites (campaign_id, name, address)
+  VALUES (v_campaign_id, 'Legacy GPS fixture shop', 'Legacy fixture address')
+  RETURNING id INTO v_site_id;
+
+  PERFORM public.admin_manage_partner_stock(
+    v_owner_id, v_partner_id, v_assignment_id, 'issued', 1, 'Legacy proof fixture stock',
+    'a2000000-0000-4000-8000-000000000101'
+  );
+  PERFORM public.submit_partner_proof(
+    v_partner_id, v_assignment_id, v_site_id,
+    v_partner_id::text || '/legacy-coordinate-proof.webp',
+    'Legacy campaign proof with coordinates', 28.6139, 77.2090
+  );
+END;
+$seed$;
+'@, [System.Text.UTF8Encoding]::new($false))
+      Invoke-PsqlFile -Path $legacyProofSeedPath
+      Write-Output 'Seeded a campaign proof with historical GPS coordinates and no accuracy/timestamp before independent-delivery migration.'
     }
     Write-Output "Applying to disposable database: $migrationFile"
     & $psqlPath '--no-psqlrc' '--no-password' '--set=ON_ERROR_STOP=1' '--single-transaction' `
@@ -184,6 +232,62 @@ CREATE TABLE public.admin_users (
 
   $testPath = Join-Path $repoRoot 'supabase\tests\wildcard_inventory_restock.test.sql'
   Invoke-PsqlFile -Path $testPath
+
+  $independentProofSeedPath = Join-Path $runRoot 'independent-proof-concurrency-seed.sql'
+  [System.IO.File]::WriteAllText($independentProofSeedPath, @'
+SELECT public.admin_manage_partner_stock(
+  'a1000000-0000-4000-8000-000000000001',
+  'a1000000-0000-4000-8000-000000000012',
+  NULL, 'issued', 1, 'Concurrent independent proof seed',
+  'a1000000-0000-4000-8000-000000000301'
+);
+'@, [System.Text.UTF8Encoding]::new($false))
+  Invoke-PsqlFile -Path $independentProofSeedPath
+  $independentProofSql = @'
+BEGIN;
+SELECT public.submit_independent_partner_proof(
+  'a1000000-0000-4000-8000-000000000012',
+  'a1000000-0000-4000-8000-000000000012/independent-concurrent-first.webp',
+  'Concurrent Independent Shop', 'Retail', 'Test Street, Noida', '', '',
+  NULL, NULL, NULL, NULL, 'manual_no_gps'
+);
+SELECT pg_sleep(2);
+COMMIT;
+'@
+  $independentProofWaitSql = $independentProofSql.Replace(
+    'independent-concurrent-first.webp', 'independent-concurrent-second.webp'
+  ).Replace("SELECT pg_sleep(2);`r`n", '').Replace("SELECT pg_sleep(2);`n", '')
+  $independentProofPath = Join-Path $runRoot 'independent-proof-first.sql'
+  $independentProofWaitPath = Join-Path $runRoot 'independent-proof-second.sql'
+  [System.IO.File]::WriteAllText($independentProofPath, $independentProofSql, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($independentProofWaitPath, $independentProofWaitSql, [System.Text.UTF8Encoding]::new($false))
+  $firstIndependentProof = Start-PsqlFile -Path $independentProofPath -Label 'independent-proof-first'
+  Start-Sleep -Milliseconds 250
+  $secondIndependentProof = Start-PsqlFile -Path $independentProofWaitPath -Label 'independent-proof-second'
+  [void](Wait-PsqlProcess -Process $firstIndependentProof)
+  [void](Wait-PsqlProcess -Process $secondIndependentProof)
+  $firstIndependentProofError = Get-Content -LiteralPath (Join-Path $runRoot 'independent-proof-first.stderr.txt') -Raw
+  $secondIndependentProofError = Get-Content -LiteralPath (Join-Path $runRoot 'independent-proof-second.stderr.txt') -Raw
+  if ($firstIndependentProofError -match 'ERROR:' -or
+      $secondIndependentProofError -notmatch 'No unreserved WildCard stock is available') {
+    Write-Output "Independent proof second-request diagnostics: $secondIndependentProofError"
+    throw 'Concurrent campaign-free proof submissions did not serialize to one reserved card.'
+  }
+  $independentProofConcurrencyCheckPath = Join-Path $runRoot 'independent-proof-concurrency-check.sql'
+  [System.IO.File]::WriteAllText($independentProofConcurrencyCheckPath, @'
+DO $check$
+BEGIN
+  IF (SELECT count(*) FROM public.partner_proofs
+      WHERE partner_profile_id = 'a1000000-0000-4000-8000-000000000012'
+        AND photo_path LIKE '%/independent-concurrent-%') <> 1 OR
+     (public.get_partner_inventory_summary('a1000000-0000-4000-8000-000000000012')->>'available')::integer <> 0 OR
+     (public.get_partner_inventory_summary('a1000000-0000-4000-8000-000000000012')->>'reserved')::integer <> 1 THEN
+    RAISE EXCEPTION 'Concurrent independent proof submissions overspent physical stock';
+  END IF;
+END;
+$check$;
+'@, [System.Text.UTF8Encoding]::new($false))
+  Invoke-PsqlFile -Path $independentProofConcurrencyCheckPath
 
   $concurrentRestockPath = Join-Path $runRoot 'concurrent-restock.sql'
   $concurrentRestockWaitPath = Join-Path $runRoot 'concurrent-restock-wait.sql'
@@ -202,11 +306,11 @@ COMMIT;
   $firstRestock = Start-PsqlFile -Path $concurrentRestockPath -Label 'concurrent-restock-first'
   Start-Sleep -Milliseconds 250
   $secondRestock = Start-PsqlFile -Path $concurrentRestockWaitPath -Label 'concurrent-restock-second'
-  $firstRestockExit = Wait-PsqlProcess -Process $firstRestock
-  $secondRestockExit = Wait-PsqlProcess -Process $secondRestock
+  [void](Wait-PsqlProcess -Process $firstRestock)
+  [void](Wait-PsqlProcess -Process $secondRestock)
+  $firstRestockError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-restock-first.stderr.txt') -Raw
   $secondRestockError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-restock-second.stderr.txt') -Raw
-  if ($firstRestockExit -ne 0 -or $secondRestockExit -eq 0 -or
-      $secondRestockError -notmatch 'A restock request is already pending') {
+  if ($firstRestockError -match 'ERROR:' -or $secondRestockError -notmatch 'A restock request is already pending') {
     throw 'Concurrent duplicate restock requests did not serialize to exactly one pending request.'
   }
 
@@ -229,8 +333,13 @@ COMMIT;
   $firstSameKey = Start-PsqlFile -Path $sameKeyPath -Label 'concurrent-same-key-first'
   Start-Sleep -Milliseconds 250
   $secondSameKey = Start-PsqlFile -Path $sameKeyWaitPath -Label 'concurrent-same-key-second'
-  if ((Wait-PsqlProcess -Process $firstSameKey) -ne 0 -or
-      (Wait-PsqlProcess -Process $secondSameKey) -ne 0) {
+  [void](Wait-PsqlProcess -Process $firstSameKey)
+  [void](Wait-PsqlProcess -Process $secondSameKey)
+  $sameKeyErrors = @(
+    (Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-same-key-first.stderr.txt') -Raw),
+    (Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-same-key-second.stderr.txt') -Raw)
+  ) -join "`n"
+  if ($sameKeyErrors -match 'ERROR:') {
     throw 'Concurrent retries with the same stock idempotency key did not both succeed.'
   }
 
@@ -253,18 +362,16 @@ COMMIT;
   $firstDecrease = Start-PsqlFile -Path $decreasePath -Label 'concurrent-decrease-first'
   Start-Sleep -Milliseconds 250
   $secondDecrease = Start-PsqlFile -Path $decreaseWaitPath -Label 'concurrent-decrease-second'
-  $firstDecreaseExit = Wait-PsqlProcess -Process $firstDecrease
-  $secondDecreaseExit = Wait-PsqlProcess -Process $secondDecrease
+  [void](Wait-PsqlProcess -Process $firstDecrease)
+  [void](Wait-PsqlProcess -Process $secondDecrease)
+  $firstDecreaseError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-first.stderr.txt') -Raw
+  $secondDecreaseError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-second.stderr.txt') -Raw
   $decreaseErrors = @(
-    (Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-first.stderr.txt') -Raw),
-    (Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-second.stderr.txt') -Raw)
+    $firstDecreaseError, $secondDecreaseError
   ) -join "`n"
-  $decreaseExitCodes = @($firstDecreaseExit, $secondDecreaseExit)
-  $decreaseSuccessCount = @($decreaseExitCodes | Where-Object { $_ -eq 0 }).Count
-  $decreaseFailureCount = @($decreaseExitCodes | Where-Object { $_ -ne 0 }).Count
-  if ($decreaseSuccessCount -ne 1 -or $decreaseFailureCount -ne 1 -or
+  $decreaseFailureCount = @(@($firstDecreaseError, $secondDecreaseError) | Where-Object { $_ -match 'ERROR:' }).Count
+  if ($decreaseFailureCount -ne 1 -or
       $decreaseErrors -notmatch 'unreserved partner stock negative') {
-    Write-Output "Concurrent decrease exit codes: $($decreaseExitCodes -join ', ')"
     Write-Output "Concurrent decrease outputs: $((Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-first.stdout.txt') -Raw), (Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-decrease-second.stdout.txt') -Raw) -join "`n")"
     Write-Output "Concurrent decrease diagnostics: $decreaseErrors"
     throw 'Concurrent stock decreases did not serialize while preventing a negative balance.'
@@ -298,10 +405,11 @@ SELECT public.admin_manage_partner_stock(
   $proofApproval = Start-PsqlFile -Path $proofApprovalPath -Label 'concurrent-proof-approval'
   Start-Sleep -Milliseconds 250
   $proofDecrease = Start-PsqlFile -Path $proofDecreasePath -Label 'concurrent-proof-decrease'
-  $proofApprovalExit = Wait-PsqlProcess -Process $proofApproval
-  $proofDecreaseExit = Wait-PsqlProcess -Process $proofDecrease
+  [void](Wait-PsqlProcess -Process $proofApproval)
+  [void](Wait-PsqlProcess -Process $proofDecrease)
+  $proofApprovalError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-proof-approval.stderr.txt') -Raw
   $proofDecreaseError = Get-Content -LiteralPath (Join-Path $runRoot 'concurrent-proof-decrease.stderr.txt') -Raw
-  if ($proofApprovalExit -ne 0 -or $proofDecreaseExit -eq 0 -or
+  if ($proofApprovalError -match 'ERROR:' -or
       $proofDecreaseError -notmatch 'unreserved partner stock negative') {
     throw 'Concurrent proof approval and stock decrease did not preserve the reservation and balance.'
   }
@@ -337,8 +445,8 @@ $check$;
   Invoke-PsqlFile -Path $concurrencyCheckPath
 
   Write-Output 'Disposable migration validation: PASS'
-  Write-Output 'Transactional workflows: 100-card cap, stock adjustments, restock approval/rejection/handover, proof reservation/reward/rejection/idempotency, negative-stock guard, authorization, withdrawal threshold.'
-  Write-Output 'Concurrency workflows: duplicate restock serialization, same-key stock idempotency, and competing stock decreases.'
+  Write-Output 'Transactional workflows: 100-card cap, stock adjustments, restock approval/rejection/handover, campaign-free proof reservation/reward/rejection/idempotency, campaign-free damage review, negative-stock guard, authorization, withdrawal threshold, and global geocoder request spacing.'
+  Write-Output 'Concurrency workflows: duplicate restock serialization, same-key stock idempotency, competing stock decreases, and campaign-free proof reservation.'
 } catch {
   if (Test-Path -LiteralPath $logPath -PathType Leaf) {
     Write-Output 'Disposable PostgreSQL diagnostic tail:'

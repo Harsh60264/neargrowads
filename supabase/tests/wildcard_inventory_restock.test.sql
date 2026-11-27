@@ -23,12 +23,31 @@ DECLARE
   v_request_id uuid;
   v_proof_id uuid;
   v_synthetic_proof_id uuid;
+  v_independent_rejected_proof uuid;
+  v_independent_approved_proof uuid;
+  v_independent_damage_report uuid;
+  v_first_geocode_slot timestamptz;
+  v_second_geocode_slot timestamptz;
   v_available bigint;
   v_reserved bigint;
   v_delivery_count bigint;
   v_ledger_amount integer;
   v_withdrawal_id uuid;
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.partner_proofs
+    WHERE partner_profile_id = 'a2000000-0000-4000-8000-000000000012'
+      AND photo_path = 'a2000000-0000-4000-8000-000000000012/legacy-coordinate-proof.webp'
+      AND latitude = 28.6139
+      AND longitude = 77.2090
+      AND location_accuracy_meters IS NULL
+      AND location_captured_at IS NULL
+      AND location_address_source = 'campaign_legacy'
+  ) THEN
+    RAISE EXCEPTION 'Existing campaign proof with legacy GPS coordinates was not preserved by independent-delivery migration';
+  END IF;
+
   INSERT INTO auth.users (id, email) VALUES
     (v_owner_id, 'inventory-owner@example.test'),
     (v_restricted_admin_id, 'inventory-restricted@example.test'),
@@ -277,6 +296,150 @@ BEGIN
     IF SQLERRM = 'TEST_SENTINEL: proof submission without stock unexpectedly succeeded' OR
        position('No unreserved WildCard stock is available' IN SQLERRM) = 0 THEN RAISE; END IF;
   END;
+
+  IF has_function_privilege(
+    'authenticated',
+    'public.submit_independent_partner_proof(uuid,text,text,text,text,text,text,double precision,double precision,double precision,timestamptz,text)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.submit_independent_partner_proof(uuid,text,text,text,text,text,text,double precision,double precision,double precision,timestamptz,text)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'service_role',
+    'public.reserve_partner_reverse_geocode_slot()',
+    'EXECUTE'
+  ) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Independent proof or reverse-geocode RPC grants are not correctly restricted';
+  END IF;
+  IF has_table_privilege('service_role', 'public.partner_reverse_geocode_rate_limit', 'SELECT') THEN
+    RAISE EXCEPTION 'The reverse-geocode scheduling table must not be directly readable by the service role';
+  END IF;
+
+  PERFORM public.admin_manage_partner_stock(
+    v_owner_id, v_no_campaign_partner_id, NULL, 'issued', 2, 'Independent delivery seed stock',
+    'a1000000-0000-4000-8000-000000000114'
+  );
+  IF EXISTS (
+    SELECT 1 FROM public.partner_campaign_assignments
+    WHERE partner_profile_id = v_no_campaign_partner_id
+  ) THEN
+    RAISE EXCEPTION 'Independent delivery test partner unexpectedly has a campaign assignment';
+  END IF;
+  v_independent_rejected_proof := public.submit_independent_partner_proof(
+    v_no_campaign_partner_id, v_no_campaign_partner_id::text || '/manual-no-gps.webp',
+    'Independent Shop', NULL, 'Market Street, Noida', NULL, 'Manual address fallback',
+    NULL, NULL, NULL, NULL, 'manual_no_gps'
+  );
+  SELECT
+    (summary ->> 'available')::bigint,
+    (summary ->> 'reserved')::bigint
+  INTO v_available, v_reserved
+  FROM (SELECT public.get_partner_inventory_summary(v_no_campaign_partner_id) AS summary) inventory;
+  IF v_available <> 1 OR v_reserved <> 1 OR
+     (SELECT assignment_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
+     (SELECT campaign_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
+     (SELECT site_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
+     (SELECT status FROM public.partner_coin_ledger WHERE proof_id = v_independent_rejected_proof) <> 'pending' OR
+     (SELECT amount FROM public.partner_coin_ledger WHERE proof_id = v_independent_rejected_proof) <> 1000 THEN
+    RAISE EXCEPTION 'Campaign-free manual proof did not reserve one physical card with exactly 1,000 pending coins';
+  END IF;
+
+  BEGIN
+    PERFORM public.submit_independent_partner_proof(
+      v_no_campaign_partner_id, v_no_campaign_partner_id::text || '/invalid-gps.webp',
+      'Independent Shop', '', 'Market Street, Noida', '', '', 28.5, 77.3,
+      50001, now(), 'gps_manual'
+    );
+    RAISE EXCEPTION 'TEST_SENTINEL: inaccurate GPS evidence unexpectedly succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'TEST_SENTINEL: inaccurate GPS evidence unexpectedly succeeded' OR
+       position('GPS evidence is invalid or too old' IN SQLERRM) = 0 THEN RAISE; END IF;
+  END;
+
+  PERFORM public.review_partner_proof(
+    v_independent_rejected_proof, v_owner_id, 'rejected', 'Independent fixture rejected'
+  );
+  SELECT
+    (summary ->> 'available')::bigint,
+    (summary ->> 'reserved')::bigint
+  INTO v_available, v_reserved
+  FROM (SELECT public.get_partner_inventory_summary(v_no_campaign_partner_id) AS summary) inventory;
+  IF v_available <> 2 OR v_reserved <> 0 OR
+     (SELECT status FROM public.partner_coin_ledger WHERE proof_id = v_independent_rejected_proof) <> 'rejected' THEN
+    RAISE EXCEPTION 'Rejected independent proof failed to release its card without coin credit';
+  END IF;
+
+  v_independent_approved_proof := public.submit_independent_partner_proof(
+    v_no_campaign_partner_id, v_no_campaign_partner_id::text || '/gps-proof.webp',
+    'Independent Shop', 'Retail', '12 Main Road, Sector 5, Noida, Uttar Pradesh, 201301, India',
+    'Near the community center', 'GPS delivery fixture', 28.5, 77.3, 12.5, now(),
+    'gps_reverse_geocoded'
+  );
+  IF (SELECT business_name FROM public.partner_proofs WHERE id = v_independent_approved_proof) <> 'Independent Shop' OR
+     (SELECT delivery_address FROM public.partner_proofs WHERE id = v_independent_approved_proof) <>
+       '12 Main Road, Sector 5, Noida, Uttar Pradesh, 201301, India' OR
+     (SELECT address_detail FROM public.partner_proofs WHERE id = v_independent_approved_proof) <> 'Near the community center' OR
+     (SELECT location_accuracy_meters FROM public.partner_proofs WHERE id = v_independent_approved_proof) <> 12.5 OR
+     (SELECT location_captured_at FROM public.partner_proofs WHERE id = v_independent_approved_proof) IS NULL THEN
+    RAISE EXCEPTION 'Independent business address or original GPS evidence was not persisted';
+  END IF;
+  PERFORM public.review_partner_proof(
+    v_independent_approved_proof, v_owner_id, 'approved', 'Independent fixture approved'
+  );
+  PERFORM public.review_partner_proof(
+    v_independent_approved_proof, v_owner_id, 'approved', 'Independent duplicate approval'
+  );
+  SELECT
+    (summary ->> 'available')::bigint,
+    (summary ->> 'reserved')::bigint,
+    (summary ->> 'delivered')::bigint
+  INTO v_available, v_reserved, v_delivery_count
+  FROM (SELECT public.get_partner_inventory_summary(v_no_campaign_partner_id) AS summary) inventory;
+  IF v_available <> 1 OR v_reserved <> 0 OR v_delivery_count <> 1 OR
+     (SELECT amount FROM public.partner_coin_ledger WHERE proof_id = v_independent_approved_proof AND status = 'approved') <> 1000 OR
+     (SELECT count(*) FROM public.partner_stock_movements WHERE proof_id = v_independent_approved_proof) <> 1 THEN
+    RAISE EXCEPTION 'Independent proof approval failed to atomically consume one card and credit exactly 1,000 coins once';
+  END IF;
+
+  PERFORM public.admin_manage_partner_stock(
+    v_owner_id, v_no_campaign_partner_id, NULL, 'adjusted', -1, 'Drain independent fixture stock',
+    'a1000000-0000-4000-8000-000000000115'
+  );
+  BEGIN
+    PERFORM public.submit_independent_partner_proof(
+      v_no_campaign_partner_id, v_no_campaign_partner_id::text || '/no-stock-independent.webp',
+      'Independent Shop', '', 'Market Street, Noida', '', '', NULL, NULL,
+      NULL, NULL, 'manual_no_gps'
+    );
+    RAISE EXCEPTION 'TEST_SENTINEL: independent proof without stock unexpectedly succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'TEST_SENTINEL: independent proof without stock unexpectedly succeeded' OR
+       position('No unreserved WildCard stock is available' IN SQLERRM) = 0 THEN RAISE; END IF;
+  END;
+
+  PERFORM public.admin_manage_partner_stock(
+    v_owner_id, v_no_campaign_partner_id, NULL, 'issued', 1, 'Damage fixture card',
+    'a1000000-0000-4000-8000-000000000116'
+  );
+  INSERT INTO public.partner_damage_reports (
+    assignment_id, partner_profile_id, card_id, issue_type, details
+  ) VALUES (
+    NULL, v_no_campaign_partner_id, 'DAMAGE-FIXTURE', 'damaged', 'Independent campaign-free report'
+  ) RETURNING id INTO v_independent_damage_report;
+  PERFORM public.review_partner_damage_report(
+    v_independent_damage_report, v_owner_id, 'resolved'
+  );
+  IF (public.get_partner_inventory_summary(v_no_campaign_partner_id) ->> 'available')::bigint <> 0 OR
+     (public.get_partner_inventory_summary(v_no_campaign_partner_id) ->> 'damaged')::bigint <> 1 THEN
+    RAISE EXCEPTION 'Campaign-free damage review did not record the physical stock adjustment';
+  END IF;
+
+  v_first_geocode_slot := public.reserve_partner_reverse_geocode_slot();
+  v_second_geocode_slot := public.reserve_partner_reverse_geocode_slot();
+  IF v_second_geocode_slot - v_first_geocode_slot < interval '1100 milliseconds' THEN
+    RAISE EXCEPTION 'Concurrent instances can reserve reverse-geocode requests faster than the provider limit';
+  END IF;
 
   INSERT INTO public.partner_proofs (
     assignment_id, campaign_id, site_id, partner_profile_id, photo_path, coins,
