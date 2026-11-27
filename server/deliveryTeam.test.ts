@@ -6,8 +6,29 @@ import {
   calculatePartnerStock,
   canAccessDeliveryTeam,
   parseDeliveryTeamPagination,
+  uniqueNonEmptyIds,
   validateManualCoinAdjustment,
 } from './deliveryTeam';
+
+test('activity lookups omit null and blank legacy relation IDs', () => {
+  assert.deepEqual(uniqueNonEmptyIds([
+    '0fba6885-5c0a-41f9-ae8f-a0de011f1a08',
+    null,
+    '',
+    '   ',
+    ' 0fba6885-5c0a-41f9-ae8f-a0de011f1a08 ',
+    'c9deca75-58aa-4870-9721-1f12fc25bbbc',
+  ]), [
+    '0fba6885-5c0a-41f9-ae8f-a0de011f1a08',
+    'c9deca75-58aa-4870-9721-1f12fc25bbbc',
+  ]);
+});
+
+test('overview activity filters nullable proof site IDs before UUID lookups', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  assert.match(server, /campaign_id: string \| null; site_id: string \| null; status: string/);
+  assert.match(server, /const siteIds = uniqueNonEmptyIds\(proofs\.map\(\(item\) => item\.site_id\)\)/);
+});
 
 test('Delivery Team view and mutation permissions require active explicit grants for non-owners', () => {
   const limitedAdmin = {

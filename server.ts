@@ -118,6 +118,7 @@ import {
 import {
   canAccessDeliveryTeam,
   parseDeliveryTeamPagination,
+  uniqueNonEmptyIds,
   validateManualCoinAdjustment,
 } from './server/deliveryTeam';
 import { createPublicSitemapHandler } from './server/publicSitemap';
@@ -4251,7 +4252,7 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
         limit: '100',
       }),
       readPartnerWorkspaceTable<{
-        id: string; partner_profile_id: string; campaign_id: string; site_id: string; status: string;
+        id: string; partner_profile_id: string; campaign_id: string | null; site_id: string | null; status: string;
         coins: number; submitted_at: string; reviewed_at: string | null; review_note: string;
       }>('partner_proofs', {
         select: 'id,partner_profile_id,campaign_id,site_id,status,coins,submitted_at,reviewed_at,review_note',
@@ -4307,7 +4308,7 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
       }),
     ]);
 
-  const partnerIds = [...new Set([
+  const partnerIds = uniqueNonEmptyIds([
     ...adminEvents.map((item) => item.partner_profile_id),
     ...proofs.map((item) => item.partner_profile_id),
     ...movements.map((item) => item.partner_profile_id),
@@ -4316,18 +4317,18 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
     ...withdrawals.map((item) => item.partner_profile_id),
     ...ledger.map((item) => item.partner_profile_id),
     ...assignments.map((item) => item.partner_profile_id),
-  ].filter((id): id is string => Boolean(id)))];
-  const assignmentIds = [...new Set([
+  ]);
+  const assignmentIds = uniqueNonEmptyIds([
     ...movements.map((item) => item.assignment_id),
     ...campaignRequests.map((item) => item.assignment_id),
     ...damageReports.map((item) => item.assignment_id),
-  ].filter((id): id is string => Boolean(id)))];
-  const campaignIds = [...new Set([
+  ]);
+  const campaignIds = uniqueNonEmptyIds([
     ...proofs.map((item) => item.campaign_id),
     ...adminEvents.map((item) => item.campaign_id),
     ...assignments.map((item) => item.campaign_id),
-  ].filter((id): id is string => Boolean(id)))];
-  const siteIds = [...new Set(proofs.map((item) => item.site_id))];
+  ]);
+  const siteIds = uniqueNonEmptyIds(proofs.map((item) => item.site_id));
   const [profiles, assignmentRows, campaigns, sites] = await Promise.all([
     partnerIds.length ? readPartnerWorkspaceTable<{ id: string; full_name: string }>('partner_profiles', {
       id: partnerInFilter(partnerIds),
@@ -4369,12 +4370,15 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
     });
   }
   for (const proof of proofs) {
-    const campaign = campaignNames.get(proof.campaign_id) || 'WildCard campaign';
+    const campaign = proof.campaign_id
+      ? campaignNames.get(proof.campaign_id) || 'Historical campaign'
+      : 'Independent delivery';
+    const site = proof.site_id ? siteNames.get(proof.site_id) || 'Historical shop' : '';
     add({
       id: `proof-submitted-${proof.id}`,
       partnerName: partnerName(proof.partner_profile_id),
       activityType: 'Proof submitted',
-      details: `${campaign} · ${siteNames.get(proof.site_id) || 'Assigned shop'}`,
+      details: [campaign, site].filter(Boolean).join(' · '),
       status: proof.status,
       createdAt: proof.submitted_at,
     });

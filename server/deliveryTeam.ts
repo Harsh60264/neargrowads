@@ -2,6 +2,18 @@ import type { AdminPermissions } from '../shared/adminPermissions';
 
 export type DeliveryTeamAction = 'view' | 'create' | 'edit';
 
+export function uniqueNonEmptyIds(values: readonly (string | null | undefined)[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const id = typeof value === 'string' ? value.trim() : '';
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
 export interface DeliveryTeamAdministrator {
   role: string;
   status: string;
