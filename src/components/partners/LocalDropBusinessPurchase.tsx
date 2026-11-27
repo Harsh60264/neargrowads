@@ -360,14 +360,13 @@ export function LocalDropBusinessPurchase() {
   return (
     <div className="localdrop-business-purchase">
       <article className="localdrop-business-package" aria-label="WildCard Business Package">
-        <div>
-          <p className="localdrop-kicker">WildCard Business Package</p>
-          <h4>Reach more nearby customers</h4>
-          <p>2,100 WildCards for local business promotion.</p>
+        <div className="localdrop-business-package-info">
+          <strong>WildCard Business Package</strong>
+          <span>2,100 WildCards</span>
         </div>
         <div className="localdrop-business-price">
           <strong>₹10,000</strong>
-          <span>INR · one-time payment</span>
+          <span>INR · one-time</span>
         </div>
       </article>
 
@@ -411,26 +410,26 @@ export function LocalDropBusinessPurchase() {
             <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={255} /></label>
             <label>Mobile number<input name="mobileNumber" type="tel" autoComplete="tel" required minLength={7} maxLength={25} /></label>
           </div>
-          <div className="localdrop-business-location">
-            <PartnerLocationCapture
-              idPrefix="localdrop-business"
-              title="Business location"
-              addressLabel="Business address"
-              addressRequired
-              detectButtonLabel="Use My Location"
-              refreshButtonLabel="Refresh Location"
-              helperText="You can enter the full business address manually. GPS is requested only when you choose Use My Location."
-              endpoint="/api/partners/registration-reverse-geocode"
-              value={location}
-              onChange={(nextLocation) => setLocation(nextLocation)}
-            />
-          </div>
+          <PartnerLocationCapture
+            idPrefix="localdrop-business"
+            className="localdrop-business-location"
+            title="Business location"
+            addressLabel="Business address"
+            addressRequired
+            detectButtonLabel="Use My Location"
+            refreshButtonLabel="Refresh Location"
+            helperText="GPS is optional; manual address entry is available."
+            endpoint="/api/partners/registration-reverse-geocode"
+            value={location}
+            onChange={(nextLocation) => setLocation(nextLocation)}
+          />
           <label>Preferred promotion areas (optional)
             <input name="preferredPromotionAreas" maxLength={500} placeholder="e.g. Sector 5, Sector 6" />
           </label>
-          <label>Additional note (optional)
-            <textarea name="additionalNote" rows={3} maxLength={2000} placeholder="Anything our team should know?" />
-          </label>
+          <details className="localdrop-business-note">
+            <summary>Additional note <span>(optional)</span></summary>
+            <textarea name="additionalNote" aria-label="Additional note (optional)" rows={2} maxLength={2000} placeholder="Anything our team should know?" />
+          </details>
           <label className="localdrop-consent">
             <input type="checkbox" required />
             <span>I agree to the WildCard business purchase and fulfilment terms. I understand this package contains 2,100 WildCards for ₹10,000 INR, payment is securely processed by Cashfree, and fulfilment starts after payment verification.</span>

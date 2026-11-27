@@ -122,6 +122,7 @@ export default function App() {
   const [theme, setTheme] = useState<PublicTheme>(getSessionTheme);
   const [adminTheme, setAdminTheme] = useState<PublicTheme>(() => getSessionTheme('neargrow-admin-theme'));
   const [chatOpen, setChatOpen] = useState(false);
+  const [localDropBusinessMode, setLocalDropBusinessMode] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState<MarketingConsent>(() =>
     typeof window === 'undefined' ? null : readMarketingAnalyticsConsent(),
   );
@@ -133,6 +134,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentPath.startsWith('/admin') || isCmsPreview) setChatOpen(false);
+    if (currentPath !== '/partners/localdrop') setLocalDropBusinessMode(false);
     setCookieSettingsOpen(false);
   }, [currentPath, isCmsPreview]);
 
@@ -598,7 +600,7 @@ export default function App() {
       return <GetStartedPage onNavigate={navigate} siteContent={siteContent} />;
     }
     if (currentPath === '/partners/localdrop') {
-      return <LocalDropPage onNavigate={navigate} />;
+      return <LocalDropPage onNavigate={navigate} onBusinessModeChange={setLocalDropBusinessMode} />;
     }
     if (['/partners/portal-preview', '/partners/dashboard', '/partners/recovery', '/partners/register', '/partners/login'].includes(currentPath)) {
       return <PartnerAuthPage onNavigate={navigate} />;
@@ -715,14 +717,15 @@ export default function App() {
                 siteContent={siteContent}
               />
             )}
-            {!hidePartnerAuthAssistants && (
-              <FloatingAssistant
-                sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
-                scrollWithPage={false}
-                chatOpen={chatOpen}
-                onOpenChat={() => setChatOpen(true)}
-              />
-            )}
+            {!hidePartnerAuthAssistants &&
+              !(normalizedCurrentPath === '/partners/localdrop' && localDropBusinessMode) && (
+                <FloatingAssistant
+                  sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
+                  scrollWithPage={false}
+                  chatOpen={chatOpen}
+                  onOpenChat={() => setChatOpen(true)}
+                />
+              )}
             {!isCmsPreview && !hidePartnerAuthAssistants && (
               <ChatbotWidget
                 siteContent={siteContent}

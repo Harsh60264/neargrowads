@@ -179,40 +179,67 @@ html[data-theme='dark'] .localdrop-page { --localdrop-action-text: #07110A; }
 .localdrop-form-success { display: flex; align-items: center; gap: 12px; margin-top: 22px; border-radius: 14px; background: var(--localdrop-soft); padding: 18px; color: var(--localdrop-text); line-height: 1.5; }
 .localdrop-form-success svg { flex: none; color: var(--localdrop-green); }
 
-.localdrop-business-purchase { display: grid; gap: 20px; margin-top: 22px; }
+.localdrop-interest-panel--business { padding: clamp(24px, 3vw, 36px); }
+.localdrop-interest-panel--business > h3 { margin: 12px 0 8px; font-size: 22px; letter-spacing: -.035em; }
+.localdrop-business-purchase { display: grid; gap: 12px; margin-top: 14px; }
 .localdrop-business-package {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  border: 1px solid color-mix(in srgb, var(--localdrop-green) 28%, var(--localdrop-border));
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--localdrop-green) 7%, var(--localdrop-surface));
-  padding: 20px;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--brand-orange) 48%, var(--localdrop-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--brand-orange) 7%, var(--localdrop-surface));
+  padding: 10px 14px;
 }
-.localdrop-business-package .localdrop-kicker { margin-bottom: 8px; }
-.localdrop-business-package h4 { margin: 0 0 6px; font-size: 18px; font-weight: 800; letter-spacing: -.025em; }
-.localdrop-business-package p:last-child { margin: 0; color: var(--localdrop-muted); font-size: 13px; }
-.localdrop-business-price { display: grid; flex: none; gap: 3px; text-align: right; }
-.localdrop-business-price strong { font-size: 26px; font-weight: 850; letter-spacing: -.04em; }
-.localdrop-business-price span { color: var(--localdrop-muted); font-size: 11px; }
-.localdrop-business-form { margin-top: 0; }
-.localdrop-business-form .partner-location-capture {
+.localdrop-business-package-info { display: grid; min-width: 0; gap: 2px; }
+.localdrop-business-package-info strong { font-size: 14px; font-weight: 800; }
+.localdrop-business-package-info span { color: var(--localdrop-muted); font-size: 12px; }
+.localdrop-business-price { display: grid; flex: none; gap: 1px; border-left: 1px solid color-mix(in srgb, var(--brand-orange) 42%, var(--localdrop-border)); padding-left: 16px; text-align: right; }
+.localdrop-business-price strong { color: var(--localdrop-green); font-size: 23px; font-weight: 850; letter-spacing: -.04em; line-height: 1.1; }
+.localdrop-business-price span { color: var(--localdrop-muted); font-size: 10px; }
+.localdrop-business-form { gap: 10px; margin-top: 0; }
+.localdrop-business-form .localdrop-form-grid { gap: 10px 14px; }
+.localdrop-business-form label { gap: 5px; font-size: 12px; }
+.localdrop-business-form input:not([type='checkbox']),
+.localdrop-business-form textarea { border-radius: 9px; padding: 9px 11px; font-size: 13px; }
+.localdrop-business-form input:not([type='checkbox']) { min-height: 40px; }
+.localdrop-business-form .partner-location-capture.localdrop-business-location {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
+  gap: 5px 10px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
-.localdrop-business-form .partner-location-capture > h3,
-.localdrop-business-form .partner-location-help,
-.localdrop-business-form .partner-location-error,
-.localdrop-business-form .partner-location-result { grid-column: 1 / -1; }
-.localdrop-business-form .partner-location-address { grid-column: 1; }
-.localdrop-business-form .partner-location-detect {
+.localdrop-business-form .localdrop-business-location > h3,
+.localdrop-business-form .localdrop-business-location .partner-location-help,
+.localdrop-business-form .localdrop-business-location .partner-location-error,
+.localdrop-business-form .localdrop-business-location .partner-location-result { grid-column: 1 / -1; }
+.localdrop-business-form .localdrop-business-location > h3 { margin: 0; font-size: 12px; font-weight: 700; }
+.localdrop-business-form .localdrop-business-location .partner-location-address { grid-column: 1; gap: 0; }
+.localdrop-business-form .localdrop-business-location .partner-location-address > input { min-height: 40px; }
+.localdrop-business-form .localdrop-business-location .partner-location-detect {
   grid-column: 2;
-  min-height: 42px;
-  margin-bottom: 1px;
+  min-height: 40px;
+  margin: 0 0 1px;
+  border-radius: 9px;
+  padding-inline: 12px;
+  font-size: 12px;
   white-space: nowrap;
 }
-.localdrop-payment-security { display: flex; align-items: center; gap: 7px; margin: -5px 0 0; color: var(--localdrop-muted); font-size: 11px; }
+.localdrop-business-form .localdrop-business-location .partner-location-help { margin-top: -1px; font-size: 10px; }
+.localdrop-business-form .localdrop-business-location .partner-location-result { padding: 7px; }
+.localdrop-business-note { display: grid; gap: 7px; }
+.localdrop-business-note summary { width: fit-content; color: var(--localdrop-text); font-size: 12px; font-weight: 700; cursor: pointer; }
+.localdrop-business-note summary span { color: var(--localdrop-muted); font-weight: 500; }
+.localdrop-business-note summary:focus-visible { outline: 2px solid var(--localdrop-green); outline-offset: 3px; border-radius: 3px; }
+.localdrop-business-note textarea { min-height: 62px; resize: vertical; }
+.localdrop-business-form .localdrop-consent { gap: 8px; margin: 0; font-size: 11px; line-height: 1.4; }
+.localdrop-business-form .localdrop-consent input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--localdrop-green); }
+.localdrop-business-form > .localdrop-button { width: 100%; min-height: 44px; margin-top: 1px; border-radius: 12px; }
+.localdrop-payment-security { display: flex; align-items: center; justify-content: center; gap: 6px; margin: -5px 0 0; color: var(--localdrop-muted); font-size: 10px; }
 .localdrop-payment-status,
 .localdrop-payment-success {
   display: grid;
@@ -272,11 +299,26 @@ html[data-theme='dark'] .localdrop-page { --localdrop-action-text: #07110A; }
   .localdrop-actions .localdrop-button { width: 100%; }
   .localdrop-card { padding: 22px; }
   .localdrop-video-wrap { border-radius: 18px; }
-  .localdrop-business-package { align-items: flex-start; flex-direction: column; }
-  .localdrop-business-price { text-align: left; }
-  .localdrop-business-form .partner-location-capture { grid-template-columns: 1fr; }
-  .localdrop-business-form .partner-location-address,
-  .localdrop-business-form .partner-location-detect { grid-column: 1; }
+  .localdrop-interest-panel--business { padding: 22px; }
+  .localdrop-business-package { gap: 8px; padding: 9px 10px; }
+  .localdrop-business-package-info strong { font-size: 12px; }
+  .localdrop-business-package-info span { font-size: 11px; }
+  .localdrop-business-price { padding-left: 9px; }
+  .localdrop-business-price strong { font-size: 20px; }
+  .localdrop-business-form .localdrop-business-location { grid-template-columns: minmax(0, 1fr) auto; }
+  .localdrop-business-form .localdrop-business-location .partner-location-address { grid-column: 1; }
+  .localdrop-business-form .localdrop-business-location .partner-location-detect { grid-column: 2; padding-inline: 8px; }
+}
+
+@media (max-width: 380px) {
+  .localdrop-interest-panel--business { padding: 18px; }
+  .localdrop-business-package { padding-inline: 8px; }
+  .localdrop-business-package-info strong { font-size: 11px; }
+  .localdrop-business-price strong { font-size: 18px; }
+  .localdrop-business-form .localdrop-business-location { grid-template-columns: minmax(0, 1fr); }
+  .localdrop-business-form .localdrop-business-location .partner-location-address,
+  .localdrop-business-form .localdrop-business-location .partner-location-detect { grid-column: 1; }
+  .localdrop-business-form .localdrop-business-location .partner-location-detect { justify-self: start; }
   .localdrop-payment-success { grid-template-columns: 1fr; }
 }
 

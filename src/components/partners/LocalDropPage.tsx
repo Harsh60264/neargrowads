@@ -7,6 +7,7 @@ import './localDrop.css';
 
 interface LocalDropPageProps {
   onNavigate: (path: string) => void;
+  onBusinessModeChange?: (active: boolean) => void;
 }
 
 type InterestKind = 'partner' | 'business';
@@ -105,7 +106,7 @@ function InterestForm({ kind }: { kind: InterestKind }) {
   );
 }
 
-export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
+export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate, onBusinessModeChange }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [prefersReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [videoPlaying, setVideoPlaying] = useState(!prefersReducedMotion);
@@ -187,10 +188,16 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate }) => {
       <section id="partner-interest" className="localdrop-section localdrop-interest" aria-labelledby="localdrop-interest-heading">
         <div className="localdrop-container localdrop-interest-grid">
           <div><p className="localdrop-kicker">Let's connect</p><h2 id="localdrop-interest-heading">Bring local businesses and deliveries together.</h2><p>Tell us whether you deliver in your area or want to explore promotional cards for your business.</p><button type="button" className="localdrop-text-link" onClick={() => onNavigate('/contact')}>Contact NearGrow Ads <ArrowRight aria-hidden="true" size={16} /></button></div>
-          <div className="localdrop-interest-panel" data-mascot-obstacle>
+          <div className={`localdrop-interest-panel${interestKind === 'business' ? ' localdrop-interest-panel--business' : ''}`} data-mascot-obstacle>
             <div className="localdrop-form-tabs" aria-label="Enquiry type">
-              <button type="button" aria-pressed={interestKind === 'partner'} onClick={() => setInterestKind('partner')}>Delivery partner</button>
-              <button type="button" aria-pressed={interestKind === 'business'} onClick={() => setInterestKind('business')}>Local business</button>
+              <button type="button" aria-pressed={interestKind === 'partner'} onClick={() => {
+                setInterestKind('partner');
+                onBusinessModeChange?.(false);
+              }}>Delivery partner</button>
+              <button type="button" aria-pressed={interestKind === 'business'} onClick={() => {
+                setInterestKind('business');
+                onBusinessModeChange?.(true);
+              }}>Local business</button>
             </div>
             <h3>{interestKind === 'partner' ? 'Become a delivery partner' : 'Grow Your Business with NearGrow WildCard'}</h3>
             {interestKind === 'partner'

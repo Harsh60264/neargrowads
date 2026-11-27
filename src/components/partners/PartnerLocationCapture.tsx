@@ -16,6 +16,7 @@ interface PartnerLocationCaptureProps {
   detectButtonLabel?: string;
   refreshButtonLabel?: string;
   helperText?: string;
+  className?: string;
 }
 
 interface GeocodeResponse {
@@ -60,6 +61,7 @@ export function PartnerLocationCapture({
   detectButtonLabel = 'Detect my location',
   refreshButtonLabel = 'Retry / refresh location',
   helperText = 'GPS is optional. If detection is unavailable, you may enter an address manually or leave this blank.',
+  className,
 }: PartnerLocationCaptureProps) {
   const [address, setAddress] = useState(value?.address ?? '');
   const [capturedGps, setCapturedGps] = useState<CapturedGps | null>(() =>
@@ -203,7 +205,7 @@ export function PartnerLocationCapture({
     value.longitude !== null && value.longitude !== undefined;
 
   return (
-    <section className="partner-location-capture" aria-labelledby={`${idPrefix}-heading`}>
+    <section className={`partner-location-capture${className ? ` ${className}` : ''}`} aria-labelledby={`${idPrefix}-heading`}>
       <h3 id={`${idPrefix}-heading`}>{title}</h3>
       {consentRequired && (
         <label className="partner-location-consent">
