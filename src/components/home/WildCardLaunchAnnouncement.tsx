@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, Bike, CalendarDays, ShoppingCart, Store, X } from 'lucide-react';
-import ownerStorefrontImage from '../../assets/images/local_business_storefront_1792080226091.jpg';
+import { ArrowRight, Bike, CalendarDays, ShoppingCart, X } from 'lucide-react';
 import './wildCardLaunchAnnouncement.css';
 
 const AUTO_SHOW_KEY = 'neargrow-wildcard-launch-seen';
@@ -173,22 +172,16 @@ export function WildCardLaunchAnnouncement({
             </div>
             <div className="wildcard-launch-dialog__layout">
               <div className="wildcard-launch-dialog__visual">
-                <img
-                  className="wildcard-launch-dialog__owner-photo"
-                  src={ownerStorefrontImage}
-                  alt="A local business owner at a neighborhood storefront"
-                />
-                <img
-                  className="wildcard-launch-dialog__partner-photo"
-                  src="/media/localdrop/scooter-poster.jpg"
-                  alt="A delivery partner with a scooter outside a local business"
-                />
-                <img
-                  className="wildcard-launch-dialog__mobile-photo"
-                  src="/media/localdrop/scooter-poster.jpg"
-                  alt="A delivery partner with a scooter outside a local business"
-                />
-                <span className="wildcard-launch-dialog__visual-tag">Local business × delivery network</span>
+                <picture className="wildcard-launch-dialog__artwork">
+                  <source
+                    media="(max-width: 900px)"
+                    srcSet="/images/wildcard-launch/mobile-art.webp"
+                  />
+                  <img
+                    src="/images/wildcard-launch/desktop-art.webp"
+                    alt="A local business owner and NearGrow WildCard delivery partner with their branded scooter"
+                  />
+                </picture>
               </div>
 
               <div className="wildcard-launch-dialog__content">
@@ -212,42 +205,43 @@ export function WildCardLaunchAnnouncement({
 
                 <div className="wildcard-launch-dialog__offer-row">
                   <div className="wildcard-launch-dialog__reach">
-                    <span className="wildcard-launch-dialog__reach-icon"><Store aria-hidden="true" size={23} /></span>
                     <span>
                       <strong>Reach More Local Customers</strong>
                       <span>Promote your business across your area through our delivery partner network.</span>
                     </span>
                   </div>
                   <div className="wildcard-launch-dialog__package">
-                    <span>WildCard Business Package</span>
+                    <span className="wildcard-launch-dialog__package-name">
+                      <span className="wildcard-launch-dialog__package-name-desktop">WildCard Package</span>
+                      <span className="wildcard-launch-dialog__package-name-mobile">Business Package</span>
+                    </span>
                     <strong>₹10,000</strong>
                     <span>2,100 WildCards</span>
                   </div>
                 </div>
-
-                <div className="wildcard-launch-dialog__actions">
-                  <button
-                    type="button"
-                    className="wildcard-launch-dialog__cta wildcard-launch-dialog__cta--primary"
-                    onClick={() => navigateFromModal(BUSINESS_PURCHASE_ROUTE)}
-                  >
-                    <ShoppingCart aria-hidden="true" size={20} />
-                    <span>Buy WildCard for Your Business</span>
-                    <ArrowRight aria-hidden="true" size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    className="wildcard-launch-dialog__cta wildcard-launch-dialog__cta--secondary"
-                    onClick={() => navigateFromModal(PARTNER_REGISTRATION_ROUTE)}
-                  >
-                    <Bike aria-hidden="true" size={22} />
-                    <span>Become a Delivery Partner</span>
-                    <ArrowRight aria-hidden="true" size={18} />
-                  </button>
-                </div>
               </div>
             </div>
-            <div className="wildcard-launch-dialog__wave" aria-hidden="true" />
+            <div className="wildcard-launch-dialog__actions">
+              <button
+                type="button"
+                className="wildcard-launch-dialog__cta wildcard-launch-dialog__cta--primary"
+                onClick={() => navigateFromModal(BUSINESS_PURCHASE_ROUTE)}
+              >
+                <ShoppingCart aria-hidden="true" size={24} />
+                <span>Buy WildCard for Your Business</span>
+                <ArrowRight aria-hidden="true" size={21} />
+              </button>
+              <button
+                type="button"
+                className="wildcard-launch-dialog__cta wildcard-launch-dialog__cta--secondary"
+                onClick={() => navigateFromModal(PARTNER_REGISTRATION_ROUTE)}
+              >
+                <Bike aria-hidden="true" size={27} />
+                <span>Become a Delivery Partner</span>
+                <ArrowRight aria-hidden="true" size={21} />
+              </button>
+            </div>
+            <img className="wildcard-launch-dialog__wave" src="/images/wildcard-launch/bottom-wave.webp" alt="" />
           </section>
         </div>,
         document.body,
