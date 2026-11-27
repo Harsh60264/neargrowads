@@ -661,6 +661,7 @@ export default function App() {
     DEFAULT_PUBLIC_WEBSITE_THEME_ASSIGNMENTS;
   const publicThemeMode = getPublicWebsiteThemeDefinition(publicAssignments[theme])?.mode ?? theme;
   const normalizedCurrentPath = currentPath.replace(/\/+$/, '') || '/';
+  const hideLocalDropAssistants = normalizedCurrentPath === '/partners/localdrop' && localDropBusinessMode;
   const isPartnerAuthRoute = [
     '/partners/portal-preview',
     '/partners/dashboard',
@@ -717,16 +718,15 @@ export default function App() {
                 siteContent={siteContent}
               />
             )}
-            {!hidePartnerAuthAssistants &&
-              !(normalizedCurrentPath === '/partners/localdrop' && localDropBusinessMode) && (
-                <FloatingAssistant
-                  sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
-                  scrollWithPage={false}
-                  chatOpen={chatOpen}
-                  onOpenChat={() => setChatOpen(true)}
-                />
-              )}
-            {!isCmsPreview && !hidePartnerAuthAssistants && (
+            {!hidePartnerAuthAssistants && !hideLocalDropAssistants && (
+              <FloatingAssistant
+                sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
+                scrollWithPage={false}
+                chatOpen={chatOpen}
+                onOpenChat={() => setChatOpen(true)}
+              />
+            )}
+            {!isCmsPreview && !hidePartnerAuthAssistants && !hideLocalDropAssistants && (
               <ChatbotWidget
                 siteContent={siteContent}
                 siteContentLoaded={siteContentLoaded}
