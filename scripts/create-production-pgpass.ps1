@@ -168,6 +168,10 @@ ROLLBACK;
   if ($LASTEXITCODE -ne 0 -or $probe -notcontains 't') {
     throw 'The pinned read-only PostgreSQL connection failed; password details were not emitted.'
   }
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    throw "The protected pgpass file disappeared during the read-only probe: $path"
+  }
+  Assert-RestrictedAcl -TargetPath $path
   Write-Output 'Protected pgpass file ACL: PASS'
   Write-Output "Pinned Production TLS/read-only connection: PASS ($expectedProjectRef)"
   Write-Output 'The database password was not printed, logged, or included in process arguments.'
@@ -199,3 +203,10 @@ ROLLBACK;
   }
   [Environment]::SetEnvironmentVariable('PGPASSWORD', $null, 'Process')
 }
+
+$resolvedPath = [System.IO.Path]::GetFullPath($path)
+if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+  throw "The protected pgpass file was removed before the helper exited: $resolvedPath"
+}
+Assert-RestrictedAcl -TargetPath $resolvedPath
+Write-Output "Protected pgpass file retained at expected path: PASS ($resolvedPath)"

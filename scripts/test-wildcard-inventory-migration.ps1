@@ -168,7 +168,8 @@ CREATE TABLE public.admin_users (
     '20261126120000_create_partner_workspace.sql',
     '20261127120000_admin_delivery_team_management.sql',
     '20261202120000_wildcard_inventory_restock.sql',
-    '20261203120000_partner_independent_delivery.sql'
+    '20261203120000_partner_independent_delivery.sql',
+    '20261204120000_partner_profile_delivery_preferences.sql'
   )
   foreach ($migrationFile in $migrationFiles) {
     $migrationPath = Join-Path $repoRoot "supabase\migrations\$migrationFile"

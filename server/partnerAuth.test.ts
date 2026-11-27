@@ -6,10 +6,12 @@ import {
   normalizePartnerEmail,
   normalizePartnerMobile,
   normalizePartnerName,
+  normalizePreferredDeliveryAreas,
   parsePartnerAuthSignupUser,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
 } from './partnerAuth';
+import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../shared/indianStates';
 
 test('partner registration validation requires isolated profile fields and a strong password', () => {
   assert.equal(normalizePartnerEmail('  Partner@Example.COM  '), 'partner@example.com');
@@ -23,13 +25,42 @@ test('partner registration validation requires isolated profile fields and a str
     password: 'Password123!',
     mobileNumber: '+91 98765 43210',
     fullName: 'Delivery Partner',
+    state: 'Rajasthan',
+    preferredDeliveryAreas: 'Jaipur, Vaishali Nagar',
   }), {
     valid: true,
     email: 'partner@example.com',
     password: 'Password123!',
     mobileNumber: '+919876543210',
     fullName: 'Delivery Partner',
+    state: 'Rajasthan',
+    preferredDeliveryAreas: ['Jaipur', 'Vaishali Nagar'],
   });
+});
+
+test('partner registration permits only the alphabetized Indian states and union territories', () => {
+  assert.equal(INDIAN_STATES_AND_UNION_TERRITORIES.length, 36);
+  assert.deepEqual(
+    [...INDIAN_STATES_AND_UNION_TERRITORIES].sort((left, right) => left.localeCompare(right, 'en-IN')),
+    INDIAN_STATES_AND_UNION_TERRITORIES,
+  );
+  assert.equal(normalizePreferredDeliveryAreas(' Tilak Nagar, Janakpuri, tilak nagar ')?.length, 2);
+  assert.equal(normalizePreferredDeliveryAreas(Array.from({ length: 26 }, () => 'A'.repeat(80))), undefined);
+  assert.equal(validatePartnerRegistration({
+    email: 'partner@example.com',
+    password: 'Password123!',
+    mobileNumber: '+91 98765 43210',
+    fullName: 'Delivery Partner',
+    state: 'California',
+    preferredDeliveryAreas: '',
+  }).valid, false);
+  assert.equal(validatePartnerRegistration({
+    email: 'partner@example.com',
+    password: 'Password123!',
+    mobileNumber: '+91 98765 43210',
+    fullName: 'Delivery Partner',
+    preferredDeliveryAreas: '',
+  }).valid, false);
 });
 
 test('partner email redirects preserve an existing query separator for Auth templates', () => {
@@ -129,4 +160,21 @@ test('partner routes and authorization keep partner sessions separate from CMS a
   assert.match(server, /supabaseAuthRequest\('verify'/);
   assert.doesNotMatch(server, /res\.locals\.partnerIdentity\s*=\s*res\.locals\.adminIdentity/);
   assert.match(app, /\['\/partners\/portal-preview', '\/partners\/dashboard', '\/partners\/recovery', '\/partners\/register', '\/partners\/login'\]\.includes\(currentPath\)/);
+});
+
+test('profile updates require the authenticated partner and state filters require an authorized admin', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  const profileRoute = server.slice(
+    server.indexOf("app.patch('/api/partners/profile'"),
+    server.indexOf("app.post('/api/partners/reverse-geocode'"),
+  );
+  const partnerListRoute = server.slice(
+    server.indexOf("app.get('/api/admin/delivery-team/partners'"),
+    server.indexOf("app.get('/api/admin/delivery-team/partners/:partnerId'"),
+  );
+  assert.match(profileRoute, /requirePartnerSession\(req, res\)/);
+  assert.match(profileRoute, /preferred_delivery_areas/);
+  assert.match(partnerListRoute, /currentAdmin\(res\)/);
+  assert.match(partnerListRoute, /normalizeIndianState\(requestedState\)/);
+  assert.match(partnerListRoute, /get_delivery_team_partners_by_state/);
 });

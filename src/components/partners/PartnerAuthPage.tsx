@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Eye, EyeOff, Headset, LoaderCircle, Megaphone, UserRound } from 'lucide-react';
 import { NearGrowLogo } from '../brand/NearGrowLogo';
 import type { PartnerProfile } from './partnerTypes';
+import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../../../shared/indianStates';
 
 const PartnerWorkspace = lazy(() => import('./PartnerWorkspace').then((module) => ({ default: module.PartnerWorkspace })));
 
@@ -28,7 +29,15 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   const [recoveryTokenHash, setRecoveryTokenHash] = useState('');
   const [recoveryTokenType, setRecoveryTokenType] = useState('');
   const [signupConfirming, setSignupConfirming] = useState(false);
-  const [form, setForm] = useState({ fullName: '', email: '', mobileNumber: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({
+    fullName: '',
+    email: '',
+    mobileNumber: '',
+    state: '',
+    preferredDeliveryAreas: '',
+    password: '',
+    confirmPassword: '',
+  });
 
   useEffect(() => {
     let active = true;
@@ -164,7 +173,15 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
       } else if (mode === 'register') {
         setNotice(data.message || 'Account registered. Verify your email before signing in.');
         setMode('login');
-        setForm((current) => ({ ...current, password: '', confirmPassword: '' }));
+        setForm((current) => ({
+          ...current,
+          fullName: '',
+          mobileNumber: '',
+          state: '',
+          preferredDeliveryAreas: '',
+          password: '',
+          confirmPassword: '',
+        }));
       } else {
         setNotice(data.message || 'If this is a registered partner account, a recovery email has been sent.');
       }
@@ -219,7 +236,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
           <p className="partner-auth-subtitle">Your partner workspace starts here.</p>
           <ul className="partner-auth-benefits">
             <li><UserRound aria-hidden="true" /><span>View your<br />profile</span></li>
-            <li><Megaphone aria-hidden="true" /><span>Check campaign<br />updates</span></li>
+            <li><Megaphone aria-hidden="true" /><span>Track your<br />deliveries</span></li>
             <li><Headset aria-hidden="true" /><span>Get<br />support</span></li>
           </ul>
         </section>
@@ -252,6 +269,18 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
                 <input id="partner-full-name" autoComplete="name" required maxLength={80} value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
                 <label htmlFor="partner-mobile">Mobile number</label>
                 <input id="partner-mobile" type="tel" autoComplete="tel" required maxLength={24} value={form.mobileNumber} onChange={(event) => setForm((current) => ({ ...current, mobileNumber: event.target.value }))} />
+                <label htmlFor="partner-state">State / Union Territory</label>
+                <select id="partner-state" autoComplete="address-level1" required value={form.state}
+                  onChange={(event) => setForm((current) => ({ ...current, state: event.target.value }))}>
+                  <option value="">Select your state or union territory</option>
+                  {INDIAN_STATES_AND_UNION_TERRITORIES.map((state) => <option key={state} value={state}>{state}</option>)}
+                </select>
+                <label htmlFor="partner-preferred-delivery-areas">Preferred delivery areas (optional)</label>
+                <input id="partner-preferred-delivery-areas" maxLength={2000}
+                  value={form.preferredDeliveryAreas}
+                  onChange={(event) => setForm((current) => ({ ...current, preferredDeliveryAreas: event.target.value }))}
+                  placeholder="e.g. Tilak Nagar, Janakpuri, Uttam Nagar" />
+                <small className="partner-auth-field-hint">You can update your preferred delivery areas anytime from your profile.</small>
               </>
             )}
             {!recoveryReady && (

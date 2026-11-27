@@ -32,6 +32,33 @@ test('partner profile edits normalize the name and phone and reject invalid valu
   assert.equal(normalizePartnerProfileUpdate({ fullName: 'H', mobileNumber: '123' }), undefined);
 });
 
+test('partner profile edits save optional Indian state and preferred areas without requiring legacy partners to set a state', () => {
+  assert.deepEqual(normalizePartnerProfileUpdate({
+    fullName: '  Harsh   Kumar ',
+    mobileNumber: '+91 (98765) 43210',
+  }), {
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+  });
+  assert.deepEqual(normalizePartnerProfileUpdate({
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    state: ' ',
+    preferredDeliveryAreas: 'Tilak Nagar, Janakpuri, Tilak Nagar',
+  }), {
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    state: null,
+    preferredDeliveryAreas: ['Tilak Nagar', 'Janakpuri'],
+  });
+  assert.equal(normalizePartnerProfileUpdate({
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    state: 'California',
+    preferredDeliveryAreas: '',
+  }), undefined);
+});
+
 test('coin summary counts approved proof once and reserves requested withdrawals', () => {
   assert.deepEqual(summarizePartnerCoins([
     { entry_type: 'earning', amount: 1500, status: 'approved' },

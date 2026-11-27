@@ -265,6 +265,7 @@
 }
 
 .partner-auth-form > input,
+.partner-auth-form > select,
 .partner-auth-password {
   box-sizing: border-box;
   width: 100%;
@@ -280,9 +281,26 @@
 }
 
 .partner-auth-form > input:focus,
+.partner-auth-form > select:focus,
 .partner-auth-password:focus-within {
   border-color: var(--partner-auth-green);
   outline: 2px solid color-mix(in srgb, var(--partner-auth-green) 20%, transparent);
+}
+
+.partner-auth-form > select {
+  padding: 0 12px;
+}
+
+.partner-auth-form > select option {
+  background: var(--partner-auth-surface);
+  color: var(--partner-auth-text);
+}
+
+.partner-auth-field-hint {
+  margin: -5px 0 4px;
+  color: var(--partner-auth-muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .partner-auth-password {

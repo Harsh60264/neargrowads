@@ -1,8 +1,12 @@
+import { normalizeIndianState } from '../shared/indianStates';
+
 export interface PartnerRegistrationInput {
   email: string;
   password: string;
   mobileNumber: string;
   fullName: string;
+  state: string;
+  preferredDeliveryAreas: string[];
 }
 
 export interface PartnerRegistrationValidation {
@@ -11,6 +15,8 @@ export interface PartnerRegistrationValidation {
   password?: string;
   mobileNumber?: string;
   fullName?: string;
+  state?: string;
+  preferredDeliveryAreas?: string[];
   message?: string;
 }
 
@@ -74,6 +80,33 @@ export function partnerPasswordIsStrong(value: unknown): value is string {
   return types >= 3;
 }
 
+export function normalizePreferredDeliveryAreas(value: unknown): string[] | undefined {
+  if (value === undefined || value === null || value === '') return [];
+  const rawAreas: unknown[] | undefined = typeof value === 'string'
+    ? value.split(/[,\n]/)
+    : Array.isArray(value) ? value : undefined;
+  if (!rawAreas || rawAreas.length > 2000 ||
+    (typeof value === 'string' && value.length > 2000)) return undefined;
+
+  const areas: string[] = [];
+  const seen = new Set<string>();
+  let totalCharacters = 0;
+  for (const rawArea of rawAreas) {
+    if (typeof rawArea !== 'string') return undefined;
+    const area = rawArea.trim().replace(/\s+/g, ' ');
+    if (!area) continue;
+    if (area.length > 80) return undefined;
+    totalCharacters += area.length;
+    if (totalCharacters > 2000) return undefined;
+    const key = area.toLocaleLowerCase('en-IN');
+    if (!seen.has(key)) {
+      seen.add(key);
+      areas.push(area);
+    }
+  }
+  return areas.length <= 2000 ? areas : undefined;
+}
+
 export function buildPartnerAuthRedirect(siteUrl: string, mode: 'signup' | 'recovery'): string {
   const url = new URL(
     mode === 'signup' ? '/partners/portal-preview' : '/partners/recovery',
@@ -93,11 +126,15 @@ export function validatePartnerRegistration(value: unknown): PartnerRegistration
   const password = typeof input.password === 'string' ? input.password : undefined;
   const mobileNumber = normalizePartnerMobile(input.mobileNumber);
   const fullName = normalizePartnerName(input.fullName);
+  const state = normalizeIndianState(input.state);
+  const preferredDeliveryAreas = normalizePreferredDeliveryAreas(input.preferredDeliveryAreas);
   if (!email) return { valid: false, message: 'Enter a valid email address.' };
   if (!fullName) return { valid: false, message: 'Enter your full name.' };
   if (!mobileNumber) return { valid: false, message: 'Enter a valid mobile number.' };
+  if (!state) return { valid: false, message: 'Select an Indian state or union territory.' };
+  if (!preferredDeliveryAreas) return { valid: false, message: 'Check the preferred delivery areas and try again.' };
   if (!partnerPasswordIsStrong(password)) {
     return { valid: false, message: 'Use 12 or more characters with at least three character types.' };
   }
-  return { valid: true, email, password, mobileNumber, fullName };
+  return { valid: true, email, password, mobileNumber, fullName, state, preferredDeliveryAreas };
 }

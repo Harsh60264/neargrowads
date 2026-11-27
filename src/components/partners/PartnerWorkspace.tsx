@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import type { PartnerProfile } from './partnerTypes';
 import { buildPartnerWorkspaceActivity } from './partnerWorkspaceActivity';
+import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../../../shared/indianStates';
 import './partnerPortalPreview.css';
 
 const sections = [
@@ -909,8 +910,7 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
             </article>
           ))}</div>
         </> : <EmptyState icon={Package} title="Stock history is empty"
-          detail={campaign ? 'Stock issues and approved deliveries for this campaign will be recorded here.'
-            : 'Stock history will appear when a campaign assignment is available.'} />}
+          detail="Stock issues and approved deliveries will be recorded here." />}
       </section>
     </section>
   );
@@ -919,10 +919,7 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
 function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefresh: () => Promise<void> }) {
   const [photoDataUrl, setPhotoDataUrl] = useState('');
   const [note, setNote] = useState('');
-  const [businessName, setBusinessName] = useState('');
-  const [businessCategory, setBusinessCategory] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
-  const [addressDetail, setAddressDetail] = useState('');
   const [location, setLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -1051,8 +1048,8 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
   };
   const submitProof = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (businessName.trim().length < 2 || deliveryAddress.trim().length < 3 || !photoDataUrl) {
-      setError('Enter the business name and delivery address, and capture or choose a proof photo.');
+    if (deliveryAddress.trim().length < 3 || !photoDataUrl) {
+      setError('Enter the delivery location, and capture or choose a proof photo.');
       return;
     }
     setBusy(true); setError(''); setMessage('');
@@ -1060,10 +1057,7 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
       await partnerApi('/api/partners/proofs', {
         method: 'POST',
         body: JSON.stringify({
-          businessName: businessName.trim(),
-          businessCategory: businessCategory.trim(),
           deliveryAddress: deliveryAddress.trim(),
-          addressDetail: addressDetail.trim(),
           photoDataUrl,
           note,
           latitude: location?.latitude ?? null,
@@ -1078,10 +1072,7 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
       });
       setPhotoDataUrl('');
       setNote('');
-      setBusinessName('');
-      setBusinessCategory('');
       setDeliveryAddress('');
-      setAddressDetail('');
       setLocation(null);
       setLocationToken('');
       setLocationSource('manual_no_gps');
@@ -1102,18 +1093,6 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
         <section className="nwg-card nwg-capture-card">
           <CardHeading icon={Camera} title="Capture proof" />
           <form onSubmit={(event) => void submitProof(event)} className="nwg-form">
-            <label>Business / Shop Name <span className="nwg-required">*</span>
-              <input required minLength={2} maxLength={120} value={businessName}
-                onChange={(event) => setBusinessName(event.target.value)} placeholder="Enter the business name" />
-            </label>
-            <label>Business Category (optional)
-              <select value={businessCategory} onChange={(event) => setBusinessCategory(event.target.value)}>
-                <option value="">Select a category (optional)</option>
-                <option value="Retail">Retail</option><option value="Food & Beverage">Food &amp; Beverage</option>
-                <option value="Health & Wellness">Health &amp; Wellness</option><option value="Services">Services</option>
-                <option value="Education">Education</option><option value="Other">Other</option>
-              </select>
-            </label>
             <div className="nwg-location-picker nwg-delivery-location">
               <label>Current Delivery Location <span className="nwg-required">*</span>
                 <textarea required minLength={3} maxLength={500} value={deliveryAddress}
@@ -1145,12 +1124,6 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
                 loading="lazy" referrerPolicy="no-referrer" />
               <small>© OpenStreetMap contributors</small>
             </section>}
-            <label>Additional address detail or landmark (optional)
-              <input maxLength={240} value={addressDetail}
-                onChange={(event) => setAddressDetail(event.target.value)}
-                placeholder="Floor, nearby landmark, or directions" />
-              <small>This is stored separately and does not change your GPS evidence or detected address.</small>
-            </label>
             <div className="nwg-camera-frame">
               {photoDataUrl ? <img src={photoDataUrl} alt="Captured partner proof preview" /> :
                 cameraStream ? <video ref={videoRef} autoPlay muted playsInline aria-label="Live camera preview" /> :
@@ -1183,10 +1156,10 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
             </label>
             <div className="nwg-form-end">
               <span className="nwg-muted">{data.inventory.available > 0
-                ? 'No campaign or shop assignment is required. One card is reserved on submit; 1,000 NGA Coins are credited only after approval.'
+                ? 'Deliver anywhere. One card is reserved on submit; 1,000 NGA Coins are credited only after approval.'
                 : 'No unreserved WildCards are available. Request a restock before submitting.'}</span>
               <button type="submit" className="nwg-button nwg-button-primary"
-                disabled={busy || !businessName.trim() || deliveryAddress.trim().length < 3 ||
+                disabled={busy || deliveryAddress.trim().length < 3 ||
                   !photoDataUrl || data.inventory.available <= 0}>
                 <Send size={15} />{busy ? 'Submitting…' : 'Submit Delivery Proof'}
               </button>
@@ -1392,6 +1365,8 @@ function ProfileSection({ data, onProfileUpdated }: {
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(data.user.fullName);
   const [mobileNumber, setMobileNumber] = useState(data.user.mobileNumber);
+  const [state, setState] = useState(data.user.state ?? '');
+  const [preferredDeliveryAreas, setPreferredDeliveryAreas] = useState(data.user.preferredDeliveryAreas.join(', '));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -1401,9 +1376,11 @@ function ProfileSection({ data, onProfileUpdated }: {
     try {
       const response = await partnerApi<{ user: PartnerProfile }>('/api/partners/profile', {
         method: 'PATCH',
-        body: JSON.stringify({ fullName, mobileNumber }),
+        body: JSON.stringify({ fullName, mobileNumber, state, preferredDeliveryAreas }),
       });
       onProfileUpdated(response.user);
+      setState(response.user.state ?? '');
+      setPreferredDeliveryAreas(response.user.preferredDeliveryAreas.join(', '));
       setEditing(false);
       setMessage('Your profile was saved.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Your profile could not be saved.'); }
@@ -1417,7 +1394,14 @@ function ProfileSection({ data, onProfileUpdated }: {
         <section className="nwg-card nwg-profile-summary">
           <span className="nwg-profile-avatar" aria-hidden="true">{getInitials(data.user.fullName)}</span>
           <div><h2>{data.user.fullName}</h2><p>Partner ID: {data.user.id.slice(0, 8).toUpperCase()}
-            <span className="nwg-separator">|</span><StatusPill status={data.user.status} /></p></div>
+            <span className="nwg-separator">|</span><StatusPill status={data.user.status} /></p>
+            <div className="nwg-profile-location-details">
+              <span>State / Union Territory: {data.user.state || 'Not set yet'}</span>
+              <span>Preferred delivery areas: {data.user.preferredDeliveryAreas.length
+                ? data.user.preferredDeliveryAreas.join(', ')
+                : 'Not specified'}</span>
+            </div>
+          </div>
           <button className="nwg-button nwg-button-secondary" type="button" onClick={() => { setEditing((current) => !current); setError(''); }}>
             <Pencil size={15} />{editing ? 'Cancel edit' : 'Edit profile'}
           </button>
@@ -1429,6 +1413,18 @@ function ProfileSection({ data, onProfileUpdated }: {
               <label>Full name<input required autoComplete="name" maxLength={80} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
               <label>Mobile number<input required type="tel" autoComplete="tel" maxLength={24} value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} /></label>
             </div>
+            <label>State / Union Territory
+              <select autoComplete="address-level1" value={state} onChange={(event) => setState(event.target.value)}>
+                <option value="">Not set yet</option>
+                {INDIAN_STATES_AND_UNION_TERRITORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label>Preferred delivery areas (optional)
+              <input maxLength={2000} value={preferredDeliveryAreas}
+                onChange={(event) => setPreferredDeliveryAreas(event.target.value)}
+                placeholder="e.g. Tilak Nagar, Janakpuri, Uttam Nagar" />
+              <small>Informational only. You can deliver anywhere and update these areas anytime.</small>
+            </label>
             <label>Email address<input type="email" value={data.user.email} readOnly /></label>
             <button type="submit" className="nwg-button nwg-button-primary" disabled={busy}><Check size={15} />{busy ? 'Saving…' : 'Save changes'}</button>
           </form>
@@ -1468,7 +1464,7 @@ function ProfileSection({ data, onProfileUpdated }: {
         </section>
         <section className="nwg-card nwg-sample-data">
           <CardHeading icon={CircleHelp} title="Sample Data — Reference Only"
-            description="Illustrative handover details; not a live campaign or partner record." />
+            description="Illustrative delivery details; not a live business or partner record." />
           <dl>
             <div><dt><Store size={16} />Business</dt><dd>Sample local grocery store</dd></div>
             <div><dt><MapPin size={16} />Delivery address</dt><dd>Example Street, Noida, India</dd></div>
@@ -1519,7 +1515,7 @@ export function PartnerWorkspace({
       }
       setWorkspace(data);
     } catch (reason) {
-      setWorkspaceError(reason instanceof Error ? reason.message : 'Partner campaign data could not be loaded.');
+      setWorkspaceError(reason instanceof Error ? reason.message : 'Partner workspace data could not be loaded.');
     } finally { setWorkspaceBusy(false); }
   }, []);
 

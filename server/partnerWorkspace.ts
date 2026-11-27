@@ -1,4 +1,5 @@
-import { normalizePartnerMobile, normalizePartnerName } from './partnerAuth';
+import { normalizePartnerMobile, normalizePartnerName, normalizePreferredDeliveryAreas } from './partnerAuth';
+import { normalizeIndianState } from '../shared/indianStates';
 
 export interface PartnerProofPhoto {
   contentType: 'image/jpeg' | 'image/png' | 'image/webp';
@@ -42,13 +43,36 @@ export function parsePartnerProofPhoto(value: unknown): PartnerProofPhoto | unde
 export function normalizePartnerProfileUpdate(value: unknown): {
   fullName: string;
   mobileNumber: string;
+  state?: string | null;
+  preferredDeliveryAreas?: string[];
 } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
   const fullName = normalizePartnerName(input.fullName);
   const mobileNumber = normalizePartnerMobile(input.mobileNumber);
   if (!fullName || !mobileNumber) return undefined;
-  return { fullName, mobileNumber };
+  const update: {
+    fullName: string;
+    mobileNumber: string;
+    state?: string | null;
+    preferredDeliveryAreas?: string[];
+  } = { fullName, mobileNumber };
+
+  if (Object.hasOwn(input, 'state')) {
+    if (input.state === null || (typeof input.state === 'string' && !input.state.trim())) {
+      update.state = null;
+    } else {
+      const state = normalizeIndianState(input.state);
+      if (!state) return undefined;
+      update.state = state;
+    }
+  }
+  if (Object.hasOwn(input, 'preferredDeliveryAreas')) {
+    const areas = normalizePreferredDeliveryAreas(input.preferredDeliveryAreas);
+    if (!areas) return undefined;
+    update.preferredDeliveryAreas = areas;
+  }
+  return update;
 }
 
 export function summarizePartnerCoins(entries: readonly PartnerCoinLedgerEntry[]): PartnerCoinSummary {

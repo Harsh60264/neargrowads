@@ -5,6 +5,7 @@ import {
   Settings2, ShieldCheck, UsersRound, X,
 } from 'lucide-react';
 import './adminDeliveryTeam.css';
+import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../../../shared/indianStates';
 
 export interface DeliveryTeamActivity {
   id: string;
@@ -32,6 +33,8 @@ interface DeliveryTeamPartner {
   full_name: string;
   email: string;
   mobile_number: string;
+  state: string | null;
+  preferred_delivery_areas: string[];
   status: 'pending' | 'active' | 'disabled';
   created_at: string;
   last_login_at: string | null;
@@ -386,6 +389,7 @@ export function AdminDeliveryTeam({
   const [campaignPartnerSearch, setCampaignPartnerSearch] = useState('');
   const [totalPartners, setTotalPartners] = useState(0);
   const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'pending' | 'disabled'>('all');
   const [page, setPage] = useState(1);
   const [selectedPartner, setSelectedPartner] = useState<DeliveryTeamPartnerDetail | null>(null);
@@ -439,6 +443,7 @@ export function AdminDeliveryTeam({
   const fetchPartners = useCallback(async () => {
     const params = new URLSearchParams({
       search,
+      state: stateFilter,
       status: statusFilter,
       page: String(page),
       pageSize: String(pageSize),
@@ -448,7 +453,7 @@ export function AdminDeliveryTeam({
     );
     setPartners(response.partners);
     setTotalPartners(response.total);
-  }, [page, search, statusFilter]);
+  }, [page, search, stateFilter, statusFilter]);
 
   const fetchCampaigns = useCallback(async () => {
     const response = await requestJson<{ campaigns: DeliveryTeamCampaign[] }>('/api/admin/delivery-team/campaigns');
@@ -822,6 +827,13 @@ export function AdminDeliveryTeam({
                   <option value="all">All statuses</option><option value="active">Active</option><option value="pending">Pending</option><option value="disabled">Disabled</option>
                 </select>
               </label>
+              <label className="dt-select-wrap"><span className="dt-sr-only">Filter delivery partners by state</span>
+                <select value={stateFilter} onChange={(event) => { setStateFilter(event.target.value); setPage(1); }}>
+                  <option value="all">All states / UTs</option>
+                  <option value="unselected">State not set</option>
+                  {INDIAN_STATES_AND_UNION_TERRITORIES.map((state) => <option key={state} value={state}>{state}</option>)}
+                </select>
+              </label>
             </div>
           </div>
           <div className="dt-table-wrap">
@@ -840,6 +852,7 @@ export function AdminDeliveryTeam({
                           <button type="button" className="dt-partner-select" disabled={actionBusy} onClick={() => void openPartner(partner)}>{partner.full_name}</button>
                           <span>ID {partner.id}</span>
                           <span>{partner.mobile_number || partner.email}</span>
+                          <span>{partner.state || 'State / UT not set'}</span>
                         </div>
                       </div>
                     </td>
@@ -868,6 +881,7 @@ export function AdminDeliveryTeam({
                       <strong>{partner.full_name}</strong>
                       <span>ID {partner.id}</span>
                       <span>{partner.mobile_number || partner.email}</span>
+                      <span>{partner.state || 'State / UT not set'}</span>
                     </div>
                   </div>
                   <button
@@ -912,6 +926,14 @@ export function AdminDeliveryTeam({
               </div>
               <span className={`dt-status dt-status--${selectedPartner.partner.status}`}>{selectedPartner.partner.status}</span>
             </div>
+            <section className="dt-partner-location-details" aria-label="Partner location preferences">
+              <strong>Location preferences</strong>
+              <span><b>State / Union Territory</b>{selectedPartner.partner.state || 'Not set yet'}</span>
+              <span><b>Preferred delivery areas</b>{selectedPartner.partner.preferred_delivery_areas.length
+                ? selectedPartner.partner.preferred_delivery_areas.join(', ')
+                : 'Not specified'}</span>
+              <small>These details are informational only and do not limit delivery locations.</small>
+            </section>
 
             <section className="dt-quick-section dt-coin-section" aria-labelledby="dt-coins-title">
               <div className="dt-quick-section-heading"><h4 id="dt-coins-title"><Coins size={16} /> NGA Coins</h4></div>

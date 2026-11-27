@@ -33,6 +33,7 @@ DECLARE
   v_delivery_count bigint;
   v_ledger_amount integer;
   v_withdrawal_id uuid;
+  v_partner_list jsonb;
 BEGIN
   IF NOT EXISTS (
     SELECT 1
@@ -46,6 +47,21 @@ BEGIN
       AND location_address_source = 'campaign_legacy'
   ) THEN
     RAISE EXCEPTION 'Existing campaign proof with legacy GPS coordinates was not preserved by independent-delivery migration';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.partner_profiles
+    WHERE id = 'a2000000-0000-4000-8000-000000000012'
+      AND state IS NULL
+      AND preferred_delivery_areas = '{}'::text[]
+  ) THEN
+    RAISE EXCEPTION 'An existing partner without state details was not preserved with optional location preferences';
+  END IF;
+  IF has_table_privilege('anon', 'public.partner_profiles', 'SELECT') OR
+     has_table_privilege('authenticated', 'public.partner_profiles', 'SELECT') OR
+     has_table_privilege('anon', 'public.partner_profiles', 'UPDATE') OR
+     has_table_privilege('authenticated', 'public.partner_profiles', 'UPDATE') THEN
+    RAISE EXCEPTION 'Partner location profile fields are directly accessible to unauthenticated or authenticated database roles';
   END IF;
 
   INSERT INTO auth.users (id, email) VALUES
@@ -64,6 +80,58 @@ BEGIN
     (v_partner_id, 'inventory-partner@example.test', 'Inventory Fixture', '+10000000001', 'active'),
     (v_no_campaign_partner_id, 'inventory-no-campaign@example.test', 'No Campaign Fixture', '+10000000002', 'active'),
     (v_concurrent_partner_id, 'inventory-concurrent@example.test', 'Concurrent Fixture', '+10000000003', 'active');
+  UPDATE public.partner_profiles
+  SET state = 'Punjab', preferred_delivery_areas = ARRAY['Tilak Nagar', 'Janakpuri']
+  WHERE id = v_partner_id;
+
+  BEGIN
+    UPDATE public.partner_profiles SET state = 'California' WHERE id = v_partner_id;
+    RAISE EXCEPTION 'TEST_SENTINEL: non-Indian state unexpectedly succeeded';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+
+  IF has_function_privilege(
+    'anon',
+    'public.get_delivery_team_partners_by_state(uuid,text,text,text,integer,integer)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.get_delivery_team_partners_by_state(uuid,text,text,text,integer,integer)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'State-filtered partner listing is not restricted to the service role';
+  END IF;
+  v_partner_list := public.get_delivery_team_partners_by_state(
+    v_owner_id, 'Punjab', '', 'all', 1, 20
+  );
+  IF jsonb_array_length(v_partner_list -> 'partners') <> 1 OR
+     NOT (v_partner_list -> 'partners' @> jsonb_build_array(jsonb_build_object(
+       'id', v_partner_id::text,
+       'state', 'Punjab',
+       'preferred_delivery_areas', jsonb_build_array('Tilak Nagar', 'Janakpuri')
+     ))) THEN
+    RAISE EXCEPTION 'Owner state filter or partner location preferences were not returned correctly';
+  END IF;
+  v_partner_list := public.get_delivery_team_partners_by_state(
+    v_owner_id, 'unselected', '', 'all', 1, 20
+  );
+  IF NOT (v_partner_list -> 'partners' @> jsonb_build_array(jsonb_build_object(
+    'id', 'a2000000-0000-4000-8000-000000000012',
+    'state', NULL,
+    'preferred_delivery_areas', '[]'::jsonb
+  ))) THEN
+    RAISE EXCEPTION 'Admin could not filter legacy partners whose state is not set';
+  END IF;
+  BEGIN
+    PERFORM public.get_delivery_team_partners_by_state(
+      v_owner_id, 'California', '', 'all', 1, 20
+    );
+    RAISE EXCEPTION 'TEST_SENTINEL: non-Indian state filter unexpectedly succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'TEST_SENTINEL: non-Indian state filter unexpectedly succeeded' OR
+       position('Invalid Delivery Team partner filters' IN SQLERRM) = 0 THEN RAISE; END IF;
+  END;
 
   INSERT INTO public.partner_campaigns (
     name, description, area, start_date, end_date, daily_target, coins_per_proof
@@ -328,7 +396,7 @@ BEGIN
   END IF;
   v_independent_rejected_proof := public.submit_independent_partner_proof(
     v_no_campaign_partner_id, v_no_campaign_partner_id::text || '/manual-no-gps.webp',
-    'Independent Shop', NULL, 'Market Street, Noida', NULL, 'Manual address fallback',
+    '', '', 'Market Street, Noida', '', 'Manual address fallback',
     NULL, NULL, NULL, NULL, 'manual_no_gps'
   );
   SELECT
@@ -340,6 +408,9 @@ BEGIN
      (SELECT assignment_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
      (SELECT campaign_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
      (SELECT site_id FROM public.partner_proofs WHERE id = v_independent_rejected_proof) IS NOT NULL OR
+     (SELECT business_name FROM public.partner_proofs WHERE id = v_independent_rejected_proof) <> '' OR
+     (SELECT business_category FROM public.partner_proofs WHERE id = v_independent_rejected_proof) <> '' OR
+     (SELECT address_detail FROM public.partner_proofs WHERE id = v_independent_rejected_proof) <> '' OR
      (SELECT status FROM public.partner_coin_ledger WHERE proof_id = v_independent_rejected_proof) <> 'pending' OR
      (SELECT amount FROM public.partner_coin_ledger WHERE proof_id = v_independent_rejected_proof) <> 1000 THEN
     RAISE EXCEPTION 'Campaign-free manual proof did not reserve one physical card with exactly 1,000 pending coins';

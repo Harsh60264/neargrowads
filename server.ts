@@ -102,7 +102,9 @@ import {
   partnerPasswordIsStrong,
   validatePartnerRegistration,
   buildPartnerAuthRedirect,
+  normalizePreferredDeliveryAreas,
 } from './server/partnerAuth';
+import { normalizeIndianState } from './shared/indianStates';
 import {
   normalizePartnerProfileUpdate,
   parsePartnerProofPhoto,
@@ -3489,6 +3491,8 @@ interface PartnerProfile {
   email: string;
   fullName: string;
   mobileNumber: string;
+  state: string | null;
+  preferredDeliveryAreas: string[];
   status: 'pending' | 'active' | 'disabled';
 }
 
@@ -3771,21 +3775,29 @@ async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefi
 async function readPartnerProfile(userId: string): Promise<PartnerProfile | undefined> {
   const query = new URLSearchParams({
     id: `eq.${userId}`,
-    select: 'id,email,full_name,mobile_number,status',
+    select: 'id,email,full_name,mobile_number,state,preferred_delivery_areas,status',
     limit: '1',
   });
   const rows = await readSupabaseJson<Array<Record<string, unknown>>>(
     await supabaseAdminRequest(`rest/v1/partner_profiles?${query}`),
   );
   const row = rows[0];
+  const state = row?.state === null || row?.state === undefined
+    ? null
+    : normalizeIndianState(row.state);
+  const preferredDeliveryAreas = normalizePreferredDeliveryAreas(row?.preferred_delivery_areas);
   if (!row || typeof row.id !== 'string' || typeof row.email !== 'string' ||
     typeof row.full_name !== 'string' || typeof row.mobile_number !== 'string' ||
+    (row.state !== null && row.state !== undefined && !state) ||
+    !Array.isArray(row.preferred_delivery_areas) || !preferredDeliveryAreas ||
     !['pending', 'active', 'disabled'].includes(String(row.status))) return undefined;
   return {
     id: row.id,
     email: row.email,
     fullName: row.full_name,
     mobileNumber: row.mobile_number,
+    state: state ?? null,
+    preferredDeliveryAreas,
     status: row.status as PartnerProfile['status'],
   };
 }
@@ -6003,7 +6015,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     const validation = validatePartnerRegistration(req.body);
     if (!validation.valid || !validation.email || !validation.password ||
-      !validation.mobileNumber || !validation.fullName) {
+      !validation.mobileNumber || !validation.fullName || !validation.state ||
+      !validation.preferredDeliveryAreas) {
       res.status(400).json({ message: validation.message || 'Enter valid partner registration details.' });
       return;
     }
@@ -6101,6 +6114,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           email: validation.email,
           full_name: validation.fullName,
           mobile_number: validation.mobileNumber,
+          state: validation.state,
+          preferred_delivery_areas: validation.preferredDeliveryAreas,
           status,
         }),
       }));
@@ -6257,7 +6272,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       console.error('[NearGrow Ads] Partner workspace data could not be loaded:', error);
       res.status(503).json({
         authenticated: false,
-        message: 'Partner campaign data could not be loaded. Confirm the partner workspace migration is applied and try again.',
+        message: 'Partner workspace data could not be loaded. Confirm the partner workspace migration is applied and try again.',
       });
     }
   });
@@ -6281,7 +6296,14 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         {
           method: 'PATCH',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ full_name: update.fullName, mobile_number: update.mobileNumber }),
+          body: JSON.stringify({
+            full_name: update.fullName,
+            mobile_number: update.mobileNumber,
+            ...(update.state !== undefined ? { state: update.state } : {}),
+            ...(update.preferredDeliveryAreas !== undefined
+              ? { preferred_delivery_areas: update.preferredDeliveryAreas }
+              : {}),
+          }),
         },
       ));
       const updatedProfile = await readPartnerProfile(profile.id);
@@ -6358,10 +6380,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(400).json({ message: 'Capture or select a clear JPEG, PNG, or WebP proof photo up to 2 MB.' });
       return;
     }
-    const businessName = typeof req.body?.businessName === 'string' ? req.body.businessName.trim() : '';
-    const businessCategory = typeof req.body?.businessCategory === 'string' ? req.body.businessCategory.trim() : '';
+    const businessName = req.body?.businessName === undefined || req.body?.businessName === null
+      ? ''
+      : typeof req.body.businessName === 'string' ? req.body.businessName.trim() : undefined;
+    const businessCategory = req.body?.businessCategory === undefined || req.body?.businessCategory === null
+      ? ''
+      : typeof req.body.businessCategory === 'string' ? req.body.businessCategory.trim() : undefined;
     const deliveryAddress = typeof req.body?.deliveryAddress === 'string' ? req.body.deliveryAddress.trim() : '';
-    const addressDetail = typeof req.body?.addressDetail === 'string' ? req.body.addressDetail.trim() : '';
+    const addressDetail = req.body?.addressDetail === undefined || req.body?.addressDetail === null
+      ? ''
+      : typeof req.body.addressDetail === 'string' ? req.body.addressDetail.trim() : undefined;
     const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
     const latitude = req.body?.latitude === null || req.body?.latitude === undefined
       ? null
@@ -6376,8 +6404,10 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const locationAddressSource = req.body?.locationAddressSource;
     const locationToken = typeof req.body?.locationToken === 'string' ? req.body.locationToken : '';
     const capturedAtMs = capturedAt ? Date.parse(capturedAt) : NaN;
-    if (businessName.length < 2 || businessName.length > 120 || businessCategory.length > 80 ||
-      deliveryAddress.length < 3 || deliveryAddress.length > 500 || addressDetail.length > 240 ||
+    if (businessName === undefined || businessName.length > 120 ||
+      businessCategory === undefined || businessCategory.length > 80 ||
+      deliveryAddress.length < 3 || deliveryAddress.length > 500 ||
+      addressDetail === undefined || addressDetail.length > 240 ||
       note.length > 200 ||
       ((latitude === null) !== (longitude === null)) ||
       (latitude !== null && (typeof latitude !== 'number' || !Number.isFinite(latitude) ||
@@ -6388,7 +6418,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000)) ||
       (latitude === null && (accuracy !== null || capturedAt !== null || locationToken.length > 0)) ||
       !['gps_reverse_geocoded', 'gps_manual', 'manual_no_gps'].includes(locationAddressSource)) {
-      res.status(400).json({ message: 'Check the business details, address, note, and current location evidence, then try again.' });
+      res.status(400).json({ message: 'Check the delivery location, optional details, note, and current location evidence, then try again.' });
       return;
     }
     if ((latitude === null && locationAddressSource !== 'manual_no_gps') ||
@@ -6449,8 +6479,6 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         'Active partner profile not found',
         'The captured location is invalid',
         'Manual address submissions cannot include fabricated GPS evidence',
-        'Enter a valid business name',
-        'The business category is invalid',
         'Enter a valid delivery address',
         'The proof note is too long',
       ].find((message) => providerMessage.includes(message));
@@ -6662,13 +6690,22 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       page: typeof req.query.page === 'string' ? req.query.page : '1',
       pageSize: typeof req.query.pageSize === 'string' ? req.query.pageSize : '20',
     }));
+    const requestedState = typeof req.query.state === 'string' ? req.query.state : 'all';
+    const stateFilter = requestedState === 'all' || requestedState === 'unselected'
+      ? requestedState
+      : normalizeIndianState(requestedState);
+    if (!stateFilter) {
+      res.status(400).json({ message: 'Select a valid Indian state or union territory filter.' });
+      return;
+    }
     try {
       const result = await readSupabaseJson<{ partners: unknown[]; total: number }>(await supabaseAdminRequest(
-        'rest/v1/rpc/get_delivery_team_partners',
+        'rest/v1/rpc/get_delivery_team_partners_by_state',
         {
           method: 'POST',
           body: JSON.stringify({
             p_admin_id: identity.id,
+            p_state: stateFilter,
             p_search: filters.search,
             p_status: filters.status,
             p_page: filters.page,
