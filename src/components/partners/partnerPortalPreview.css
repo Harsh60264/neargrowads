@@ -2318,3 +2318,80 @@ html[data-theme='dark'] .partner-workspace :is(input, select, textarea) {
     height: 116px;
   }
 }
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar {
+  border-right-color: var(--brand-border);
+  background: #FFFFFF;
+  color: #071426;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar .partner-preview-brand {
+  color: #071426;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar .partner-preview-brand span {
+  color: var(--brand-green);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button {
+  color: #071426;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button svg {
+  color: var(--brand-green);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button:hover:not([aria-current='page']),
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button:focus-visible:not([aria-current='page']) {
+  background: var(--brand-bg-soft);
+  color: #071426;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button[aria-current='page'] {
+  background: var(--brand-green-light);
+  color: var(--brand-green-deep);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button[aria-current='page'] svg {
+  color: var(--brand-green-deep);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button:not([aria-current='page']):active,
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button[aria-current='page']:active {
+  background: color-mix(in srgb, var(--brand-green-light) 75%, #FFFFFF);
+  color: var(--brand-green-deep);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-sidebar nav button:focus-visible,
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button:focus-visible {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 2px;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button:hover:not([aria-current='page']),
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button:focus-visible:not([aria-current='page']) {
+  background: var(--brand-bg-soft);
+  color: #071426;
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button[aria-current='page'] {
+  background: var(--brand-green-light);
+  color: var(--brand-green-deep);
+}
+
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button:not([aria-current='page']):active,
+html[data-theme='light'] .partner-workspace .partner-preview-mobile-tabs button[aria-current='page']:active {
+  background: color-mix(in srgb, var(--brand-green-light) 75%, #FFFFFF);
+  color: var(--brand-green-deep);
+}
+
+html[data-theme='light'] .partner-workspace .nwg-active-campaign h2,
+html[data-theme='light'] .partner-workspace .nwg-active-campaign .nwg-empty-inverse > strong {
+  color: #FFFFFF;
+}
+
+html[data-theme='light'] .partner-workspace .nwg-active-campaign > p,
+html[data-theme='light'] .partner-workspace .nwg-active-campaign .nwg-campaign-meta span,
+html[data-theme='light'] .partner-workspace .nwg-active-campaign .nwg-empty-inverse > p {
+  color: #DDFBE3;
+}
