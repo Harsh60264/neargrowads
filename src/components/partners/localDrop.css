@@ -179,6 +179,82 @@ html[data-theme='dark'] .localdrop-page { --localdrop-action-text: #07110A; }
 .localdrop-form-success { display: flex; align-items: center; gap: 12px; margin-top: 22px; border-radius: 14px; background: var(--localdrop-soft); padding: 18px; color: var(--localdrop-text); line-height: 1.5; }
 .localdrop-form-success svg { flex: none; color: var(--localdrop-green); }
 
+.localdrop-business-purchase { display: grid; gap: 20px; margin-top: 22px; }
+.localdrop-business-package {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid color-mix(in srgb, var(--localdrop-green) 28%, var(--localdrop-border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--localdrop-green) 7%, var(--localdrop-surface));
+  padding: 20px;
+}
+.localdrop-business-package .localdrop-kicker { margin-bottom: 8px; }
+.localdrop-business-package h4 { margin: 0 0 6px; font-size: 18px; font-weight: 800; letter-spacing: -.025em; }
+.localdrop-business-package p:last-child { margin: 0; color: var(--localdrop-muted); font-size: 13px; }
+.localdrop-business-price { display: grid; flex: none; gap: 3px; text-align: right; }
+.localdrop-business-price strong { font-size: 26px; font-weight: 850; letter-spacing: -.04em; }
+.localdrop-business-price span { color: var(--localdrop-muted); font-size: 11px; }
+.localdrop-business-form { margin-top: 0; }
+.localdrop-business-form .partner-location-capture {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+.localdrop-business-form .partner-location-capture > h3,
+.localdrop-business-form .partner-location-help,
+.localdrop-business-form .partner-location-error,
+.localdrop-business-form .partner-location-result { grid-column: 1 / -1; }
+.localdrop-business-form .partner-location-address { grid-column: 1; }
+.localdrop-business-form .partner-location-detect {
+  grid-column: 2;
+  min-height: 42px;
+  margin-bottom: 1px;
+  white-space: nowrap;
+}
+.localdrop-payment-security { display: flex; align-items: center; gap: 7px; margin: -5px 0 0; color: var(--localdrop-muted); font-size: 11px; }
+.localdrop-payment-status,
+.localdrop-payment-success {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--localdrop-border);
+  border-radius: 16px;
+  background: var(--localdrop-soft);
+  padding: 18px;
+}
+.localdrop-payment-status > strong { color: var(--localdrop-text); font-size: 14px; }
+.localdrop-payment-status > span { color: var(--localdrop-muted); font-size: 13px; line-height: 1.5; }
+.localdrop-payment-status--failed,
+.localdrop-payment-status--cancelled { border-color: color-mix(in srgb, #b42318 35%, var(--localdrop-border)); }
+.localdrop-payment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.localdrop-location-refresh {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--localdrop-border);
+  border-radius: 999px;
+  background: var(--localdrop-surface);
+  padding: 8px 14px;
+  color: var(--localdrop-text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.localdrop-location-refresh:disabled { cursor: wait; opacity: .65; }
+.localdrop-location-refresh:focus-visible { outline: 3px solid var(--brand-orange); outline-offset: 3px; }
+.localdrop-payment-success { grid-template-columns: auto minmax(0, 1fr); align-items: start; border-color: color-mix(in srgb, var(--localdrop-green) 35%, var(--localdrop-border)); }
+.localdrop-payment-success > svg { color: var(--localdrop-green); }
+.localdrop-payment-success h4 { margin: 0 0 6px; font-size: 19px; }
+.localdrop-payment-success p { margin: 0 0 12px; color: var(--localdrop-muted); font-size: 13px; line-height: 1.5; }
+.localdrop-payment-success dl { display: grid; gap: 7px; margin: 0 0 12px; }
+.localdrop-payment-success dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--localdrop-border); padding-bottom: 6px; font-size: 12px; }
+.localdrop-payment-success dt { color: var(--localdrop-muted); }
+.localdrop-payment-success dd { margin: 0; color: var(--localdrop-text); font-weight: 750; }
+.localdrop-payment-success small { color: var(--localdrop-muted); font-size: 11px; }
+.localdrop-payment-notice { margin: 0; color: var(--localdrop-muted); font-size: 12px; }
+
 @media (max-width: 1000px) {
   .localdrop-hero { grid-template-columns: 1fr; }
   .localdrop-hero-copy { max-width: 700px; }
@@ -196,6 +272,12 @@ html[data-theme='dark'] .localdrop-page { --localdrop-action-text: #07110A; }
   .localdrop-actions .localdrop-button { width: 100%; }
   .localdrop-card { padding: 22px; }
   .localdrop-video-wrap { border-radius: 18px; }
+  .localdrop-business-package { align-items: flex-start; flex-direction: column; }
+  .localdrop-business-price { text-align: left; }
+  .localdrop-business-form .partner-location-capture { grid-template-columns: 1fr; }
+  .localdrop-business-form .partner-location-address,
+  .localdrop-business-form .partner-location-detect { grid-column: 1; }
+  .localdrop-payment-success { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
