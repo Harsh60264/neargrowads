@@ -169,7 +169,8 @@ CREATE TABLE public.admin_users (
     '20261127120000_admin_delivery_team_management.sql',
     '20261202120000_wildcard_inventory_restock.sql',
     '20261203120000_partner_independent_delivery.sql',
-    '20261204120000_partner_profile_delivery_preferences.sql'
+    '20261204120000_partner_profile_delivery_preferences.sql',
+    '20261205120000_partner_registration_location_details.sql'
   )
   foreach ($migrationFile in $migrationFiles) {
     $migrationPath = Join-Path $repoRoot "supabase\migrations\$migrationFile"
@@ -230,6 +231,31 @@ $seed$;
       throw "Migration failed on the disposable database: $migrationFile"
     }
   }
+
+  $applyRunnerPath = Join-Path $repoRoot 'scripts\apply-production-partner-registration-location-migration.ps1'
+  $applyRunnerContent = Get-Content -LiteralPath $applyRunnerPath -Raw
+  $poststateGuardMarker = '$poststateGuard = @'''
+  $poststateGuardStart = $applyRunnerContent.IndexOf($poststateGuardMarker, [StringComparison]::Ordinal)
+  $poststateGuardBodyStart = if ($poststateGuardStart -ge 0) {
+    $applyRunnerContent.IndexOf("`n", $poststateGuardStart, [StringComparison]::Ordinal) + 1
+  } else { -1 }
+  $poststateGuardEnd = if ($poststateGuardBodyStart -gt 0) {
+    $applyRunnerContent.IndexOf("`n'@", $poststateGuardBodyStart, [StringComparison]::Ordinal)
+  } else { -1 }
+  if ($poststateGuardEnd -lt $poststateGuardBodyStart) {
+    throw 'Could not extract the Production post-state guard for isolated validation.'
+  }
+  $poststateGuardSql = $applyRunnerContent.Substring(
+    $poststateGuardBodyStart,
+    $poststateGuardEnd - $poststateGuardBodyStart
+  ).TrimEnd("`r")
+  $poststateGuardPath = Join-Path $runRoot 'partner-registration-location-poststate-guard.sql'
+  [System.IO.File]::WriteAllText(
+    $poststateGuardPath,
+    $poststateGuardSql,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  Invoke-PsqlFile -Path $poststateGuardPath
 
   $testPath = Join-Path $repoRoot 'supabase\tests\wildcard_inventory_restock.test.sql'
   Invoke-PsqlFile -Path $testPath

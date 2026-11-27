@@ -1,0 +1,176 @@
+.partner-location-capture {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 12px;
+  padding: 12px;
+  color: inherit;
+}
+
+.partner-location-capture h3 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.partner-location-consent {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.partner-location-consent input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--partner-auth-green, var(--preview-green, #35984e));
+}
+
+.partner-location-address {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.partner-location-address input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 9px;
+  background: transparent;
+  padding: 0 10px;
+  color: inherit;
+  font: inherit;
+}
+
+.partner-location-address input:focus {
+  border-color: var(--partner-auth-green, var(--preview-green, #35984e));
+  outline: 2px solid color-mix(in srgb, var(--partner-auth-green, var(--preview-green, #35984e)) 24%, transparent);
+}
+
+.partner-workspace .partner-location-address input {
+  border-color: var(--preview-border);
+  background: var(--nwg-input);
+  color: var(--nwg-ink);
+}
+
+.partner-workspace .partner-location-address input:focus {
+  border-color: var(--preview-green);
+  outline: 2px solid color-mix(in srgb, var(--preview-green) 24%, transparent);
+}
+
+.partner-location-address input::placeholder {
+  color: color-mix(in srgb, currentColor 56%, transparent);
+}
+
+.partner-location-detect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--partner-auth-green, var(--preview-green, #35984e)) 55%, currentColor 10%);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--partner-auth-green, var(--preview-green, #35984e)) 9%, transparent);
+  padding: 0 11px;
+  color: var(--partner-auth-green, var(--preview-green, #287d3d));
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.partner-location-detect:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--partner-auth-green, var(--preview-green, #35984e)) 16%, transparent);
+}
+
+.partner-location-detect:focus-visible {
+  outline: 2px solid var(--partner-auth-green, var(--preview-green, #35984e));
+  outline-offset: 2px;
+}
+
+.partner-location-detect:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.partner-location-detect:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.partner-location-help,
+.partner-location-result small {
+  color: color-mix(in srgb, currentColor 70%, transparent);
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
+.partner-location-error {
+  margin: 0;
+  color: var(--nwg-danger, #b42318);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.partner-location-result {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--partner-auth-green, var(--preview-green, #35984e)) 8%, transparent);
+  padding: 9px;
+  overflow-wrap: anywhere;
+}
+
+.partner-location-result strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--partner-auth-green, var(--preview-green, #287d3d));
+  font-size: 0.74rem;
+}
+
+.partner-location-result > span {
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.partner-location-result small {
+  font-size: 0.66rem;
+}
+
+.partner-location-capture .is-spinning {
+  animation: partner-location-spin 1s linear infinite;
+}
+
+@keyframes partner-location-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 440px) {
+  .partner-location-capture {
+    padding: 10px;
+  }
+
+  .partner-location-detect {
+    width: 100%;
+  }
+}
+
+.public-website[data-public-theme='dark'] .partner-location-capture .partner-location-error {
+  color: #fecaca;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .partner-location-capture .is-spinning {
+    animation: none;
+  }
+}

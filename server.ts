@@ -26,7 +26,11 @@ import {
 } from './src/data/marketingAnalytics';
 import { withOptionalCustomerLocation } from './server/optionalCustomerLocation.ts';
 import { readCustomerLocation, withCustomerLocation } from './server/customerLocationSerialization.ts';
-import { PartnerReverseGeocoding, ReverseGeocodeError } from './server/partnerReverseGeocoding.ts';
+import {
+  PartnerReverseGeocoding,
+  ReverseGeocodeError,
+  type ReverseGeocodedLocation,
+} from './server/partnerReverseGeocoding.ts';
 import {
   fromSupabaseServiceEnquiry,
   type ServiceBillingType,
@@ -101,10 +105,12 @@ import {
   parsePartnerAuthSignupUser,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
+  validatePartnerLocation,
   buildPartnerAuthRedirect,
   normalizePreferredDeliveryAreas,
 } from './server/partnerAuth';
 import { normalizeIndianState } from './shared/indianStates';
+import type { PartnerLocation, PartnerLocationSubmission } from './shared/partnerLocation';
 import {
   normalizePartnerProfileUpdate,
   parsePartnerProofPhoto,
@@ -3493,6 +3499,8 @@ interface PartnerProfile {
   mobileNumber: string;
   state: string | null;
   preferredDeliveryAreas: string[];
+  registrationLocation: PartnerLocation | null;
+  currentLocation: PartnerLocation | null;
   status: 'pending' | 'active' | 'disabled';
 }
 
@@ -3514,6 +3522,29 @@ function partnerConfigIsReady(): boolean {
 
 function partnerSignature(payload: string): string {
   return createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '').update(payload).digest('base64url');
+}
+
+interface PartnerLocationCapture {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  capturedAt: string;
+}
+
+function parsePartnerLocationCapture(value: unknown): PartnerLocationCapture | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const { latitude, longitude, accuracy, capturedAt } = input;
+  const capturedAtMs = typeof capturedAt === 'string' ? Date.parse(capturedAt) : NaN;
+  if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+    typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+    typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 50_000 ||
+    typeof capturedAt !== 'string' || !Number.isFinite(capturedAtMs) ||
+    new Date(capturedAtMs).toISOString() !== capturedAt ||
+    capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000) {
+    return undefined;
+  }
+  return { latitude, longitude, accuracy, capturedAt };
 }
 
 function setPartnerSessionCookie(
@@ -3772,10 +3803,73 @@ async function readAdminIdentity(userId: string): Promise<AdminIdentity | undefi
   return identity;
 }
 
+function readStoredPartnerLocation(
+  row: Record<string, unknown>,
+  prefix: 'registration' | 'current',
+): PartnerLocation | null | undefined {
+  const field = (name: string) => row[`${prefix}_location_${name}`];
+  const address = field('address');
+  const locationValues = [
+    address,
+    field('latitude'),
+    field('longitude'),
+    field('accuracy_meters'),
+    field('captured_at'),
+    field('address_source'),
+    field('components'),
+  ];
+  if (address === null || address === undefined) {
+    return locationValues.every((value) => value === null || value === undefined) ? null : undefined;
+  }
+  const components = field('components');
+  const location = validatePartnerLocation({
+    address,
+    latitude: field('latitude'),
+    longitude: field('longitude'),
+    accuracyMeters: field('accuracy_meters'),
+    capturedAt: field('captured_at'),
+    source: field('address_source'),
+    components: components ?? null,
+  });
+  return location && location !== null ? location : undefined;
+}
+
+function partnerLocationTokenIsValid(location: PartnerLocationSubmission, scope: string): boolean {
+  if (location.source !== 'gps_reverse_geocoded' ||
+    location.latitude === null || location.longitude === null ||
+    location.accuracyMeters === null || location.capturedAt === null ||
+    !location.components || !location.locationToken) return false;
+  const evidence = JSON.stringify([
+    scope,
+    location.latitude,
+    location.longitude,
+    location.accuracyMeters,
+    location.capturedAt,
+    location.address,
+    location.components,
+  ]);
+  return safeStringEqual(location.locationToken, partnerSignature(evidence));
+}
+
+function partnerLocationColumns(
+  prefix: 'registration' | 'current',
+  location: PartnerLocationSubmission | null,
+): Record<string, unknown> {
+  return {
+    [`${prefix}_location_address`]: location?.address ?? null,
+    [`${prefix}_location_latitude`]: location?.latitude ?? null,
+    [`${prefix}_location_longitude`]: location?.longitude ?? null,
+    [`${prefix}_location_accuracy_meters`]: location?.accuracyMeters ?? null,
+    [`${prefix}_location_captured_at`]: location?.capturedAt ?? null,
+    [`${prefix}_location_address_source`]: location?.source ?? null,
+    [`${prefix}_location_components`]: location?.components ?? null,
+  };
+}
+
 async function readPartnerProfile(userId: string): Promise<PartnerProfile | undefined> {
   const query = new URLSearchParams({
     id: `eq.${userId}`,
-    select: 'id,email,full_name,mobile_number,state,preferred_delivery_areas,status',
+    select: 'id,email,full_name,mobile_number,state,preferred_delivery_areas,status,registration_location_address,registration_location_latitude,registration_location_longitude,registration_location_accuracy_meters,registration_location_captured_at,registration_location_address_source,registration_location_components,current_location_address,current_location_latitude,current_location_longitude,current_location_accuracy_meters,current_location_captured_at,current_location_address_source,current_location_components',
     limit: '1',
   });
   const rows = await readSupabaseJson<Array<Record<string, unknown>>>(
@@ -3786,10 +3880,13 @@ async function readPartnerProfile(userId: string): Promise<PartnerProfile | unde
     ? null
     : normalizeIndianState(row.state);
   const preferredDeliveryAreas = normalizePreferredDeliveryAreas(row?.preferred_delivery_areas);
+  const registrationLocation = row ? readStoredPartnerLocation(row, 'registration') : undefined;
+  const currentLocation = row ? readStoredPartnerLocation(row, 'current') : undefined;
   if (!row || typeof row.id !== 'string' || typeof row.email !== 'string' ||
     typeof row.full_name !== 'string' || typeof row.mobile_number !== 'string' ||
     (row.state !== null && row.state !== undefined && !state) ||
     !Array.isArray(row.preferred_delivery_areas) || !preferredDeliveryAreas ||
+    registrationLocation === undefined || currentLocation === undefined ||
     !['pending', 'active', 'disabled'].includes(String(row.status))) return undefined;
   return {
     id: row.id,
@@ -3798,6 +3895,8 @@ async function readPartnerProfile(userId: string): Promise<PartnerProfile | unde
     mobileNumber: row.mobile_number,
     state: state ?? null,
     preferredDeliveryAreas,
+    registrationLocation,
+    currentLocation,
     status: row.status as PartnerProfile['status'],
   };
 }
@@ -6020,6 +6119,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(400).json({ message: validation.message || 'Enter valid partner registration details.' });
       return;
     }
+    if (validation.registrationLocation?.source === 'gps_reverse_geocoded' &&
+      !partnerLocationTokenIsValid(validation.registrationLocation, 'registration')) {
+      res.status(400).json({ message: 'The detected registration location could not be verified. Retry location detection or enter the address manually.' });
+      return;
+    }
 
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
@@ -6116,6 +6220,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           mobile_number: validation.mobileNumber,
           state: validation.state,
           preferred_delivery_areas: validation.preferredDeliveryAreas,
+          ...partnerLocationColumns('registration', validation.registrationLocation ?? null),
           status,
         }),
       }));
@@ -6290,6 +6395,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       res.status(400).json({ message: 'Enter a valid name and mobile number.' });
       return;
     }
+    if (update.currentLocation?.source === 'gps_reverse_geocoded' &&
+      !partnerLocationTokenIsValid(update.currentLocation, `profile:${profile.id}`)) {
+      res.status(400).json({ message: 'The detected profile location could not be verified. Retry location detection or enter the address manually.' });
+      return;
+    }
     try {
       await readSupabaseJson<unknown>(await supabaseAdminRequest(
         `rest/v1/partner_profiles?id=eq.${encodeURIComponent(profile.id)}`,
@@ -6302,6 +6412,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
             ...(update.state !== undefined ? { state: update.state } : {}),
             ...(update.preferredDeliveryAreas !== undefined
               ? { preferred_delivery_areas: update.preferredDeliveryAreas }
+              : {}),
+            ...(update.currentLocation !== undefined
+              ? partnerLocationColumns('current', update.currentLocation)
               : {}),
           }),
         },
@@ -6323,17 +6436,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     }
     const profile = await requirePartnerSession(req, res);
     if (!profile) return;
-    const latitude = req.body?.latitude;
-    const longitude = req.body?.longitude;
-    const accuracy = req.body?.accuracy;
-    const capturedAt = req.body?.capturedAt;
-    const capturedAtMs = typeof capturedAt === 'string' ? Date.parse(capturedAt) : NaN;
-    if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
-      typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
-      typeof accuracy !== 'number' || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy > 50_000 ||
-      typeof capturedAt !== 'string' || !Number.isFinite(capturedAtMs) ||
-      new Date(capturedAtMs).toISOString() !== capturedAt ||
-      capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000) {
+    const capture = parsePartnerLocationCapture(req.body);
+    if (!capture) {
       res.status(400).json({ message: 'Capture a fresh location with valid GPS accuracy before looking up its address.' });
       return;
     }
@@ -6347,13 +6451,29 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const address = await partnerReverseGeocoder.reverse(profile.id, latitude, longitude);
-      const evidence = JSON.stringify([profile.id, latitude, longitude, accuracy, capturedAt, address]);
-      const token = createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '')
-        .update(evidence).digest('base64url');
+      const location = await partnerReverseGeocoder.reverseDetailed(profile.id, capture.latitude, capture.longitude);
+      const proofEvidence = JSON.stringify([
+        profile.id,
+        capture.latitude,
+        capture.longitude,
+        capture.accuracy,
+        capture.capturedAt,
+        location.address,
+      ]);
+      const locationEvidence = JSON.stringify([
+        `profile:${profile.id}`,
+        capture.latitude,
+        capture.longitude,
+        capture.accuracy,
+        capture.capturedAt,
+        location.address,
+        location.components,
+      ]);
       res.json({
-        address,
-        token,
+        address: location.address,
+        components: location.components,
+        locationToken: partnerSignature(locationEvidence),
+        token: partnerSignature(proofEvidence),
         provider: 'OpenStreetMap Nominatim',
         attribution: '© OpenStreetMap contributors',
       });
@@ -6363,6 +6483,63 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         return;
       }
       console.error('[NearGrow Ads] Partner reverse geocoding failed.');
+      res.status(502).json({ message: 'The address service is temporarily unavailable. Retry or enter the address manually.' });
+    }
+  });
+
+  app.post('/api/partners/registration-reverse-geocode', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Location lookup must be requested from this website.' });
+      return;
+    }
+    if (!partnerConfigIsReady()) {
+      res.status(503).json({ message: 'Location detection is temporarily unavailable. Enter your location manually instead.' });
+      return;
+    }
+    const capture = parsePartnerLocationCapture(req.body);
+    if (!capture) {
+      res.status(400).json({ message: 'Capture a fresh location with valid GPS accuracy before looking up its address.' });
+      return;
+    }
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const rateLimitKey = `registration:${clientIp}`;
+    if (!partnerReverseGeocodeRequestLimiter.allow(rateLimitKey, now, {
+      maxRequests: 4,
+      windowMs: 5 * 60_000,
+    })) {
+      res.status(429).json({ message: 'Location lookup is temporarily rate-limited. Wait before retrying.' });
+      return;
+    }
+    try {
+      const location: ReverseGeocodedLocation = await partnerReverseGeocoder.reverseDetailed(
+        rateLimitKey,
+        capture.latitude,
+        capture.longitude,
+      );
+      const evidence = JSON.stringify([
+        'registration',
+        capture.latitude,
+        capture.longitude,
+        capture.accuracy,
+        capture.capturedAt,
+        location.address,
+        location.components,
+      ]);
+      res.json({
+        address: location.address,
+        components: location.components,
+        locationToken: partnerSignature(evidence),
+        provider: 'OpenStreetMap Nominatim',
+        attribution: '© OpenStreetMap contributors',
+      });
+    } catch (error) {
+      if (error instanceof ReverseGeocodeError) {
+        res.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.error('[NearGrow Ads] Registration reverse geocoding failed.');
       res.status(502).json({ message: 'The address service is temporarily unavailable. Retry or enter the address manually.' });
     }
   });
@@ -6733,7 +6910,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       return;
     }
     try {
-      const [detail, proofs] = await Promise.all([
+      const [detail, proofs, authUser] = await Promise.all([
         readSupabaseJson<Record<string, unknown>>(await supabaseAdminRequest(
           'rest/v1/rpc/get_delivery_team_partner_detail',
           { method: 'POST', body: JSON.stringify({ p_admin_id: identity.id, p_partner_profile_id: partnerId }) },
@@ -6750,12 +6927,26 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           order: 'submitted_at.desc',
           limit: '100',
         }),
+        readPartnerAuthStatus(partnerId),
       ]);
+      if (!authUser || authUser.id !== partnerId || !authUser.email) {
+        throw new Error('The authenticated partner email could not be verified.');
+      }
+      const partnerDetails = detail.partner;
+      if (!partnerDetails || typeof partnerDetails !== 'object' || Array.isArray(partnerDetails)) {
+        throw new Error('The partner details response was incomplete.');
+      }
       const proofHistory = await Promise.all(proofs.map(async (proof) => ({
         ...proof,
         photoUrl: await getPartnerProofPhotoUrl(proof.photo_path),
       })));
-      res.json({ detail: { ...detail, proofHistory } });
+      res.json({
+        detail: {
+          ...detail,
+          partner: { ...partnerDetails, email: authUser.email },
+          proofHistory,
+        },
+      });
     } catch (error) {
       console.error('[NearGrow Ads] Delivery Team partner detail failed:', error);
       res.status(503).json({ message: 'The delivery partner details could not be loaded.' });

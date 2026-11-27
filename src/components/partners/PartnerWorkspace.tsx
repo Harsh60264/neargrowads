@@ -41,8 +41,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { PartnerProfile } from './partnerTypes';
+import { PartnerLocationCapture } from './PartnerLocationCapture';
 import { buildPartnerWorkspaceActivity } from './partnerWorkspaceActivity';
 import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../../../shared/indianStates';
+import type { PartnerLocationSubmission } from '../../../shared/partnerLocation';
 import './partnerPortalPreview.css';
 
 const sections = [
@@ -1367,6 +1369,8 @@ function ProfileSection({ data, onProfileUpdated }: {
   const [mobileNumber, setMobileNumber] = useState(data.user.mobileNumber);
   const [state, setState] = useState(data.user.state ?? '');
   const [preferredDeliveryAreas, setPreferredDeliveryAreas] = useState(data.user.preferredDeliveryAreas.join(', '));
+  const [currentLocation, setCurrentLocation] = useState<PartnerLocationSubmission | null>(data.user.currentLocation);
+  const initialCurrentLocation = useRef(data.user.currentLocation);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -1374,13 +1378,22 @@ function ProfileSection({ data, onProfileUpdated }: {
     event.preventDefault();
     setBusy(true); setError(''); setMessage('');
     try {
+      const currentLocationChanged = JSON.stringify(currentLocation) !== JSON.stringify(initialCurrentLocation.current);
       const response = await partnerApi<{ user: PartnerProfile }>('/api/partners/profile', {
         method: 'PATCH',
-        body: JSON.stringify({ fullName, mobileNumber, state, preferredDeliveryAreas }),
+        body: JSON.stringify({
+          fullName,
+          mobileNumber,
+          state,
+          preferredDeliveryAreas,
+          ...(currentLocationChanged ? { currentLocation } : {}),
+        }),
       });
       onProfileUpdated(response.user);
       setState(response.user.state ?? '');
       setPreferredDeliveryAreas(response.user.preferredDeliveryAreas.join(', '));
+      setCurrentLocation(response.user.currentLocation);
+      initialCurrentLocation.current = response.user.currentLocation;
       setEditing(false);
       setMessage('Your profile was saved.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Your profile could not be saved.'); }
@@ -1396,6 +1409,8 @@ function ProfileSection({ data, onProfileUpdated }: {
           <div><h2>{data.user.fullName}</h2><p>Partner ID: {data.user.id.slice(0, 8).toUpperCase()}
             <span className="nwg-separator">|</span><StatusPill status={data.user.status} /></p>
             <div className="nwg-profile-location-details">
+              <span>Registration location: {data.user.registrationLocation?.address || 'Location not set'}</span>
+              <span>Current location: {data.user.currentLocation?.address || 'Location not set'}</span>
               <span>State / Union Territory: {data.user.state || 'Not set yet'}</span>
               <span>Preferred delivery areas: {data.user.preferredDeliveryAreas.length
                 ? data.user.preferredDeliveryAreas.join(', ')
@@ -1425,6 +1440,14 @@ function ProfileSection({ data, onProfileUpdated }: {
                 placeholder="e.g. Tilak Nagar, Janakpuri, Uttam Nagar" />
               <small>Informational only. You can deliver anywhere and update these areas anytime.</small>
             </label>
+            <PartnerLocationCapture
+              idPrefix="partner-profile-current-location"
+              title="Current location"
+              endpoint="/api/partners/reverse-geocode"
+              value={currentLocation}
+              onChange={setCurrentLocation}
+              onDetectedState={(detectedState) => setState(detectedState)}
+            />
             <label>Email address<input type="email" value={data.user.email} readOnly /></label>
             <button type="submit" className="nwg-button nwg-button-primary" disabled={busy}><Check size={15} />{busy ? 'Saving…' : 'Save changes'}</button>
           </form>

@@ -2,6 +2,18 @@ interface NominatimResponse {
   address?: Record<string, unknown>;
 }
 
+export interface ReverseGeocodedLocation {
+  address: string;
+  components: {
+    locality: string | null;
+    city: string | null;
+    district: string | null;
+    state: string | null;
+    postalCode: string | null;
+    country: string | null;
+  };
+}
+
 export class ReverseGeocodeError extends Error {
   constructor(message: string, readonly status: 429 | 502 | 504 = 502) {
     super(message);
@@ -32,9 +44,24 @@ export function formatReverseGeocodedAddress(address: Record<string, unknown>): 
   return values.join(', ');
 }
 
+function formatReverseGeocodedLocation(address: Record<string, unknown>): ReverseGeocodedLocation {
+  const optionalComponent = (...keys: string[]): string | null => component(address, ...keys) || null;
+  return {
+    address: formatReverseGeocodedAddress(address),
+    components: {
+      locality: optionalComponent('neighbourhood', 'suburb', 'city_district', 'quarter', 'hamlet'),
+      city: optionalComponent('city', 'town', 'village', 'municipality'),
+      district: optionalComponent('county', 'state_district'),
+      state: optionalComponent('state'),
+      postalCode: optionalComponent('postcode'),
+      country: optionalComponent('country'),
+    },
+  };
+}
+
 export class PartnerReverseGeocoding {
   private readonly partnerRequests = new Map<string, number[]>();
-  private readonly cache = new Map<string, { address: string; expiresAt: number }>();
+  private readonly cache = new Map<string, { location: ReverseGeocodedLocation; expiresAt: number }>();
   private lastProviderRequestAt = 0;
   private providerQueue: Promise<void> = Promise.resolve();
 
@@ -47,6 +74,10 @@ export class PartnerReverseGeocoding {
   ) {}
 
   async reverse(partnerId: string, latitude: number, longitude: number): Promise<string> {
+    return (await this.reverseDetailed(partnerId, latitude, longitude)).address;
+  }
+
+  async reverseDetailed(partnerId: string, latitude: number, longitude: number): Promise<ReverseGeocodedLocation> {
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
       !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
       throw new ReverseGeocodeError('The requested location coordinates are invalid.', 502);
@@ -55,7 +86,7 @@ export class PartnerReverseGeocoding {
     const now = this.now();
     const cacheKey = `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
     const cached = this.cache.get(cacheKey);
-    if (cached && cached.expiresAt > now) return cached.address;
+    if (cached && cached.expiresAt > now) return cached.location;
     this.cache.delete(cacheKey);
 
     const recent = (this.partnerRequests.get(partnerId) || []).filter((timestamp) => now - timestamp < 5 * 60_000);
@@ -102,17 +133,17 @@ export class PartnerReverseGeocoding {
       } catch {
         throw new ReverseGeocodeError('The address service returned an unreadable response. Retry or enter the address manually.', 502);
       }
-      const address = result.address && formatReverseGeocodedAddress(result.address);
-      if (!address) {
+      const location = result.address && formatReverseGeocodedLocation(result.address);
+      if (!location?.address) {
         throw new ReverseGeocodeError('No readable address was returned for this location. Enter the address manually.', 502);
       }
-      this.cache.set(cacheKey, { address, expiresAt: this.now() + 15 * 60_000 });
+      this.cache.set(cacheKey, { location, expiresAt: this.now() + 15 * 60_000 });
       while (this.cache.size > 200) {
         const oldestKey = this.cache.keys().next().value;
         if (oldestKey === undefined) break;
         this.cache.delete(oldestKey);
       }
-      return address;
+      return location;
     } finally {
       releaseQueue();
     }

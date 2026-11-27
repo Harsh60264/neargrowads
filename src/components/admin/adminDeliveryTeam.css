@@ -1397,6 +1397,19 @@
   white-space: nowrap;
 }
 
+.dt-partner-copy > .dt-partner-detail-line,
+.dt-selected-partner-copy > span {
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.dt-partner-copy > .dt-partner-detail-line {
+  max-width: 32ch;
+}
+
 .dt-coin-value {
   align-items: center;
   color: var(--dt-text);

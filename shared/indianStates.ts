@@ -46,3 +46,19 @@ export function normalizeIndianState(value: unknown): IndianStateOrUnionTerritor
     (state) => state.toLocaleLowerCase('en-IN') === normalized,
   );
 }
+
+export function normalizeDetectedIndianState(value: unknown): IndianStateOrUnionTerritory | undefined {
+  const canonical = normalizeIndianState(value);
+  if (canonical || typeof value !== 'string') return canonical;
+  const detected = value.trim().toLocaleLowerCase('en-IN');
+  const aliases: Record<string, IndianStateOrUnionTerritory> = {
+    'andaman & nicobar islands': 'Andaman and Nicobar Islands',
+    'dadra and nagar haveli and daman & diu': 'Dadra and Nagar Haveli and Daman and Diu',
+    delhi: 'National Capital Territory of Delhi',
+    'nct of delhi': 'National Capital Territory of Delhi',
+    orissa: 'Odisha',
+    pondicherry: 'Puducherry',
+    uttaranchal: 'Uttarakhand',
+  };
+  return aliases[detected];
+}

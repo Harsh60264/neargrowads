@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildPartnerAuthRedirect,
+  normalizePartnerLocationSubmission,
   normalizePartnerEmail,
   normalizePartnerMobile,
   normalizePartnerName,
@@ -10,8 +11,12 @@ import {
   parsePartnerAuthSignupUser,
   partnerPasswordIsStrong,
   validatePartnerRegistration,
+  validatePartnerLocation,
 } from './partnerAuth';
-import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../shared/indianStates';
+import {
+  INDIAN_STATES_AND_UNION_TERRITORIES,
+  normalizeDetectedIndianState,
+} from '../shared/indianStates';
 
 test('partner registration validation requires isolated profile fields and a strong password', () => {
   assert.equal(normalizePartnerEmail('  Partner@Example.COM  '), 'partner@example.com');
@@ -54,6 +59,9 @@ test('partner registration permits only the alphabetized Indian states and union
     state: 'California',
     preferredDeliveryAreas: '',
   }).valid, false);
+  assert.equal(normalizeDetectedIndianState('Delhi'), 'National Capital Territory of Delhi');
+  assert.equal(normalizeDetectedIndianState('Pondicherry'), 'Puducherry');
+  assert.equal(normalizeDetectedIndianState('California'), undefined);
   assert.equal(validatePartnerRegistration({
     email: 'partner@example.com',
     password: 'Password123!',
@@ -91,6 +99,53 @@ test('partner registration rejects malformed email, mobile, name and weak passwo
     mobileNumber: '12',
     fullName: 'Delivery Partner',
   }).valid, false);
+});
+
+test('partner locations allow explicit manual fallback and require fresh, bounded GPS evidence', () => {
+  const manual = {
+    address: 'Sector 5, Noida',
+    latitude: null,
+    longitude: null,
+    accuracyMeters: null,
+    capturedAt: null,
+    source: 'manual_no_gps',
+    components: null,
+  };
+  assert.deepEqual(validatePartnerLocation(manual), manual);
+  assert.deepEqual(normalizePartnerLocationSubmission(manual), manual);
+
+  const capturedAt = new Date().toISOString();
+  const detected = {
+    address: 'Main Road, Noida, Uttar Pradesh, India',
+    latitude: 28.5,
+    longitude: 77.3,
+    accuracyMeters: 12.5,
+    capturedAt,
+    source: 'gps_reverse_geocoded',
+    components: {
+      locality: null,
+      city: 'Noida',
+      district: null,
+      state: 'Uttar Pradesh',
+      postalCode: null,
+      country: 'India',
+    },
+    locationToken: 'a'.repeat(43),
+  };
+  assert.deepEqual(normalizePartnerLocationSubmission(detected), {
+    ...detected,
+    capturedAt: new Date(capturedAt).toISOString(),
+  });
+  assert.equal(normalizePartnerLocationSubmission({ ...detected, locationToken: undefined }), undefined);
+  assert.equal(normalizePartnerLocationSubmission({
+    ...detected,
+    capturedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+  }), undefined);
+  assert.equal(validatePartnerLocation({ ...detected, accuracyMeters: 50_001 }), undefined);
+  assert.equal(validatePartnerLocation({
+    ...manual,
+    latitude: 28.5,
+  }), undefined);
 });
 
 test('partner signup accepts Supabase Auth user objects with top-level fields', () => {
@@ -174,7 +229,40 @@ test('profile updates require the authenticated partner and state filters requir
   );
   assert.match(profileRoute, /requirePartnerSession\(req, res\)/);
   assert.match(profileRoute, /preferred_delivery_areas/);
+  assert.match(profileRoute, /partnerLocationTokenIsValid/);
+  assert.match(profileRoute, /partnerLocationColumns\('current'/);
   assert.match(partnerListRoute, /currentAdmin\(res\)/);
   assert.match(partnerListRoute, /normalizeIndianState\(requestedState\)/);
   assert.match(partnerListRoute, /get_delivery_team_partners_by_state/);
+
+  const registrationGeocodeStart = server.indexOf("app.post('/api/partners/registration-reverse-geocode'");
+  const registrationGeocodeEnd = server.indexOf('\n  app.', registrationGeocodeStart + 1);
+  const registrationGeocodeRoute = server.slice(registrationGeocodeStart, registrationGeocodeEnd);
+  assert.match(registrationGeocodeRoute, /isSameOriginRequest\(req\)/);
+  assert.match(registrationGeocodeRoute, /partnerReverseGeocodeRequestLimiter\.allow/);
+  assert.match(registrationGeocodeRoute, /reverseDetailed/);
+  assert.doesNotMatch(registrationGeocodeRoute, /requirePartnerSession/);
+
+  const adminDetailRoute = server.slice(
+    server.indexOf("app.get('/api/admin/delivery-team/partners/:partnerId'"),
+    server.indexOf("app.post('/api/admin/delivery-team/partners/:partnerId/coins'"),
+  );
+  assert.match(adminDetailRoute, /currentAdmin\(res\)/);
+  assert.match(adminDetailRoute, /readPartnerAuthStatus\(partnerId\)/);
+  assert.match(adminDetailRoute, /email: authUser\.email/);
+  assert.doesNotMatch(adminDetailRoute, /app_metadata|access_token|encrypted_password/);
+});
+
+test('partner location migration keeps private data nullable and admin searches use authenticated email and areas', () => {
+  const migration = readFileSync(new URL('../supabase/migrations/20261205120000_partner_registration_location_details.sql', import.meta.url), 'utf8');
+  assert.match(migration, /add column registration_location_address text/);
+  assert.match(migration, /add column current_location_address text/);
+  assert.match(migration, /partner_profiles_registration_location_check/);
+  assert.match(migration, /partner_profiles_current_location_check/);
+  assert.match(migration, /join auth\.users u on u\.id = p\.id/);
+  assert.match(migration, /coalesce\(u\.email, ''\) ilike/);
+  assert.match(migration, /unnest\(p\.preferred_delivery_areas\)/);
+  assert.match(migration, /revoke all on function public\.get_delivery_team_partners_by_state[\s\S]*from public, anon, authenticated/i);
+  assert.match(migration, /grant execute on function public\.get_delivery_team_partners_by_state[\s\S]*to service_role/i);
+  assert.doesNotMatch(migration, /^\s*(?:drop|truncate)\b/im);
 });

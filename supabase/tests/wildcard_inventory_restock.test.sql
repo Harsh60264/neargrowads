@@ -57,6 +57,16 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'An existing partner without state details was not preserved with optional location preferences';
   END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.partner_profiles
+    WHERE id = 'a2000000-0000-4000-8000-000000000012'
+      AND (
+        registration_location_address IS NOT NULL OR current_location_address IS NOT NULL
+      )
+  ) THEN
+    RAISE EXCEPTION 'Existing partners without location evidence were assigned a fabricated location';
+  END IF;
   IF has_table_privilege('anon', 'public.partner_profiles', 'SELECT') OR
      has_table_privilege('authenticated', 'public.partner_profiles', 'SELECT') OR
      has_table_privilege('anon', 'public.partner_profiles', 'UPDATE') OR
@@ -81,8 +91,50 @@ BEGIN
     (v_no_campaign_partner_id, 'inventory-no-campaign@example.test', 'No Campaign Fixture', '+10000000002', 'active'),
     (v_concurrent_partner_id, 'inventory-concurrent@example.test', 'Concurrent Fixture', '+10000000003', 'active');
   UPDATE public.partner_profiles
-  SET state = 'Punjab', preferred_delivery_areas = ARRAY['Tilak Nagar', 'Janakpuri']
+  SET state = 'Punjab',
+      preferred_delivery_areas = ARRAY['Tilak Nagar', 'Janakpuri'],
+      email = 'profile-mirror@example.test',
+      registration_location_address = '12 Main Road, Sector 5, Noida, Punjab, 140001, India',
+      registration_location_latitude = 30.7,
+      registration_location_longitude = 76.8,
+      registration_location_accuracy_meters = 12.5,
+      registration_location_captured_at = now(),
+      registration_location_address_source = 'gps_reverse_geocoded',
+      registration_location_components = jsonb_build_object(
+        'locality', 'Sector 5', 'city', 'Noida', 'district', NULL,
+        'state', 'Punjab', 'postalCode', '140001', 'country', 'India'
+      ),
+      current_location_address = 'Current manually entered location, Chandigarh',
+      current_location_address_source = 'manual_no_gps'
   WHERE id = v_partner_id;
+
+  BEGIN
+    UPDATE public.partner_profiles SET current_location_latitude = 91 WHERE id = v_partner_id;
+    RAISE EXCEPTION 'TEST_SENTINEL: out-of-range profile GPS unexpectedly succeeded';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE public.partner_profiles
+    SET current_location_address_source = 'gps_manual'
+    WHERE id = v_partner_id;
+    RAISE EXCEPTION 'TEST_SENTINEL: incomplete profile GPS unexpectedly succeeded';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.partner_profiles
+    WHERE id = v_partner_id
+      AND registration_location_address = '12 Main Road, Sector 5, Noida, Punjab, 140001, India'
+      AND registration_location_components ->> 'locality' = 'Sector 5'
+      AND current_location_address = 'Current manually entered location, Chandigarh'
+      AND current_location_address_source = 'manual_no_gps'
+      AND current_location_latitude IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Registration and current location evidence were not kept distinct or protected by constraints';
+  END IF;
 
   BEGIN
     UPDATE public.partner_profiles SET state = 'California' WHERE id = v_partner_id;
@@ -112,6 +164,22 @@ BEGIN
        'preferred_delivery_areas', jsonb_build_array('Tilak Nagar', 'Janakpuri')
      ))) THEN
     RAISE EXCEPTION 'Owner state filter or partner location preferences were not returned correctly';
+  END IF;
+  v_partner_list := public.get_delivery_team_partners_by_state(
+    v_owner_id, 'all', 'inventory-partner@example.test', 'all', 1, 20
+  );
+  IF jsonb_array_length(v_partner_list -> 'partners') <> 1 OR
+     v_partner_list -> 'partners' -> 0 ->> 'id' <> v_partner_id::text OR
+     v_partner_list -> 'partners' -> 0 ->> 'email' <> 'inventory-partner@example.test' OR
+     v_partner_list -> 'partners' -> 0 ? 'authenticated_email' THEN
+    RAISE EXCEPTION 'Admin search did not use only the authenticated account email';
+  END IF;
+  v_partner_list := public.get_delivery_team_partners_by_state(
+    v_owner_id, 'all', 'Janakpuri', 'all', 1, 20
+  );
+  IF jsonb_array_length(v_partner_list -> 'partners') <> 1 OR
+     v_partner_list -> 'partners' -> 0 ->> 'id' <> v_partner_id::text THEN
+    RAISE EXCEPTION 'Admin search did not match preferred delivery areas';
   END IF;
   v_partner_list := public.get_delivery_team_partners_by_state(
     v_owner_id, 'unselected', '', 'all', 1, 20

@@ -59,6 +59,41 @@ test('partner profile edits save optional Indian state and preferred areas witho
   }), undefined);
 });
 
+test('partner profile location edits accept manual fallback, clear explicitly, and reject unverified detections', () => {
+  const manualLocation = {
+    address: 'Sector 5, Noida',
+    latitude: null,
+    longitude: null,
+    accuracyMeters: null,
+    capturedAt: null,
+    source: 'manual_no_gps',
+    components: null,
+  };
+  assert.deepEqual(normalizePartnerProfileUpdate({
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    currentLocation: manualLocation,
+  })?.currentLocation, manualLocation);
+  assert.equal(normalizePartnerProfileUpdate({
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    currentLocation: null,
+  })?.currentLocation, null);
+  assert.equal(normalizePartnerProfileUpdate({
+    fullName: 'Harsh Kumar',
+    mobileNumber: '+919876543210',
+    currentLocation: {
+      ...manualLocation,
+      source: 'gps_reverse_geocoded',
+      latitude: 28.5,
+      longitude: 77.3,
+      accuracyMeters: 10,
+      capturedAt: new Date().toISOString(),
+      components: null,
+    },
+  }), undefined);
+});
+
 test('coin summary counts approved proof once and reserves requested withdrawals', () => {
   assert.deepEqual(summarizePartnerCoins([
     { entry_type: 'earning', amount: 1500, status: 'approved' },

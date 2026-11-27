@@ -1,4 +1,9 @@
 import { normalizeIndianState } from '../shared/indianStates';
+import type {
+  PartnerLocation,
+  PartnerLocationComponents,
+  PartnerLocationSubmission,
+} from '../shared/partnerLocation';
 
 export interface PartnerRegistrationInput {
   email: string;
@@ -7,6 +12,7 @@ export interface PartnerRegistrationInput {
   fullName: string;
   state: string;
   preferredDeliveryAreas: string[];
+  registrationLocation?: PartnerLocationSubmission | null;
 }
 
 export interface PartnerRegistrationValidation {
@@ -17,7 +23,97 @@ export interface PartnerRegistrationValidation {
   fullName?: string;
   state?: string;
   preferredDeliveryAreas?: string[];
+  registrationLocation?: PartnerLocationSubmission | null;
   message?: string;
+}
+
+const LOCATION_COMPONENT_KEYS = ['locality', 'city', 'district', 'state', 'postalCode', 'country'] as const;
+const LOCATION_SOURCES = ['gps_reverse_geocoded', 'gps_manual', 'manual_no_gps'] as const;
+
+function normalizeLocationComponents(value: unknown): PartnerLocationComponents | undefined | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const components: PartnerLocationComponents = {
+    locality: null,
+    city: null,
+    district: null,
+    state: null,
+    postalCode: null,
+    country: null,
+  };
+  for (const key of LOCATION_COMPONENT_KEYS) {
+    const component = record[key];
+    if (component === null) continue;
+    if (typeof component !== 'string') return undefined;
+    const normalized = component.trim().replace(/\s+/g, ' ');
+    if (normalized.length > 120) return undefined;
+    components[key] = normalized || null;
+  }
+  return components;
+}
+
+export function validatePartnerLocation(value: unknown): PartnerLocation | undefined | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const address = typeof input.address === 'string'
+    ? input.address.trim().replace(/\s+/g, ' ')
+    : '';
+  const latitude = input.latitude;
+  const longitude = input.longitude;
+  const accuracyMeters = input.accuracyMeters;
+  const capturedAt = input.capturedAt;
+  const capturedAtMs = typeof capturedAt === 'string' ? Date.parse(capturedAt) : NaN;
+  const source = LOCATION_SOURCES.find((candidate) => candidate === input.source);
+  const components = normalizeLocationComponents(input.components);
+  if (address.length < 3 || address.length > 500 ||
+    (latitude !== null && (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+    (longitude !== null && (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)) ||
+    (accuracyMeters !== null && (typeof accuracyMeters !== 'number' || !Number.isFinite(accuracyMeters) || accuracyMeters <= 0 || accuracyMeters > 50_000)) ||
+    (capturedAt !== null && (typeof capturedAt !== 'string' || !Number.isFinite(capturedAtMs))) ||
+    !source ||
+    components === undefined) return undefined;
+
+  const hasLatitude = typeof latitude === 'number';
+  const hasLongitude = typeof longitude === 'number';
+  const hasGps = hasLatitude && hasLongitude;
+  if (hasLatitude !== hasLongitude) return undefined;
+  if (source === 'manual_no_gps') {
+    if (hasGps || accuracyMeters !== null || capturedAt !== null || components !== null) return undefined;
+  } else if (!hasGps || typeof accuracyMeters !== 'number' || typeof capturedAt !== 'string' ||
+    (source === 'gps_manual' && components !== null) ||
+    (source === 'gps_reverse_geocoded' && components === null)) {
+    return undefined;
+  }
+  const normalizedLatitude = typeof latitude === 'number' ? latitude : null;
+  const normalizedLongitude = typeof longitude === 'number' ? longitude : null;
+  return {
+    address,
+    latitude: normalizedLatitude,
+    longitude: normalizedLongitude,
+    accuracyMeters: typeof accuracyMeters === 'number' ? accuracyMeters : null,
+    capturedAt: typeof capturedAt === 'string' ? new Date(capturedAtMs).toISOString() : null,
+    source,
+    components,
+  };
+}
+
+export function normalizePartnerLocationSubmission(value: unknown): PartnerLocationSubmission | undefined | null {
+  const location = validatePartnerLocation(value);
+  if (location === undefined || location === null) return location;
+  if (location.latitude !== null) {
+    const capturedAtMs = Date.parse(location.capturedAt || '');
+    if (capturedAtMs < Date.now() - 30 * 60_000 || capturedAtMs > Date.now() + 60_000) return undefined;
+  }
+  const input = value as Record<string, unknown>;
+  const locationToken = input.locationToken;
+  if (location.source === 'gps_reverse_geocoded') {
+    if (typeof locationToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(locationToken)) return undefined;
+    return { ...location, locationToken };
+  }
+  if (locationToken !== undefined && locationToken !== null && locationToken !== '') return undefined;
+  return location;
 }
 
 export interface PartnerAuthSignupUser {
@@ -128,6 +224,13 @@ export function validatePartnerRegistration(value: unknown): PartnerRegistration
   const fullName = normalizePartnerName(input.fullName);
   const state = normalizeIndianState(input.state);
   const preferredDeliveryAreas = normalizePreferredDeliveryAreas(input.preferredDeliveryAreas);
+  let registrationLocation: PartnerLocationSubmission | null | undefined;
+  if (Object.hasOwn(input, 'registrationLocation')) {
+    registrationLocation = normalizePartnerLocationSubmission(input.registrationLocation);
+    if (registrationLocation === undefined) {
+      return { valid: false, message: 'Check the optional registration location and try again.' };
+    }
+  }
   if (!email) return { valid: false, message: 'Enter a valid email address.' };
   if (!fullName) return { valid: false, message: 'Enter your full name.' };
   if (!mobileNumber) return { valid: false, message: 'Enter a valid mobile number.' };
@@ -136,5 +239,14 @@ export function validatePartnerRegistration(value: unknown): PartnerRegistration
   if (!partnerPasswordIsStrong(password)) {
     return { valid: false, message: 'Use 12 or more characters with at least three character types.' };
   }
-  return { valid: true, email, password, mobileNumber, fullName, state, preferredDeliveryAreas };
+  return {
+    valid: true,
+    email,
+    password,
+    mobileNumber,
+    fullName,
+    state,
+    preferredDeliveryAreas,
+    ...(registrationLocation !== undefined ? { registrationLocation } : {}),
+  };
 }

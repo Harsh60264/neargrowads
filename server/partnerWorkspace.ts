@@ -1,5 +1,11 @@
-import { normalizePartnerMobile, normalizePartnerName, normalizePreferredDeliveryAreas } from './partnerAuth';
+import {
+  normalizePartnerLocationSubmission,
+  normalizePartnerMobile,
+  normalizePartnerName,
+  normalizePreferredDeliveryAreas,
+} from './partnerAuth';
 import { normalizeIndianState } from '../shared/indianStates';
+import type { PartnerLocationSubmission } from '../shared/partnerLocation';
 
 export interface PartnerProofPhoto {
   contentType: 'image/jpeg' | 'image/png' | 'image/webp';
@@ -45,6 +51,7 @@ export function normalizePartnerProfileUpdate(value: unknown): {
   mobileNumber: string;
   state?: string | null;
   preferredDeliveryAreas?: string[];
+  currentLocation?: PartnerLocationSubmission | null;
 } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
@@ -56,6 +63,7 @@ export function normalizePartnerProfileUpdate(value: unknown): {
     mobileNumber: string;
     state?: string | null;
     preferredDeliveryAreas?: string[];
+    currentLocation?: PartnerLocationSubmission | null;
   } = { fullName, mobileNumber };
 
   if (Object.hasOwn(input, 'state')) {
@@ -71,6 +79,11 @@ export function normalizePartnerProfileUpdate(value: unknown): {
     const areas = normalizePreferredDeliveryAreas(input.preferredDeliveryAreas);
     if (!areas) return undefined;
     update.preferredDeliveryAreas = areas;
+  }
+  if (Object.hasOwn(input, 'currentLocation')) {
+    const location = normalizePartnerLocationSubmission(input.currentLocation);
+    if (location === undefined) return undefined;
+    update.currentLocation = location;
   }
   return update;
 }

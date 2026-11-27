@@ -20,6 +20,32 @@ test('formats only address components supplied by reverse geocoding', () => {
   assert.equal(formatReverseGeocodedAddress({}), '');
 });
 
+test('reverse geocoding retains only returned locality, city, district, state, postal code, and country', async () => {
+  const service = new PartnerReverseGeocoding(async () => new Response(JSON.stringify({
+    address: {
+      road: 'Main Road',
+      suburb: 'Sector 5',
+      city: 'Noida',
+      state_district: 'Gautam Buddha Nagar',
+      state: 'Uttar Pradesh',
+      postcode: '201301',
+      country: 'India',
+    },
+  }), { status: 200 }), () => 1_000, async () => undefined);
+
+  assert.deepEqual(await service.reverseDetailed('registration-ip', 28.5, 77.3), {
+    address: 'Main Road, Sector 5, Noida, Gautam Buddha Nagar, Uttar Pradesh, 201301, India',
+    components: {
+      locality: 'Sector 5',
+      city: 'Noida',
+      district: 'Gautam Buddha Nagar',
+      state: 'Uttar Pradesh',
+      postalCode: '201301',
+      country: 'India',
+    },
+  });
+});
+
 test('reverse geocoding uses fixed Nominatim endpoint, timeout, identity and cache', async () => {
   let calls = 0;
   let requestedUrl = '';

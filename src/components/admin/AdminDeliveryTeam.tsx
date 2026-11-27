@@ -35,6 +35,8 @@ interface DeliveryTeamPartner {
   mobile_number: string;
   state: string | null;
   preferred_delivery_areas: string[];
+  registration_location_address: string | null;
+  registration_location_address_source: string | null;
   status: 'pending' | 'active' | 'disabled';
   created_at: string;
   last_login_at: string | null;
@@ -820,7 +822,7 @@ export function AdminDeliveryTeam({
             <div><h3 id="dt-partners-title">Delivery partners <span className="dt-heading-count">{formatNumber(totalPartners)}</span></h3><p>Manage partner accounts and ledger balances.</p></div>
             <div className="dt-filters">
               <label className="dt-search"><Search size={15} /><span className="dt-sr-only">Search partners</span>
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, ID or phone" />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, ID, email, mobile, state or area" />
               </label>
               <label className="dt-select-wrap"><span className="dt-sr-only">Filter partner status</span>
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
@@ -850,9 +852,16 @@ export function AdminDeliveryTeam({
                         <span className="dt-avatar" aria-hidden="true">{getPartnerInitials(partner.full_name)}</span>
                         <div className="dt-partner-copy">
                           <button type="button" className="dt-partner-select" disabled={actionBusy} onClick={() => void openPartner(partner)}>{partner.full_name}</button>
-                          <span>ID {partner.id}</span>
-                          <span>{partner.mobile_number || partner.email}</span>
-                          <span>{partner.state || 'State / UT not set'}</span>
+                          <span className="dt-partner-detail-line">Partner ID: {partner.id}</span>
+                          <span className="dt-partner-detail-line">Email: {partner.email || 'Not available'}</span>
+                          <span className="dt-partner-detail-line">Mobile: {partner.mobile_number || 'Not set'}</span>
+                          <span className="dt-partner-detail-line">
+                            {partner.registration_location_address_source === 'gps_reverse_geocoded' ? 'Detected registration location' : 'Registration location'}: {partner.registration_location_address || 'Location not set'}
+                          </span>
+                          <span className="dt-partner-detail-line">State / Union Territory: {partner.state || 'Not set'}</span>
+                          {partner.preferred_delivery_areas.length > 0 && (
+                            <span className="dt-partner-detail-line">Preferred delivery areas: {partner.preferred_delivery_areas.join(', ')}</span>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -879,9 +888,16 @@ export function AdminDeliveryTeam({
                     <span className="dt-avatar" aria-hidden="true">{getPartnerInitials(partner.full_name)}</span>
                     <div className="dt-partner-copy">
                       <strong>{partner.full_name}</strong>
-                      <span>ID {partner.id}</span>
-                      <span>{partner.mobile_number || partner.email}</span>
-                      <span>{partner.state || 'State / UT not set'}</span>
+                      <span className="dt-partner-detail-line">Partner ID: {partner.id}</span>
+                      <span className="dt-partner-detail-line">Email: {partner.email || 'Not available'}</span>
+                      <span className="dt-partner-detail-line">Mobile: {partner.mobile_number || 'Not set'}</span>
+                      <span className="dt-partner-detail-line">
+                        {partner.registration_location_address_source === 'gps_reverse_geocoded' ? 'Detected registration location' : 'Registration location'}: {partner.registration_location_address || 'Location not set'}
+                      </span>
+                      <span className="dt-partner-detail-line">State / Union Territory: {partner.state || 'Not set'}</span>
+                      {partner.preferred_delivery_areas.length > 0 && (
+                        <span className="dt-partner-detail-line">Preferred delivery areas: {partner.preferred_delivery_areas.join(', ')}</span>
+                      )}
                     </div>
                   </div>
                   <button
@@ -921,19 +937,19 @@ export function AdminDeliveryTeam({
               <span className="dt-avatar dt-avatar--large" aria-hidden="true">{getPartnerInitials(selectedPartner.partner.full_name)}</span>
               <div className="dt-selected-partner-copy">
                 <strong>{selectedPartner.partner.full_name}</strong>
-                <span>ID {selectedPartner.partner.id}</span>
-                {selectedPartner.partner.mobile_number && <span>{selectedPartner.partner.mobile_number}</span>}
+                <span>Partner ID: {selectedPartner.partner.id}</span>
+                <span>Email: {selectedPartner.partner.email || 'Not available'}</span>
+                <span>Mobile: {selectedPartner.partner.mobile_number || 'Not set'}</span>
+                <span>
+                  {selectedPartner.partner.registration_location_address_source === 'gps_reverse_geocoded' ? 'Detected registration location' : 'Registration location'}: {selectedPartner.partner.registration_location_address || 'Location not set'}
+                </span>
+                <span>State / Union Territory: {selectedPartner.partner.state || 'Not set'}</span>
+                {selectedPartner.partner.preferred_delivery_areas.length > 0 && (
+                  <span>Preferred delivery areas: {selectedPartner.partner.preferred_delivery_areas.join(', ')}</span>
+                )}
               </div>
               <span className={`dt-status dt-status--${selectedPartner.partner.status}`}>{selectedPartner.partner.status}</span>
             </div>
-            <section className="dt-partner-location-details" aria-label="Partner location preferences">
-              <strong>Location preferences</strong>
-              <span><b>State / Union Territory</b>{selectedPartner.partner.state || 'Not set yet'}</span>
-              <span><b>Preferred delivery areas</b>{selectedPartner.partner.preferred_delivery_areas.length
-                ? selectedPartner.partner.preferred_delivery_areas.join(', ')
-                : 'Not specified'}</span>
-              <small>These details are informational only and do not limit delivery locations.</small>
-            </section>
 
             <section className="dt-quick-section dt-coin-section" aria-labelledby="dt-coins-title">
               <div className="dt-quick-section-heading"><h4 id="dt-coins-title"><Coins size={16} /> NGA Coins</h4></div>

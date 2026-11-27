@@ -1,3 +1,5 @@
+@import './partnerLocationCapture.css';
+
 .partner-auth-page {
   --partner-auth-surface: #fff;
   --partner-auth-stage-background: #faf9f6;

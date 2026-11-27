@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Eye, EyeOff, Headset, LoaderCircle, Megaphone, UserRound } from 'lucide-react';
 import { NearGrowLogo } from '../brand/NearGrowLogo';
 import type { PartnerProfile } from './partnerTypes';
+import { PartnerLocationCapture } from './PartnerLocationCapture';
 import { INDIAN_STATES_AND_UNION_TERRITORIES } from '../../../shared/indianStates';
+import type { PartnerLocationSubmission } from '../../../shared/partnerLocation';
 
 const PartnerWorkspace = lazy(() => import('./PartnerWorkspace').then((module) => ({ default: module.PartnerWorkspace })));
 
@@ -29,6 +31,8 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
   const [recoveryTokenHash, setRecoveryTokenHash] = useState('');
   const [recoveryTokenType, setRecoveryTokenType] = useState('');
   const [signupConfirming, setSignupConfirming] = useState(false);
+  const [registrationLocation, setRegistrationLocation] = useState<PartnerLocationSubmission | null>(null);
+  const [locationResetKey, setLocationResetKey] = useState(0);
   const [form, setForm] = useState({
     fullName: '',
     email: '',
@@ -129,7 +133,7 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
       let body: Record<string, unknown> = { email: form.email, password: form.password };
       if (mode === 'register') {
         endpoint = '/api/partners/register';
-        body = form;
+        body = { ...form, registrationLocation };
       } else if (mode === 'recovery') {
         if (recoveryAccessToken) {
           endpoint = '/api/partners/auth/complete';
@@ -182,6 +186,8 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
           password: '',
           confirmPassword: '',
         }));
+        setRegistrationLocation(null);
+        setLocationResetKey((current) => current + 1);
       } else {
         setNotice(data.message || 'If this is a registered partner account, a recovery email has been sent.');
       }
@@ -275,6 +281,16 @@ export function PartnerAuthPage({ onNavigate }: { onNavigate: (path: string) => 
                   <option value="">Select your state or union territory</option>
                   {INDIAN_STATES_AND_UNION_TERRITORIES.map((state) => <option key={state} value={state}>{state}</option>)}
                 </select>
+                <PartnerLocationCapture
+                  key={locationResetKey}
+                  idPrefix="partner-registration-location"
+                  title="Registration location (optional)"
+                  endpoint="/api/partners/registration-reverse-geocode"
+                  value={registrationLocation}
+                  onChange={setRegistrationLocation}
+                  consentRequired
+                  onDetectedState={(detectedState) => setForm((current) => ({ ...current, state: detectedState }))}
+                />
                 <label htmlFor="partner-preferred-delivery-areas">Preferred delivery areas (optional)</label>
                 <input id="partner-preferred-delivery-areas" maxLength={2000}
                   value={form.preferredDeliveryAreas}
