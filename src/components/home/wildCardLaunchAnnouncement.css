@@ -1,0 +1,696 @@
+.wildcard-launch-announcement {
+  position: relative;
+  z-index: 41;
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  background: #063b2a;
+  color: #fff;
+  padding: 5px 48px;
+}
+
+.wildcard-launch-announcement__content {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  font-size: clamp(10px, 1vw, 13px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.wildcard-launch-announcement__content > span:first-child {
+  flex: none;
+  font-size: 15px;
+}
+
+.wildcard-launch-announcement__content > span:nth-child(2) {
+  min-width: 0;
+}
+
+.wildcard-launch-announcement__content button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: #f5a623;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.wildcard-launch-announcement__content button:hover {
+  color: #ffd37b;
+}
+
+.wildcard-launch-announcement__content button:focus-visible,
+.wildcard-launch-announcement__close:focus-visible,
+.wildcard-launch-dialog__close:focus-visible,
+.wildcard-launch-dialog__cta:focus-visible {
+  outline: 3px solid #f5a623;
+  outline-offset: 3px;
+}
+
+.wildcard-launch-announcement__close {
+  position: absolute;
+  top: 50%;
+  right: max(10px, env(safe-area-inset-right));
+  display: grid;
+  width: 34px;
+  height: 34px;
+  transform: translateY(-50%);
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.wildcard-launch-announcement__close:hover {
+  background: rgb(255 255 255 / 12%);
+}
+
+.wildcard-launch-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  overflow-y: auto;
+  background: rgb(3 14 9 / 67%);
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+
+.wildcard-launch-dialog {
+  position: relative;
+  isolation: isolate;
+  width: min(1060px, 100%);
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 2px solid rgb(255 255 255 / 88%);
+  border-radius: 30px;
+  background: var(--brand-surface, #fff);
+  color: var(--brand-text, #071426);
+  box-shadow: 0 30px 90px rgb(0 0 0 / 34%);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #45a849 transparent;
+}
+
+.wildcard-launch-dialog__close-row {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  display: flex;
+  height: 0;
+  justify-content: flex-end;
+  margin-bottom: 0;
+  padding: 12px 12px 0;
+  pointer-events: none;
+}
+
+.wildcard-launch-dialog__close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgb(7 20 38 / 10%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 94%);
+  color: #071426;
+  box-shadow: 0 4px 14px rgb(7 20 38 / 18%);
+  pointer-events: auto;
+}
+
+.wildcard-launch-dialog__close:hover {
+  background: #ebf7ee;
+}
+
+.wildcard-launch-dialog__layout {
+  display: grid;
+  min-height: min(620px, calc(100dvh - 72px));
+  grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr);
+}
+
+.wildcard-launch-dialog__visual {
+  position: relative;
+  min-width: 0;
+  min-height: 100%;
+  overflow: hidden;
+  background: #d7edcf;
+}
+
+.wildcard-launch-dialog__owner-photo,
+.wildcard-launch-dialog__mobile-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wildcard-launch-dialog__owner-photo {
+  position: absolute;
+  inset: 0;
+  object-position: 34% center;
+}
+
+.wildcard-launch-dialog__partner-photo {
+  position: absolute;
+  right: 18px;
+  bottom: 56px;
+  width: 64%;
+  height: 35%;
+  border: 4px solid #fff;
+  border-radius: 20px;
+  object-fit: cover;
+  object-position: 72% center;
+  box-shadow: 0 14px 36px rgb(7 20 38 / 26%);
+}
+
+.wildcard-launch-dialog__mobile-photo {
+  display: none;
+}
+
+.wildcard-launch-dialog__visual-tag {
+  position: absolute;
+  bottom: 20px;
+  left: 18px;
+  max-width: calc(100% - 36px);
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 999px;
+  background: rgb(7 48 34 / 88%);
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .02em;
+  backdrop-filter: blur(8px);
+}
+
+.wildcard-launch-dialog__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  padding: 48px 36px 46px;
+  text-align: center;
+}
+
+.wildcard-launch-dialog__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #006c43;
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.wildcard-launch-dialog__eyebrow span:first-child,
+.wildcard-launch-dialog__eyebrow span:last-child {
+  width: 24px;
+  height: 2px;
+  background: #f5a623;
+}
+
+.wildcard-launch-dialog__content h1 {
+  margin: 0;
+  color: var(--brand-text, #071426);
+  font-size: clamp(34px, 3.2vw, 46px);
+  font-weight: 900;
+  letter-spacing: -.06em;
+  line-height: 1.05;
+}
+
+.wildcard-launch-dialog__content h1 span {
+  color: #ed8c0b;
+}
+
+.wildcard-launch-dialog__tagline {
+  margin: 0;
+  color: var(--brand-text, #071426);
+  font-size: clamp(17px, 1.8vw, 22px);
+  font-weight: 850;
+  letter-spacing: -.035em;
+  line-height: 1.25;
+}
+
+.wildcard-launch-dialog__description {
+  max-width: 440px;
+  margin: -5px 0 0;
+  color: var(--brand-text-muted, #56645c);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.wildcard-launch-dialog__trial {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 999px;
+  background: #e6f7e3;
+  padding: 10px 15px;
+  color: #075d3e;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.wildcard-launch-dialog__trial svg {
+  flex: none;
+  color: #008a55;
+}
+
+.wildcard-launch-dialog__offer-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, .7fr);
+  align-items: center;
+  gap: 16px;
+  margin-top: 2px;
+}
+
+.wildcard-launch-dialog__reach {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.wildcard-launch-dialog__reach-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: #d8f6c6;
+  color: #006c43;
+}
+
+.wildcard-launch-dialog__reach > span:last-child {
+  display: grid;
+  gap: 4px;
+}
+
+.wildcard-launch-dialog__reach strong {
+  color: var(--brand-text, #071426);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.wildcard-launch-dialog__reach > span:last-child > span {
+  color: var(--brand-text-muted, #56645c);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.wildcard-launch-dialog__package {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  border-radius: 18px;
+  background: #fff3d8;
+  padding: 11px 14px;
+  color: #57300b;
+}
+
+.wildcard-launch-dialog__package > span:first-child {
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.wildcard-launch-dialog__package strong {
+  color: #e57e00;
+  font-size: 27px;
+  font-weight: 900;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+
+.wildcard-launch-dialog__package > span:last-child {
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.wildcard-launch-dialog__actions {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.wildcard-launch-dialog__cta {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #008a55;
+  border-radius: 999px;
+  padding: 9px 13px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.wildcard-launch-dialog__cta:hover {
+  transform: translateY(-1px);
+}
+
+.wildcard-launch-dialog__cta svg {
+  flex: none;
+}
+
+.wildcard-launch-dialog__cta span {
+  min-width: 0;
+}
+
+.wildcard-launch-dialog__cta--primary {
+  background: #008a55;
+  color: #fff;
+  box-shadow: 0 7px 18px rgb(0 138 85 / 22%);
+}
+
+.wildcard-launch-dialog__cta--primary:hover {
+  background: #006c43;
+}
+
+.wildcard-launch-dialog__cta--secondary {
+  background: transparent;
+  color: #075d3e;
+}
+
+.wildcard-launch-dialog__cta--secondary:hover {
+  background: #eaf8ec;
+}
+
+.wildcard-launch-dialog__wave {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 17px;
+  background: linear-gradient(90deg, #008a55 0%, #45a849 45%, #c7f36b 100%);
+  clip-path: polygon(0 48%, 12% 76%, 28% 22%, 44% 55%, 61% 86%, 79% 28%, 100% 56%, 100% 100%, 0 100%);
+  pointer-events: none;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog {
+  border-color: rgb(221 251 227 / 38%);
+  background: #101c20;
+  color: #f5fff7;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__eyebrow {
+  color: #a4e7b7;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__content h1,
+html[data-theme='dark'] .wildcard-launch-dialog__tagline,
+html[data-theme='dark'] .wildcard-launch-dialog__reach strong {
+  color: #f5fff7;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__description,
+html[data-theme='dark'] .wildcard-launch-dialog__reach > span:last-child > span {
+  color: #c4d2c8;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__trial {
+  background: #173d2b;
+  color: #ddfbe3;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__reach-icon {
+  background: #254c32;
+  color: #ddfbe3;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__package {
+  background: #3a2a12;
+  color: #ffe4ad;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__cta--secondary {
+  color: #b7f0c4;
+}
+
+html[data-theme='dark'] .wildcard-launch-dialog__cta--secondary:hover {
+  background: #173d2b;
+}
+
+@media (max-width: 900px) {
+  .wildcard-launch-backdrop {
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .wildcard-launch-dialog {
+    width: min(680px, 100%);
+    max-height: 100%;
+    border-radius: 26px;
+  }
+
+  .wildcard-launch-dialog__layout {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .wildcard-launch-dialog__visual {
+    height: clamp(150px, 29vw, 235px);
+    min-height: 150px;
+    flex: none;
+  }
+
+  .wildcard-launch-dialog__owner-photo,
+  .wildcard-launch-dialog__partner-photo {
+    display: none;
+  }
+
+  .wildcard-launch-dialog__mobile-photo {
+    display: block;
+    object-position: 72% 45%;
+  }
+
+  .wildcard-launch-dialog__visual-tag {
+    right: 14px;
+    bottom: 12px;
+    left: auto;
+    font-size: 10px;
+  }
+
+  .wildcard-launch-dialog__content {
+    gap: 12px;
+    padding: 24px 28px 42px;
+  }
+
+  .wildcard-launch-dialog__content h1 {
+    font-size: clamp(30px, 5vw, 40px);
+  }
+
+  .wildcard-launch-dialog__description {
+    font-size: 14px;
+  }
+
+  .wildcard-launch-dialog__offer-row {
+    grid-template-columns: minmax(0, 1fr) minmax(145px, .65fr);
+    gap: 12px;
+  }
+
+  .wildcard-launch-dialog__actions {
+    grid-template-columns: 1fr;
+    max-width: 520px;
+    gap: 9px;
+    padding-top: 0;
+  }
+
+  .wildcard-launch-dialog__cta {
+    min-height: 50px;
+  }
+}
+
+@media (max-width: 520px) {
+  .wildcard-launch-announcement {
+    min-height: 42px;
+    padding: 5px 42px 5px 8px;
+  }
+
+  .wildcard-launch-announcement__content {
+    flex-wrap: wrap;
+    gap: 2px 5px;
+    font-size: 10px;
+  }
+
+  .wildcard-launch-announcement__content > span:first-child {
+    font-size: 13px;
+  }
+
+  .wildcard-launch-announcement__close {
+    right: max(4px, env(safe-area-inset-right));
+    width: 32px;
+    height: 32px;
+  }
+
+  .wildcard-launch-dialog {
+    border-radius: 22px;
+  }
+
+  .wildcard-launch-dialog__visual {
+    height: clamp(145px, 48vw, 205px);
+    min-height: 145px;
+  }
+
+  .wildcard-launch-dialog__content {
+    gap: 10px;
+    padding: 20px 18px 38px;
+  }
+
+  .wildcard-launch-dialog__eyebrow {
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .wildcard-launch-dialog__eyebrow span:first-child,
+  .wildcard-launch-dialog__eyebrow span:last-child {
+    width: 18px;
+  }
+
+  .wildcard-launch-dialog__content h1 {
+    font-size: clamp(27px, 8vw, 34px);
+  }
+
+  .wildcard-launch-dialog__tagline {
+    font-size: 16px;
+  }
+
+  .wildcard-launch-dialog__description {
+    font-size: 13px;
+  }
+
+  .wildcard-launch-dialog__trial {
+    width: 100%;
+    gap: 7px;
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+
+  .wildcard-launch-dialog__offer-row {
+    grid-template-columns: minmax(0, 1fr) minmax(128px, .8fr);
+    gap: 8px;
+  }
+
+  .wildcard-launch-dialog__reach {
+    gap: 7px;
+  }
+
+  .wildcard-launch-dialog__reach-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .wildcard-launch-dialog__reach-icon svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .wildcard-launch-dialog__reach strong {
+    font-size: 11px;
+  }
+
+  .wildcard-launch-dialog__reach > span:last-child > span {
+    font-size: 9px;
+  }
+
+  .wildcard-launch-dialog__package {
+    border-radius: 14px;
+    padding: 9px 7px;
+  }
+
+  .wildcard-launch-dialog__package > span:first-child {
+    font-size: 9px;
+  }
+
+  .wildcard-launch-dialog__package strong {
+    font-size: 23px;
+  }
+
+  .wildcard-launch-dialog__package > span:last-child {
+    font-size: 10px;
+  }
+
+  .wildcard-launch-dialog__cta {
+    min-height: 48px;
+    gap: 7px;
+    padding-inline: 9px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .wildcard-launch-dialog__offer-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wildcard-launch-dialog__reach {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .wildcard-launch-dialog__package {
+    width: min(260px, 100%);
+    justify-self: center;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 901px) {
+  .wildcard-launch-dialog__layout {
+    min-height: 540px;
+  }
+
+  .wildcard-launch-dialog__content {
+    gap: 10px;
+    padding-top: 44px;
+    padding-bottom: 38px;
+  }
+
+  .wildcard-launch-dialog__content h1 {
+    font-size: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wildcard-launch-backdrop {
+    animation: wildcard-launch-fade-in 180ms ease-out both;
+  }
+
+  .wildcard-launch-dialog {
+    animation: wildcard-launch-enter 220ms cubic-bezier(.2, .8, .2, 1) both;
+  }
+}
+
+@keyframes wildcard-launch-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes wildcard-launch-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}

@@ -3,6 +3,7 @@ import { Header } from './components/layout/Header';
 import { Footer } from './components/layout/Footer';
 import './components/partners/partnerAuthPage.css';
 import { HomePage } from './components/home/HomePage';
+import { WildCardLaunchAnnouncement } from './components/home/WildCardLaunchAnnouncement';
 const AdminPage = React.lazy(() => import('./components/admin/AdminPage').then((module) => ({ default: module.AdminPage })));
 const AdminAuthAction = React.lazy(() => import('./components/admin/AdminAuthAction').then((module) => ({ default: module.AdminAuthAction })));
 const ServicesIndexPage = React.lazy(() => import('./components/services/ServicesIndexPage').then((module) => ({ default: module.ServicesIndexPage })));
@@ -122,6 +123,7 @@ export default function App() {
   const [theme, setTheme] = useState<PublicTheme>(getSessionTheme);
   const [adminTheme, setAdminTheme] = useState<PublicTheme>(() => getSessionTheme('neargrow-admin-theme'));
   const [chatOpen, setChatOpen] = useState(false);
+  const [wildcardLaunchOpen, setWildcardLaunchOpen] = useState(false);
   const [localDropBusinessMode, setLocalDropBusinessMode] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState<MarketingConsent>(() =>
     typeof window === 'undefined' ? null : readMarketingAnalyticsConsent(),
@@ -134,6 +136,7 @@ export default function App() {
 
   useEffect(() => {
     if (currentPath.startsWith('/admin') || isCmsPreview) setChatOpen(false);
+    if (currentPath !== '/') setWildcardLaunchOpen(false);
     if (currentPath !== '/partners/localdrop') setLocalDropBusinessMode(false);
     setCookieSettingsOpen(false);
   }, [currentPath, isCmsPreview]);
@@ -699,6 +702,12 @@ export default function App() {
           </div>
         ) : (
           <>
+            {currentPath === '/' && !isCmsPreview && (
+              <WildCardLaunchAnnouncement
+                onNavigate={navigate}
+                onModalOpenChange={setWildcardLaunchOpen}
+              />
+            )}
             <Header
               currentPath={currentPath}
               onNavigate={navigate}
@@ -718,7 +727,7 @@ export default function App() {
                 siteContent={siteContent}
               />
             )}
-            {!hidePartnerAuthAssistants && !hideLocalDropAssistants && (
+            {!hidePartnerAuthAssistants && !hideLocalDropAssistants && !wildcardLaunchOpen && (
               <FloatingAssistant
                 sizeSettings={normalizeMascotSettings(siteContent.mascotSettings)}
                 scrollWithPage={false}
@@ -726,7 +735,7 @@ export default function App() {
                 onOpenChat={() => setChatOpen(true)}
               />
             )}
-            {!isCmsPreview && !hidePartnerAuthAssistants && !hideLocalDropAssistants && (
+            {!isCmsPreview && !hidePartnerAuthAssistants && !hideLocalDropAssistants && !wildcardLaunchOpen && (
               <ChatbotWidget
                 siteContent={siteContent}
                 siteContentLoaded={siteContentLoaded}

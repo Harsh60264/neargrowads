@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, CircleHelp, Layers3, MapPin, Play, RotateCcw, Truck, UploadCloud, Wallet } from 'lucide-react';
 import { getLeadTracking } from '../../data/leadTracking';
 import { HeroOrbitBackground } from '../ui/HeroOrbitBackground';
@@ -110,7 +110,26 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate, onBusi
   const videoRef = useRef<HTMLVideoElement>(null);
   const [prefersReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [videoPlaying, setVideoPlaying] = useState(!prefersReducedMotion);
-  const [interestKind, setInterestKind] = useState<InterestKind>('partner');
+  const [interestKind, setInterestKind] = useState<InterestKind>(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'business'
+      ? 'business'
+      : 'partner',
+  );
+
+  useLayoutEffect(() => {
+    onBusinessModeChange?.(interestKind === 'business');
+  }, [interestKind, onBusinessModeChange]);
+
+  useEffect(() => {
+    if (window.location.hash !== '#partner-interest') return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('partner-interest')?.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [prefersReducedMotion]);
 
   const replay = () => {
     if (!videoRef.current) return;
@@ -192,11 +211,9 @@ export const LocalDropPage: React.FC<LocalDropPageProps> = ({ onNavigate, onBusi
             <div className="localdrop-form-tabs" aria-label="Enquiry type">
               <button type="button" aria-pressed={interestKind === 'partner'} onClick={() => {
                 setInterestKind('partner');
-                onBusinessModeChange?.(false);
               }}>Delivery partner</button>
               <button type="button" aria-pressed={interestKind === 'business'} onClick={() => {
                 setInterestKind('business');
-                onBusinessModeChange?.(true);
               }}>Local business</button>
             </div>
             <h3>{interestKind === 'partner' ? 'Become a delivery partner' : 'Grow Your Business with NearGrow WildCard'}</h3>
