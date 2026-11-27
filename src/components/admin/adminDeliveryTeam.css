@@ -2138,3 +2138,91 @@
     width: 44px;
   }
 }
+
+.dt-stock-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0 0 9px;
+}
+
+.dt-stock-metrics > span {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  background: var(--dt-surface);
+  padding: 8px;
+  color: var(--dt-muted);
+  font-size: 0.6rem;
+}
+
+.dt-stock-metrics strong {
+  color: var(--dt-text);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.dt-stock-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dt-elevated);
+  margin-bottom: 12px;
+}
+
+.dt-stock-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--dt-accent);
+  transition: width 180ms ease;
+}
+
+.dt-stock-quick-quantities {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dt-stock-quick-quantities button {
+  min-height: 34px;
+  border: 1px solid var(--dt-border);
+  border-radius: 7px;
+  background: var(--dt-surface);
+  color: var(--dt-text);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.dt-stock-quick-quantities button:hover:not(:disabled),
+.dt-stock-quick-quantities button:focus-visible {
+  border-color: var(--dt-accent);
+  outline: 2px solid color-mix(in srgb, var(--dt-accent) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.dt-stock-quick-quantities button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.dt-partner-inventory {
+  margin-top: 20px;
+  border-top: 1px solid var(--dt-border);
+  padding-top: 16px;
+}
+
+.dt-partner-inventory .dt-panel-heading {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 720px) {
+  .dt-stock-metrics {
+    gap: 5px;
+  }
+
+  .dt-stock-metrics > span {
+    padding: 7px 6px;
+  }
+}

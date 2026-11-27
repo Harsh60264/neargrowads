@@ -110,12 +110,25 @@ interface StockMovement {
 
 interface CampaignRequest {
   id: string;
-  assignment_id: string;
+  assignment_id: string | null;
   request_type: string;
   details: string;
   status: string;
+  stock_quantity: number | null;
   review_note: string;
   created_at: string;
+}
+
+interface PartnerInventory {
+  totalReceived: number;
+  available: number;
+  delivered: number;
+  reserved: number;
+  damaged: number;
+  returned: number;
+  issued: number;
+  restocked: number;
+  progressPercent: number;
 }
 
 interface DamageReport {
@@ -157,6 +170,7 @@ interface PartnerWorkspaceData {
   damageReports: DamageReport[];
   ledger: CoinLedgerEntry[];
   withdrawals: Withdrawal[];
+  inventory: PartnerInventory;
   coinSummary: {
     balance: number;
     totalEarned: number;
@@ -227,6 +241,7 @@ function StatusPill({ status }: { status: string }) {
     approved: 'Approved',
     needs_correction: 'Needs correction',
     rejected: 'Rejected',
+    fulfilled: 'Fulfilled',
     requested: 'Requested',
     settled: 'Settled',
     active: 'Active',
@@ -278,10 +293,12 @@ function getInitials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'P';
 }
 
-function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; onNavigate: (section: SectionId) => void }) {
+function DashboardSection({ data, onNavigate, onRefresh }: {
+  data: PartnerWorkspaceData;
+  onNavigate: (section: SectionId) => void;
+  onRefresh: () => Promise<void>;
+}) {
   const campaign = data.campaigns.find((item) => item.campaign.status === 'active') || data.campaigns[0];
-  const approved = data.proofs.filter((proof) => proof.status === 'approved');
-  const pending = data.proofs.filter((proof) => proof.status === 'pending');
   const dailyTarget = campaign?.dailyTarget || 0;
   const dailyPercent = dailyTarget > 0 ? Math.min(100, Math.round((campaign.deliveriesToday / dailyTarget) * 100)) : 0;
   const recent = data.proofs.slice(0, 5);
@@ -324,12 +341,13 @@ function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; on
       </div>
 
       <div className="nwg-dashboard-stats">
-        <MetricCard icon={Package} label="Delivery stock" value={formatNumber(data.campaigns.reduce((sum, item) => sum + item.stockAvailable, 0))}
-          detail="Available deliveries" tone="soft" />
-        <MetricCard icon={CheckCircle2} label="Approved" value={formatNumber(approved.length)} detail="Proofs approved" />
-        <MetricCard icon={Clock3} label="Pending" value={formatNumber(pending.length)} detail="Proofs under review" />
+        <MetricCard icon={Package} label="Delivery stock" value={formatNumber(data.inventory.available)}
+          detail="Available WildCards" tone="soft" />
+        <MetricCard icon={CheckCircle2} label="Approved" value={formatNumber(data.inventory.delivered)} detail="Cards delivered" />
+        <MetricCard icon={Clock3} label="Pending" value={formatNumber(data.inventory.reserved)} detail="Cards reserved for review" />
         <MetricCard icon={Coins} label="NGA Coins" value={formatNumber(data.coinSummary.balance)} detail="Available balance" />
       </div>
+      <PartnerInventorySection data={data} onRefresh={onRefresh} onNavigate={onNavigate} />
       <div className="nwg-dashboard-submit">
         <div><strong>Finished a WildCard handover?</strong><span>Submit a clear proof photo for campaign-owner review.</span></div>
         <button type="button" className="nwg-button nwg-button-primary" onClick={() => onNavigate('proof')}>
@@ -406,6 +424,117 @@ function DashboardSection({ data, onNavigate }: { data: PartnerWorkspaceData; on
   );
 }
 
+function PartnerInventorySection({
+  data,
+  onNavigate,
+  onRefresh,
+}: {
+  data: PartnerWorkspaceData;
+  onNavigate: (section: SectionId) => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [quantity, setQuantity] = useState('10');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const requests = data.requests.filter((request) => request.request_type === 'additional_stock');
+  const hasPendingRequest = requests.some((request) => request.status === 'pending');
+  const canRequest = data.inventory.available <= 10;
+
+  const submitRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const requestedQuantity = Number(quantity);
+    if (!Number.isSafeInteger(requestedQuantity) || requestedQuantity < 1 || requestedQuantity > 100) {
+      setError('Choose a whole-card quantity between 1 and 100.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await partnerApi('/api/partners/restock-requests', {
+        method: 'POST',
+        body: JSON.stringify({ quantity: requestedQuantity, reason: reason.trim() }),
+      });
+      setReason('');
+      setRequestOpen(false);
+      setMessage('Your WildCard restock request was sent to the owner.');
+      await onRefresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'The restock request could not be submitted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <section className="nwg-card nwg-inventory-panel" aria-labelledby="nwg-inventory-title">
+    <CardHeading icon={Package} title="WildCard Inventory"
+      description="Physical cards are separate from NGA Coins. Pending proof submissions reserve one card each."
+      trailing={<button type="button" className="nwg-link-button" onClick={() => onNavigate('proof')}>
+        <Camera size={15} /> Submit Delivery Proof
+      </button>} />
+    {data.inventory.available === 0
+      ? <p className="nwg-inventory-alert is-empty" role="status"><AlertTriangle size={17} /> Out of stock. Request a restock before submitting another delivery proof.</p>
+      : data.inventory.available <= 10
+        ? <p className="nwg-inventory-alert is-low" role="status"><AlertTriangle size={17} /> Low stock: {formatNumber(data.inventory.available)} WildCards available.</p>
+        : null}
+    <div className="nwg-inventory-metrics">
+      <MetricCard icon={Package} label="Total cards received" value={formatNumber(data.inventory.totalReceived)} detail="Lifetime physical stock" />
+      <MetricCard icon={CheckCircle2} label="Available cards" value={formatNumber(data.inventory.available)} detail="Ready for delivery" tone="soft" />
+      <MetricCard icon={CheckCircle2} label="Successfully delivered" value={formatNumber(data.inventory.delivered)} detail="Approved proof submissions" />
+      <MetricCard icon={Clock3} label="Reserved" value={formatNumber(data.inventory.reserved)} detail="Pending proof submissions" />
+      <MetricCard icon={AlertTriangle} label="Damaged or returned" value={formatNumber(data.inventory.damaged + data.inventory.returned)} detail={`${formatNumber(data.inventory.damaged)} damaged/lost · ${formatNumber(data.inventory.returned)} returned`} />
+    </div>
+    <div className="nwg-inventory-progress">
+      <div><strong>Delivery progress</strong><span>{formatNumber(data.inventory.delivered)} of {formatNumber(data.inventory.totalReceived)} received cards</span></div>
+      <div className="nwg-progress-track" role="progressbar" aria-label="WildCard delivery progress"
+        aria-valuenow={data.inventory.progressPercent} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${data.inventory.progressPercent}%` }} />
+      </div>
+      <p>Reward per approved delivery: <strong>1,000 NGA Coins</strong>. Pending or rejected proofs earn no coins.</p>
+    </div>
+    <div className="nwg-inventory-actions">
+      <button type="button" className="nwg-button nwg-button-secondary"
+        disabled={!canRequest || hasPendingRequest}
+        aria-expanded={requestOpen}
+        onClick={() => setRequestOpen((open) => !open)}>
+        <Package size={16} />{hasPendingRequest ? 'Restock request pending' : 'Request Restock'}
+      </button>
+      <button type="button" className="nwg-button nwg-button-primary" onClick={() => onNavigate('proof')}>
+        <Camera size={16} />Submit Delivery Proof
+      </button>
+      {!canRequest && <span>Restock requests are available when 10 or fewer cards remain.</span>}
+    </div>
+    {requestOpen && <form className="nwg-inline-form nwg-restock-form" onSubmit={(event) => void submitRequest(event)}>
+      <p>Available stock now: <strong>{formatNumber(data.inventory.available)}</strong></p>
+      <label>Requested quantity
+        <input type="number" min="1" max="100" step="1" required value={quantity}
+          onChange={(event) => setQuantity(event.target.value)} />
+      </label>
+      <label>Reason (optional)
+        <textarea maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)}
+          placeholder="Add a note for the owner." />
+      </label>
+      <button type="submit" className="nwg-button nwg-button-primary" disabled={busy || hasPendingRequest}>
+        <Send size={15} />{busy ? 'Submitting…' : 'Submit Request'}
+      </button>
+    </form>}
+    {error && <p className="nwg-feedback is-error" role="alert">{error}</p>}
+    {message && <p className="nwg-feedback" role="status">{message}</p>}
+    <div className="nwg-restock-history">
+      <strong>Restock request history</strong>
+      {requests.length ? requests.slice(0, 5).map((request) => <article key={request.id} className="nwg-request-row">
+        <span className="nwg-request-icon"><Package size={18} /></span>
+        <div><strong>{request.stock_quantity === null ? 'Restock request' : `${formatNumber(request.stock_quantity)} cards requested`}</strong>
+          <p>{request.details}</p>{request.review_note && <small>Owner response: {request.review_note}</small>}</div>
+        <time>{formatDate(request.created_at)}</time><StatusPill status={request.status} />
+      </article>) : <p className="nwg-muted nwg-no-records">No restock requests yet.</p>}
+    </div>
+  </section>;
+}
+
 function MapPanel({ campaign }: { campaign?: PartnerCampaign }) {
   if (!campaign) {
     return <section className="nwg-card nwg-map-card">
@@ -438,7 +567,7 @@ function MapPanel({ campaign }: { campaign?: PartnerCampaign }) {
 
 function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefresh: () => Promise<void> }) {
   const [selectedId, setSelectedId] = useState('');
-  const [requestType, setRequestType] = useState('additional_stock');
+  const [requestType, setRequestType] = useState('update_locality');
   const [requestDetails, setRequestDetails] = useState('');
   const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [damageCardId, setDamageCardId] = useState('');
@@ -449,14 +578,13 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
   const [error, setError] = useState('');
   const campaign = data.campaigns.find((item) => item.assignmentId === selectedId) || data.campaigns[0];
   const campaignRequests = campaign
-    ? data.requests.filter((request) => request.assignment_id === campaign.assignmentId)
+    ? data.requests.filter((request) => request.assignment_id === campaign.assignmentId &&
+      request.request_type !== 'additional_stock')
     : [];
   const campaignDamageReports = campaign
     ? data.damageReports.filter((report) => report.assignment_id === campaign.assignmentId)
     : [];
-  const campaignStockHistory = campaign
-    ? data.stockHistory.filter((movement) => movement.assignment_id === campaign.assignmentId)
-    : [];
+  const campaignStockHistory = data.stockHistory;
   const pendingCampaignProofs = campaign
     ? data.proofs.filter((proof) => proof.assignment_id === campaign.assignmentId && proof.status === 'pending').length
     : 0;
@@ -530,8 +658,8 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
       </label>}
       <div className="nwg-campaign-metrics">
         <MetricCard icon={Gauge} label="Daily target" value={targetMetricValue} detail={targetMetricDetail} />
-        <MetricCard icon={Package} label="Available stock" value={campaign ? formatNumber(campaign.stockAvailable) : '—'}
-          detail="Physical WildCards" tone="soft" />
+        <MetricCard icon={Package} label="Partner-wide stock" value={formatNumber(data.inventory.available)}
+          detail="Available physical WildCards" tone="soft" />
         <MetricCard icon={Store} label="Assigned shops" value={campaign ? formatNumber(campaign.sites.length) : '—'}
           detail="Approved locations" />
         <MetricCard icon={Clock3} label="Pending proofs" value={formatNumber(pendingCampaignProofs)}
@@ -554,7 +682,7 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
                   aria-valuemin={0} aria-valuemax={campaign.dailyTarget}>
                   <span style={{ width: `${dailyProgress}%` }} />
                 </span>}</span></div>
-              <div><Package size={19} /><span>Stock (WildCards)<strong>{campaign.stockAvailable} available</strong>
+              <div><Package size={19} /><span>Stock (WildCards)<strong>{data.inventory.available} available</strong>
                 <small>{campaign.deliveriesToday} delivered today</small></span></div>
             </div>
             <div className="nwg-campaign-sites">
@@ -589,7 +717,6 @@ function CampaignsSection({ data, onRefresh }: { data: PartnerWorkspaceData; onR
             onSubmit={(event) => void submitRequest(event)}>
             <label>New request
               <select value={requestType} onChange={(event) => setRequestType(event.target.value)}>
-                <option value="additional_stock">Additional stock</option>
                 <option value="update_locality">Update locality</option>
                 <option value="material_clarification">Material clarification</option>
               </select>
@@ -828,8 +955,11 @@ function ProofSection({ data, onRefresh }: { data: PartnerWorkspaceData; onRefre
               <small className="nwg-char-count">{note.length} / 200</small>
             </label>
             <div className="nwg-form-end">
-              <span className="nwg-muted">Reward is credited only after owner approval.</span>
-              <button type="submit" className="nwg-button nwg-button-primary" disabled={busy || !assignment || !siteId || !photoDataUrl}>
+              <span className="nwg-muted">{data.inventory.available > 0
+                ? 'One card is reserved when submitted. 1,000 NGA Coins are credited only after approval.'
+                : 'No unreserved WildCards are available. Request a restock before submitting.'}</span>
+              <button type="submit" className="nwg-button nwg-button-primary"
+                disabled={busy || !assignment || !siteId || !photoDataUrl || data.inventory.available <= 0}>
                 <Send size={15} />{busy ? 'Submitting…' : 'Submit proof'}
               </button>
             </div>
@@ -1143,7 +1273,9 @@ export function PartnerWorkspace({
       if (!Array.isArray(data.campaigns) || !Array.isArray(data.proofs) ||
         !Array.isArray(data.stockHistory) || !Array.isArray(data.requests) ||
         !Array.isArray(data.damageReports) || !Array.isArray(data.ledger) ||
-        !Array.isArray(data.withdrawals) || !data.coinSummary || !data.user) {
+        !Array.isArray(data.withdrawals) || !data.coinSummary || !data.user ||
+        !data.inventory || !Number.isSafeInteger(data.inventory.available) ||
+        !Number.isSafeInteger(data.inventory.reserved) || !Number.isSafeInteger(data.inventory.delivered)) {
         throw new Error('The partner workspace response was incomplete.');
       }
       setWorkspace(data);
@@ -1290,7 +1422,7 @@ export function PartnerWorkspace({
                 </button></div>
             </section>}
             {!workspaceBusy && !workspaceError && workspace && <>
-              {section === 'dashboard' && <DashboardSection data={workspace} onNavigate={setSection} />}
+              {section === 'dashboard' && <DashboardSection data={workspace} onNavigate={setSection} onRefresh={refreshWorkspace} />}
               {section === 'campaigns' && <CampaignsSection data={workspace} onRefresh={refreshWorkspace} />}
               {section === 'proof' && <ProofSection data={workspace} onRefresh={refreshWorkspace} />}
               {section === 'earnings' && <EarningsSection data={workspace} onRefresh={refreshWorkspace} />}

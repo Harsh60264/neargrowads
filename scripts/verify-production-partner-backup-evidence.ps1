@@ -14,6 +14,8 @@ $expectedSourceHost = 'aws-0-ap-northeast-2.pooler.supabase.com'
 $expectedDatabase = 'postgres'
 $expectedArchiveIntegrity = 'PG_RESTORE_LIST_PASS'
 $expectedRestoreTarget = 'disposable PostgreSQL 18 cluster bound only to 127.0.0.1'
+$expectedSupabaseRestoreTarget = 'disposable Supabase PostgreSQL 17 container with disabled networking and a read-only archive mount'
+$expectedSupabaseImage = 'docker.io/supabase/postgres@sha256:df59ef0172dec80053ea186542ba12c8719bb5ca38abbecffd6b7cd6b4075994'
 $requiredDataEntries = @(
   'auth.users',
   'auth.identities',
@@ -45,7 +47,7 @@ if ($evidence.formatVersion -ne 1 -or
   throw 'Backup evidence does not identify the pinned Production project and database.'
 }
 if ($evidence.archiveIntegrity -cne $expectedArchiveIntegrity -or
-  $evidence.restoreDrill.target -cne $expectedRestoreTarget) {
+  $evidence.restoreDrill.target -notin @($expectedRestoreTarget, $expectedSupabaseRestoreTarget)) {
   throw 'Backup evidence does not contain the expected archive-integrity and isolated-target records.'
 }
 if ($ArchiveOnly) {
@@ -95,6 +97,65 @@ if ([long]$evidence.archiveBytes -ne $archiveItem.Length) {
 $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
 if ($actualHash -cne [string]$evidence.sha256) {
   throw 'Backup evidence SHA-256 does not match the archive.'
+}
+if ($evidence.restoreDrill.target -ceq $expectedSupabaseRestoreTarget) {
+  $supabaseRecoveryProperty = $evidence.restoreDrill.PSObject.Properties['supabaseRecovery']
+  $supabaseRecovery = if ($null -ne $supabaseRecoveryProperty) {
+    $supabaseRecoveryProperty.Value
+  } else {
+    $null
+  }
+  $requiredRestoredTables = @(
+    'auth.users',
+    'auth.identities',
+    'storage.buckets',
+    'storage.objects',
+    'public.partner_profiles',
+    'public.partner_campaigns',
+    'public.partner_campaign_assignments',
+    'public.partner_campaign_requests',
+    'public.partner_damage_reports',
+    'public.partner_proofs',
+    'public.partner_stock_movements',
+    'public.partner_coin_ledger',
+    'public.partner_withdrawal_requests'
+  )
+  $restoredTableRows = if ($null -ne $supabaseRecovery) {
+    @($supabaseRecovery.tableRowCounts)
+  } else {
+    @()
+  }
+  $restoredTableNames = @($restoredTableRows | ForEach-Object { [string]$_.table })
+  $restoredRowsValid = $true
+  foreach ($tableName in $requiredRestoredTables) {
+    $tableRows = @($restoredTableRows | Where-Object { [string]$_.table -ceq $tableName })
+    $rowCount = 0L
+    if ($tableRows.Count -ne 1 -or
+      -not [long]::TryParse([string]$tableRows[0].rows, [ref]$rowCount) -or
+      $rowCount -lt 0) {
+      $restoredRowsValid = $false
+      break
+    }
+  }
+  $imageDigest = if ($null -ne $supabaseRecovery) {
+    ([string]$supabaseRecovery.image).Split('@')[-1]
+  } else {
+    ''
+  }
+  if ($null -eq $supabaseRecovery -or
+    $supabaseRecovery.image -cne $expectedSupabaseImage -or
+    $imageDigest -cne 'sha256:df59ef0172dec80053ea186542ba12c8719bb5ca38abbecffd6b7cd6b4075994' -or
+    $supabaseRecovery.networkMode -cne 'none' -or
+    $supabaseRecovery.archiveMountedReadOnly -ne $true -or
+    $supabaseRecovery.archiveSha256 -cne $actualHash -or
+    [int]$supabaseRecovery.serverVersionNumber -ne 170012 -or
+    $supabaseRecovery.supabaseVaultExtensionVersion -cne '0.3.2' -or
+    [int]$supabaseRecovery.pgRestoreExitCode -ne 0 -or
+    [string]$supabaseRecovery.restoredDatabase -notmatch '^partner_restore_verified_[a-f0-9]{32}$' -or
+    -not $restoredRowsValid -or
+    @((Compare-Object $requiredRestoredTables $restoredTableNames)).Count -gt 0) {
+    throw 'The Supabase-compatible restore evidence is incomplete or does not match the pinned isolated restore target.'
+  }
 }
 
 $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -251,6 +312,10 @@ if ($ArchiveOnly) {
     Write-Output "Restore failure diagnostic: $($diagnosticProperty.Value)"
   }
 } else {
-  Write-Output "Isolated full restore drill: PASS ($($restoreCompletedAt.ToUniversalTime().ToString('o')))"
+  if ($evidence.restoreDrill.target -ceq $expectedSupabaseRestoreTarget) {
+    Write-Output "Isolated full restore drill: PASS in the pinned Supabase PostgreSQL 17 container ($($restoreCompletedAt.ToUniversalTime().ToString('o')))"
+  } else {
+    Write-Output "Isolated full restore drill: PASS ($($restoreCompletedAt.ToUniversalTime().ToString('o')))"
+  }
 }
 Write-Output 'Not covered: Storage object payload files, cluster-global roles/tablespaces, Supabase project settings/secrets, and external service configuration.'

@@ -333,6 +333,77 @@ INSERT INTO storage.objects VALUES (21);
 
   $evidence.restoreDrill.status = 'PASS'
   $evidence.restoreDrill.authTableRows = $authRows
+  $evidence.restoreDrill.target = 'disposable Supabase PostgreSQL 17 container with disabled networking and a read-only archive mount'
+  $evidence.restoreDrill.supabaseRecovery = [ordered]@{
+    image = 'docker.io/supabase/postgres@sha256:df59ef0172dec80053ea186542ba12c8719bb5ca38abbecffd6b7cd6b4075994'
+    networkMode = 'none'
+    archiveMountedReadOnly = $true
+    archiveSha256 = $evidence.sha256
+    serverVersionNumber = 170012
+    supabaseVaultExtensionVersion = '0.3.2'
+    pgRestoreExitCode = 0
+    restoredDatabase = 'partner_restore_verified_0123456789abcdef0123456789abcdef'
+    tableRowCounts = @(
+      'auth.users',
+      'auth.identities',
+      'storage.buckets',
+      'storage.objects',
+      'public.partner_profiles',
+      'public.partner_campaigns',
+      'public.partner_campaign_assignments',
+      'public.partner_campaign_requests',
+      'public.partner_damage_reports',
+      'public.partner_proofs',
+      'public.partner_stock_movements',
+      'public.partner_coin_ledger',
+      'public.partner_withdrawal_requests'
+    ) | ForEach-Object {
+      [ordered]@{ table = $_; rows = 0 }
+    }
+  }
+  [System.IO.File]::WriteAllText(
+    $evidencePath,
+    (ConvertTo-Json -InputObject $evidence -Depth 10),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $supabaseOutput = @(& $verifierPath -EvidencePath $evidencePath)
+  Assert-True ($LASTEXITCODE -eq 0) 'The evidence verifier must accept a complete pinned Supabase-container restore record.'
+  Assert-True (@($supabaseOutput | ForEach-Object { [string]$_ }) -contains 'BACKUP EVIDENCE PASS') `
+    'The pinned Supabase-container recovery must emit the full evidence success marker.'
+  Assert-True (@($supabaseOutput | ForEach-Object { [string]$_ } |
+      Where-Object { $_ -like 'Isolated full restore drill: PASS in the pinned Supabase PostgreSQL 17 container*' }).Count -eq 1) `
+    'The verifier must identify the actual Supabase-compatible restore target.'
+
+  $evidence.restoreDrill.supabaseRecovery.networkMode = 'bridge'
+  [System.IO.File]::WriteAllText(
+    $evidencePath,
+    (ConvertTo-Json -InputObject $evidence -Depth 10),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $unsafeNetworkRejected = $false
+  try {
+    & $verifierPath -EvidencePath $evidencePath | Out-Null
+  } catch {
+    $unsafeNetworkRejected = $_.Exception.Message -like '*Supabase-compatible restore evidence is incomplete*'
+  }
+  Assert-True $unsafeNetworkRejected 'The verifier must reject recovery evidence from a networked container.'
+
+  $evidence.restoreDrill.supabaseRecovery.networkMode = 'none'
+  $evidence.restoreDrill.supabaseRecovery.archiveMountedReadOnly = $false
+  [System.IO.File]::WriteAllText(
+    $evidencePath,
+    (ConvertTo-Json -InputObject $evidence -Depth 10),
+    [System.Text.UTF8Encoding]::new($false)
+  )
+  $writableArchiveRejected = $false
+  try {
+    & $verifierPath -EvidencePath $evidencePath | Out-Null
+  } catch {
+    $writableArchiveRejected = $_.Exception.Message -like '*Supabase-compatible restore evidence is incomplete*'
+  }
+  Assert-True $writableArchiveRejected 'The verifier must reject recovery evidence when the source archive mount was writable.'
+
+  $evidence.restoreDrill.supabaseRecovery.archiveMountedReadOnly = $true
   $evidence.sha256 = '0' * 64
   [System.IO.File]::WriteAllText(
     $evidencePath,

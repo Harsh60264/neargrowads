@@ -2395,3 +2395,161 @@ html[data-theme='light'] .partner-workspace .nwg-active-campaign .nwg-campaign-m
 html[data-theme='light'] .partner-workspace .nwg-active-campaign .nwg-empty-inverse > p {
   color: #DDFBE3;
 }
+
+.partner-workspace .nwg-inventory-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.partner-workspace .nwg-inventory-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.partner-workspace .nwg-inventory-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid #d5e7cc;
+  border-radius: 10px;
+  background: #f0f8e9;
+  padding: 10px 12px;
+  color: #345b26;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.partner-workspace .nwg-inventory-alert.is-empty {
+  border-color: #f0c8b9;
+  background: #fff3ee;
+  color: #823b26;
+}
+
+.partner-workspace .nwg-inventory-alert svg {
+  flex: none;
+}
+
+.partner-workspace .nwg-inventory-progress {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--nwg-line);
+  border-radius: 12px;
+  background: var(--nwg-surface);
+  padding: 12px;
+}
+
+.partner-workspace .nwg-inventory-progress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--nwg-ink);
+  font-size: 11px;
+}
+
+.partner-workspace .nwg-inventory-progress > div:first-child span,
+.partner-workspace .nwg-inventory-progress > p {
+  color: var(--nwg-muted);
+  font-size: 10px;
+}
+
+.partner-workspace .nwg-inventory-progress > p {
+  margin: 0;
+}
+
+.partner-workspace .nwg-inventory-progress > p strong {
+  color: var(--nwg-green-dark);
+}
+
+.partner-workspace .nwg-inventory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+
+.partner-workspace .nwg-inventory-actions > span {
+  color: var(--nwg-muted);
+  font-size: 10px;
+}
+
+.partner-workspace .nwg-inventory-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.partner-workspace .nwg-restock-form {
+  grid-template-columns: minmax(130px, .7fr) minmax(180px, 1fr) auto;
+  align-items: end;
+}
+
+.partner-workspace .nwg-restock-form > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--nwg-muted);
+  font-size: 10px;
+}
+
+.partner-workspace .nwg-restock-form > p strong,
+.partner-workspace .nwg-restock-history > strong {
+  color: var(--nwg-ink);
+}
+
+.partner-workspace .nwg-restock-form > button {
+  min-height: 39px;
+}
+
+.partner-workspace .nwg-restock-history {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--nwg-line);
+  padding-top: 12px;
+}
+
+.partner-workspace .nwg-restock-history > .nwg-request-row {
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  align-items: start;
+}
+
+.partner-workspace .nwg-restock-history .nwg-request-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--nwg-green-dark);
+  font-size: 9px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1050px) {
+  .partner-workspace .nwg-inventory-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .partner-workspace .nwg-inventory-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .partner-workspace .nwg-restock-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .partner-workspace .nwg-restock-form > p {
+    grid-column: 1;
+  }
+
+  .partner-workspace .nwg-restock-history > .nwg-request-row {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+  }
+
+  .partner-workspace .nwg-restock-history > .nwg-request-row time {
+    grid-column: 2;
+  }
+
+  .partner-workspace .nwg-restock-history > .nwg-request-row .nwg-status {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}

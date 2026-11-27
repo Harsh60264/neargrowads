@@ -8,7 +8,8 @@ param(
   [string]$PgCtlPath = 'C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe',
   [string]$InitDbPath = 'C:\Program Files\PostgreSQL\18\bin\initdb.exe',
   [string]$CreateDbPath = 'C:\Program Files\PostgreSQL\18\bin\createdb.exe',
-  [string]$PsqlPath = 'C:\Program Files\PostgreSQL\18\bin\psql.exe'
+  [string]$PsqlPath = 'C:\Program Files\PostgreSQL\18\bin\psql.exe',
+  [string]$PasswordFilePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -236,11 +237,15 @@ New-Item -ItemType Directory -Path $backupDirectory -ErrorAction Stop | Out-Null
 Set-PrivateDirectoryAcl -Path $backupDirectory
 
 try {
-  $remoteEnvironment = Enter-StagingPsqlEnvironment
+  $remoteEnvironment = Enter-StagingPsqlEnvironment -PasswordFilePath $PasswordFilePath
   try {
     Write-Output "Creating a full custom-format database archive for pinned Production project $expectedProjectRef."
     Write-Output "The archive will be stored outside the repository at: $archivePath"
-    Write-Output 'pg_dump will prompt privately for the database password; the password is not stored.'
+    if ([string]::IsNullOrWhiteSpace($PasswordFilePath)) {
+      Write-Output 'pg_dump will prompt privately for the database password; the password is not stored.'
+    } else {
+      Write-Output 'pg_dump will use the approved ACL-restricted pgpass file without prompting.'
+    }
     $dumpArguments = @(
       '--host', $databaseHost,
       '--port', $databasePort,
@@ -248,9 +253,9 @@ try {
       '--dbname', $databaseName,
       '--format=custom',
       '--compress=6',
-      '--file', $archivePath,
-      '--password'
+      '--file', $archivePath
     )
+    $dumpArguments += if ([string]::IsNullOrWhiteSpace($PasswordFilePath)) { '--password' } else { '--no-password' }
     & $PgDumpPath @dumpArguments
     $dumpExitCode = $LASTEXITCODE
     if ($dumpExitCode -ne 0) {

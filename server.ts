@@ -3926,7 +3926,7 @@ async function getPartnerProofPhotoUrl(objectPath: string): Promise<string> {
 
 async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<string, unknown>> {
   const partnerId = profile.id;
-  const [assignments, proofs, movements, requests, damageReports, ledger, withdrawals, coinSummary] = await Promise.all([
+  const [assignments, proofs, movements, requests, damageReports, ledger, withdrawals, coinSummary, inventory] = await Promise.all([
     readPartnerWorkspaceTable<{
       id: string; campaign_id: string; daily_target: number; active: boolean; created_at: string;
     }>('partner_campaign_assignments', {
@@ -3947,7 +3947,7 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       limit: '100',
     }),
     readPartnerWorkspaceTable<{
-      id: string; assignment_id: string; movement_type: string; quantity: number; notes: string; created_at: string;
+      id: string; assignment_id: string | null; movement_type: string; quantity: number; notes: string; created_at: string;
     }>('partner_stock_movements', {
       partner_profile_id: `eq.${partnerId}`,
       select: 'id,assignment_id,movement_type,quantity,notes,created_at',
@@ -3955,11 +3955,11 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       limit: '100',
     }),
     readPartnerWorkspaceTable<{
-      id: string; assignment_id: string; request_type: string; details: string; status: string;
-      review_note: string; created_at: string;
+      id: string; assignment_id: string | null; request_type: string; details: string; status: string;
+      stock_quantity: number | null; review_note: string; created_at: string;
     }>('partner_campaign_requests', {
       partner_profile_id: `eq.${partnerId}`,
-      select: 'id,assignment_id,request_type,details,status,review_note,created_at',
+      select: 'id,assignment_id,request_type,details,status,stock_quantity,review_note,created_at',
       order: 'created_at.desc',
       limit: '100',
     }),
@@ -4001,6 +4001,20 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
       method: 'POST',
       body: JSON.stringify({ p_partner_profile_id: partnerId }),
     })),
+    readSupabaseJson<{
+      totalReceived: number;
+      available: number;
+      delivered: number;
+      reserved: number;
+      damaged: number;
+      returned: number;
+      issued: number;
+      restocked: number;
+      progressPercent: number;
+    }>(await supabaseAdminRequest('rest/v1/rpc/get_partner_inventory_summary', {
+      method: 'POST',
+      body: JSON.stringify({ p_partner_profile_id: partnerId }),
+    })),
   ]);
   const campaignIds = [...new Set(assignments.map((assignment) => assignment.campaign_id))];
   const campaignFilter = campaignIds.length ? partnerInFilter(campaignIds) : 'in.(00000000-0000-0000-0000-000000000000)';
@@ -4029,10 +4043,6 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     campaignSites.push(site);
     sitesByCampaign.set(site.campaign_id, campaignSites);
   }
-  const stockByAssignment = new Map<string, number>();
-  for (const movement of movements) {
-    stockByAssignment.set(movement.assignment_id, (stockByAssignment.get(movement.assignment_id) || 0) + movement.quantity);
-  }
   const today = new Date().toISOString().slice(0, 10);
   const campaignViews = assignments.flatMap((assignment) => {
     const campaign = campaignById.get(assignment.campaign_id);
@@ -4042,8 +4052,8 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     return [{
       assignmentId: assignment.id,
       dailyTarget: assignment.daily_target,
-      stockAvailable: stockByAssignment.get(assignment.id) || 0,
-      campaign,
+      stockAvailable: inventory.available,
+      campaign: { ...campaign, coins_per_proof: 1000 },
       sites: sitesByCampaign.get(campaign.id) || [],
       proofs: campaignProofs,
       deliveriesToday: todayProofs.filter((proof) => proof.status === 'approved').length,
@@ -4060,6 +4070,7 @@ async function loadPartnerWorkspace(profile: PartnerProfile): Promise<Record<str
     proofs: proofViews,
     stockHistory: movements,
     requests,
+    inventory,
     damageReports,
     ledger,
     withdrawals,
@@ -4119,7 +4130,7 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
         limit: '100',
       }),
       readPartnerWorkspaceTable<{
-        id: string; partner_profile_id: string; assignment_id: string; movement_type: string;
+        id: string; partner_profile_id: string; assignment_id: string | null; movement_type: string;
         quantity: number; notes: string; created_at: string; administrator_id: string | null;
       }>('partner_stock_movements', {
         select: 'id,partner_profile_id,assignment_id,movement_type,quantity,notes,created_at,administrator_id',
@@ -4127,7 +4138,7 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
         limit: '100',
       }),
       readPartnerWorkspaceTable<{
-        id: string; partner_profile_id: string; assignment_id: string; request_type: string;
+        id: string; partner_profile_id: string; assignment_id: string | null; request_type: string;
         details: string; status: string; created_at: string; reviewed_at: string | null;
       }>('partner_campaign_requests', {
         select: 'id,partner_profile_id,assignment_id,request_type,details,status,created_at,reviewed_at',
@@ -4181,7 +4192,7 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
     ...movements.map((item) => item.assignment_id),
     ...campaignRequests.map((item) => item.assignment_id),
     ...damageReports.map((item) => item.assignment_id),
-  ])];
+  ].filter((id): id is string => Boolean(id)))];
   const campaignIds = [...new Set([
     ...proofs.map((item) => item.campaign_id),
     ...adminEvents.map((item) => item.campaign_id),
@@ -4253,9 +4264,13 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
       id: `stock-${movement.id}`,
       partnerName: partnerName(movement.partner_profile_id),
       activityType: movement.movement_type === 'distributed' ? 'WildCard distributed' :
+        movement.movement_type === 'restocked' ? 'WildCard stock restocked' :
         movement.movement_type === 'returned' ? 'WildCard stock returned' :
-          movement.movement_type === 'issued' ? 'WildCard stock issued' : 'WildCard stock adjusted',
-      details: `${Math.abs(movement.quantity)} cards · ${campaignNames.get(campaignByAssignment.get(movement.assignment_id) || '') || 'Campaign'}${movement.notes ? ` · ${movement.notes}` : ''}`,
+          movement.movement_type === 'damaged' ? 'WildCard damaged or lost' :
+            movement.movement_type === 'issued' ? 'WildCard stock issued' : 'WildCard stock adjusted',
+      details: `${Math.abs(movement.quantity)} cards · ${movement.assignment_id
+        ? campaignNames.get(campaignByAssignment.get(movement.assignment_id) || '') || 'Campaign'
+        : 'Partner-wide inventory'}${movement.notes ? ` · ${movement.notes}` : ''}`,
       status: 'recorded',
       createdAt: movement.created_at,
     });
@@ -4265,7 +4280,9 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
       id: `campaign-request-${request.id}`,
       partnerName: partnerName(request.partner_profile_id),
       activityType: request.request_type === 'additional_stock' ? 'Stock request' : 'Campaign request',
-      details: `${campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign'} · ${request.details}`,
+      details: `${request.assignment_id
+        ? campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign'
+        : 'Partner-wide inventory'} · ${request.details}`,
       status: request.status,
       createdAt: request.created_at,
     });
@@ -4273,7 +4290,9 @@ async function loadDeliveryTeamActivity(): Promise<DeliveryTeamActivityItem[]> {
       id: `campaign-request-review-${request.id}`,
       partnerName: partnerName(request.partner_profile_id),
       activityType: request.request_type === 'additional_stock' ? `Stock request ${request.status}` : `Campaign request ${request.status}`,
-      details: campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign',
+      details: request.assignment_id
+        ? campaignNames.get(campaignByAssignment.get(request.assignment_id) || '') || 'Campaign'
+        : 'Partner-wide inventory',
       status: request.status,
       createdAt: request.reviewed_at,
     });
@@ -4428,6 +4447,7 @@ function requiredAdminPermission(req: Request): { section: AdminSection; action:
   if (pathName === '/delivery-team/campaigns' && req.method === 'POST') return { section: 'deliveryTeam', action: 'create' };
   if (/^\/delivery-team\/campaigns\/[0-9a-f-]+\/status$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (pathName === '/delivery-team/requests' && req.method === 'GET') return { section: 'deliveryTeam', action: 'view' };
+  if (/^\/delivery-team\/restock-requests\/[0-9a-f-]+\/handover$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (/^\/delivery-team\/proofs\/[0-9a-f-]+\/review$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (/^\/delivery-team\/requests\/(campaign|damage|withdrawal)\/[0-9a-f-]+\/review$/i.test(pathName) && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
   if (pathName === '/delivery-team/settings' && req.method === 'POST') return { section: 'deliveryTeam', action: 'edit' };
@@ -6340,7 +6360,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const requestType = req.body?.requestType;
     const details = typeof req.body?.details === 'string' ? req.body.details.trim() : '';
     if (typeof req.body?.assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(req.body.assignmentId) ||
-      !['additional_stock', 'update_locality', 'material_clarification'].includes(requestType) ||
+      !['update_locality', 'material_clarification'].includes(requestType) ||
       details.length < 3 || details.length > 1000) {
       res.status(400).json({ message: 'Choose a request type and enter details.' });
       return;
@@ -6371,6 +6391,47 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       console.error('[NearGrow Ads] Partner campaign request failed:', error);
       res.status(503).json({ message: 'Your campaign request could not be submitted.' });
+    }
+  });
+
+  app.post('/api/partners/restock-requests', async (req: Request, res: Response): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Restock requests must be submitted from this website.' });
+      return;
+    }
+    const profile = await requirePartnerSession(req, res);
+    if (!profile) return;
+    const quantity = req.body?.quantity;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100 ||
+      reason.length === 1 || reason.length === 2 || reason.length > 500) {
+      res.status(400).json({ message: 'Enter a whole-card quantity between 1 and 100 and an optional reason of 3 to 500 characters.' });
+      return;
+    }
+    try {
+      const requestId = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/request_partner_restock',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_partner_profile_id: profile.id,
+            p_quantity: quantity,
+            p_reason: reason,
+          }),
+        },
+      ));
+      res.status(201).json({ submitted: true, requestId });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] Partner restock request failed:', error);
+      res.status(/already pending|10 cards or fewer/i.test(providerMessage) ? 409 : 503).json({
+        message: /already pending/i.test(providerMessage)
+          ? 'You already have a pending restock request.'
+          : /10 cards or fewer/i.test(providerMessage)
+            ? 'A restock can be requested when 10 or fewer cards are available.'
+            : 'Your restock request could not be submitted.',
+      });
     }
   });
 
@@ -6598,15 +6659,16 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       idempotencyKey,
     } = req.body || {};
     if (typeof partnerProfileId !== 'string' || !/^[0-9a-f-]{36}$/i.test(partnerProfileId) ||
-      typeof assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(assignmentId) ||
-      !['issued', 'returned', 'adjusted'].includes(movementType) ||
+      (assignmentId !== null && assignmentId !== undefined &&
+        (typeof assignmentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(assignmentId))) ||
+      !['issued', 'restocked', 'returned', 'adjusted', 'damaged'].includes(movementType) ||
       !Number.isSafeInteger(quantity) || quantity === 0 || Math.abs(quantity) > 1_000_000 ||
-      (movementType === 'issued' && quantity < 1) ||
-      (movementType === 'returned' && quantity > -1) ||
+      (['issued', 'restocked'].includes(movementType) && (quantity < 1 || quantity > 100)) ||
+      (['returned', 'damaged'].includes(movementType) && quantity > -1) ||
       typeof notes !== 'string' || notes.trim().length < 3 || notes.trim().length > 500 ||
       typeof idempotencyKey !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
-      res.status(400).json({ message: 'Enter a valid partner, campaign assignment, stock movement, quantity, reason and request key.' });
+      res.status(400).json({ message: 'Enter a valid partner, optional assignment, stock movement, quantity, reason and request key. Issues and restocks are limited to 100 cards.' });
       return;
     }
     try {
@@ -6617,7 +6679,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           body: JSON.stringify({
             p_admin_id: identity.id,
             p_partner_profile_id: partnerProfileId,
-            p_assignment_id: assignmentId,
+            p_assignment_id: assignmentId || null,
             p_movement_type: movementType,
             p_quantity: quantity,
             p_notes: notes.trim(),
@@ -6629,9 +6691,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
       console.error('[NearGrow Ads] Delivery Team stock movement failed:', error);
-      res.status(/negative|Idempotency key/i.test(providerMessage) ? 409 : 503).json({
-        message: /negative/i.test(providerMessage)
-          ? 'This movement would make the partner stock balance negative.'
+      res.status(/negative|unreserved|reserved|100 WildCards|Idempotency key/i.test(providerMessage) ? 409 : 503).json({
+        message: /unreserved|reserved|negative/i.test(providerMessage)
+          ? 'This movement would consume stock reserved for pending proofs or exceed available stock.'
+          : /100 WildCards/i.test(providerMessage)
+            ? 'An issue or restock transaction cannot exceed 100 cards.'
           : /Idempotency key/i.test(providerMessage)
             ? 'This stock request key has already been used with different details.'
             : 'The WildCard stock movement could not be recorded.',
@@ -6685,8 +6749,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       typeof startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
       typeof endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
       !Number.isInteger(dailyTarget) || dailyTarget < 1 || dailyTarget > 1000 ||
-      !Number.isInteger(coinsPerProof) || coinsPerProof < 1 || coinsPerProof > 1_000_000 ||
-      !Number.isInteger(initialStock) || initialStock < 0 || initialStock > 1_000_000 ||
+      coinsPerProof !== 1000 ||
+      initialStock !== 0 ||
       !Array.isArray(sites) || sites.length < 1 || sites.length > 100 ||
       sites.some((site: unknown) => !site || typeof site !== 'object' ||
         typeof (site as Record<string, unknown>).name !== 'string' ||
@@ -6695,7 +6759,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         typeof (site as Record<string, unknown>).address !== 'string' ||
         (site as Record<string, unknown>).address!.toString().trim().length < 2 ||
         (site as Record<string, unknown>).address!.toString().trim().length > 240)) {
-      res.status(400).json({ message: 'Enter valid campaign details, dates, reward, target, stock and at least one shop.' });
+      res.status(400).json({ message: 'Enter valid campaign details, dates, the fixed 1,000 NGA Coin reward, target, and at least one shop. Issue stock separately.' });
       return;
     }
     try {
@@ -6789,7 +6853,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
   app.get('/api/admin/delivery-team/requests', async (_req: Request, res: Response): Promise<void> => {
     res.setHeader('Cache-Control', 'no-store');
     try {
-      const [proofs, campaignRequests, damageReports, withdrawals] = await Promise.all([
+      const [proofs, requestRows, damageReports, withdrawals] = await Promise.all([
         readPartnerWorkspaceTable<{
           id: string; partner_profile_id: string; assignment_id: string; campaign_id: string; site_id: string;
           photo_path: string; note: string; latitude: number | null; longitude: number | null;
@@ -6801,11 +6865,11 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           limit: '100',
         }),
         readPartnerWorkspaceTable<{
-          id: string; partner_profile_id: string; assignment_id: string; request_type: string;
-          details: string; created_at: string;
+          id: string; partner_profile_id: string; assignment_id: string | null; request_type: string;
+          details: string; stock_quantity: number | null; status: string; review_note: string; created_at: string;
         }>('partner_campaign_requests', {
-          status: 'eq.pending',
-          select: 'id,partner_profile_id,assignment_id,request_type,details,created_at',
+          status: 'in.(pending,approved)',
+          select: 'id,partner_profile_id,assignment_id,request_type,details,stock_quantity,status,review_note,created_at',
           order: 'created_at.asc',
           limit: '100',
         }),
@@ -6827,15 +6891,19 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
           limit: '100',
         }),
       ]);
+      const campaignRequests = requestRows.filter((item) =>
+        item.request_type !== 'additional_stock' && item.status === 'pending');
+      const restockRequests = requestRows.filter((item) => item.request_type === 'additional_stock');
       const partnerIds = [...new Set([
         ...proofs.map((item) => item.partner_profile_id),
         ...campaignRequests.map((item) => item.partner_profile_id),
+        ...restockRequests.map((item) => item.partner_profile_id),
         ...damageReports.map((item) => item.partner_profile_id),
         ...withdrawals.map((item) => item.partner_profile_id),
       ])];
       const assignmentIds = [...new Set([
         ...proofs.map((item) => item.assignment_id),
-        ...campaignRequests.map((item) => item.assignment_id),
+        ...campaignRequests.map((item) => item.assignment_id).filter((id): id is string => Boolean(id)),
         ...damageReports.map((item) => item.assignment_id),
       ])];
       const campaignIds = [...new Set(proofs.map((item) => item.campaign_id))];
@@ -6878,10 +6946,21 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         campaignRequests: campaignRequests.map((item) => ({
           id: item.id,
           partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
-          assignmentId: item.assignment_id,
-          campaignName: campaignByAssignment.get(item.assignment_id) || 'WildCard campaign',
+          assignmentId: item.assignment_id || '',
+          campaignName: item.assignment_id
+            ? campaignByAssignment.get(item.assignment_id) || 'WildCard campaign'
+            : 'Partner-wide inventory',
           requestType: item.request_type,
           details: item.details,
+          createdAt: item.created_at,
+        })),
+        restockRequests: restockRequests.map((item) => ({
+          id: item.id,
+          partnerName: profileNames.get(item.partner_profile_id) || 'Delivery partner',
+          quantity: item.stock_quantity,
+          status: item.status,
+          details: item.details,
+          ownerResponse: item.review_note,
           createdAt: item.created_at,
         })),
         damageReports: damageReports.map((item) => ({
@@ -6905,6 +6984,48 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       console.error('[NearGrow Ads] Delivery Team request queues failed:', error);
       res.status(503).json({ message: 'Delivery Team proof and request queues could not be loaded.' });
+    }
+  });
+
+  app.post('/api/admin/delivery-team/restock-requests/:requestId/handover', async (req: Request, res: Response): Promise<void> => {
+    if (!isSameOriginRequest(req)) {
+      res.status(403).json({ message: 'Restock handovers must be confirmed from this website.' });
+      return;
+    }
+    const identity = currentAdmin(res);
+    const requestId = req.params.requestId;
+    const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
+    if (!identity) {
+      res.status(401).json({ message: 'Your admin session has expired. Please sign in again.' });
+      return;
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(requestId) || reviewNote.length < 3 || reviewNote.length > 500) {
+      res.status(400).json({ message: 'Enter the restock request ID and a handover confirmation note.' });
+      return;
+    }
+    try {
+      const status = await readSupabaseJson<string>(await supabaseAdminRequest(
+        'rest/v1/rpc/admin_handover_partner_restock',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            p_admin_id: identity.id,
+            p_request_id: requestId,
+            p_review_note: reviewNote,
+          }),
+        },
+      ));
+      res.json({ handedOver: true, status });
+    } catch (error) {
+      const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
+      console.error('[NearGrow Ads] WildCard restock handover failed:', error);
+      res.status(/already handed|approved restock|fulfilled/i.test(providerMessage) ? 409 : 503).json({
+        message: /approved restock/i.test(providerMessage)
+          ? 'Only an approved restock can be handed over.'
+          : /fulfilled|already handed/i.test(providerMessage)
+            ? 'This restock has already been fulfilled.'
+            : 'The physical handover could not be confirmed.',
+      });
     }
   });
 
@@ -6945,8 +7066,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
       console.error('[NearGrow Ads] Delivery Team proof review failed:', error);
       res.status(/stock|already been reviewed/i.test(providerMessage) ? 409 : 503).json({
-        message: /No campaign stock/i.test(providerMessage)
-          ? 'No stock is available for this campaign. Issue stock before approving the proof.'
+        message: /unreserved|reserved|stock/i.test(providerMessage)
+          ? 'A reserved WildCard is unavailable. Verify stock and pending proof reservations before retrying.'
           : /already been reviewed/i.test(providerMessage)
             ? 'This proof has already been reviewed.'
             : 'The proof could not be reviewed.',
@@ -6976,7 +7097,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       if (type === 'campaign') {
         const stockQuantity = Number(req.body?.stockQuantity ?? 0);
         if (!['approved', 'rejected'].includes(decision) || reviewNote.length < 3 || reviewNote.length > 500 ||
-          !Number.isInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000) {
+          !Number.isInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > 100) {
           res.status(400).json({ message: 'Enter a valid campaign request decision and stock quantity.' });
           return;
         }
@@ -7131,8 +7252,8 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
       typeof startDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
       typeof endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
       !Number.isInteger(dailyTarget) || dailyTarget < 1 || dailyTarget > 1000 ||
-      !Number.isInteger(coinsPerProof) || coinsPerProof < 1 || coinsPerProof > 1000000 ||
-      !Number.isInteger(initialStock) || initialStock < 0 || initialStock > 1000000 ||
+      coinsPerProof !== 1000 ||
+      initialStock !== 0 ||
       ((mapLatitude === null) !== (mapLongitude === null)) ||
       (mapLatitude !== null && (!Number.isFinite(mapLatitude) || mapLatitude < -90 || mapLatitude > 90 ||
         !Number.isFinite(mapLongitude) || mapLongitude! < -180 || mapLongitude! > 180)) ||
@@ -7144,7 +7265,7 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
         typeof (site as Record<string, unknown>).address !== 'string' ||
         (site as Record<string, unknown>).address!.toString().trim().length < 2 ||
         (site as Record<string, unknown>).address!.toString().trim().length > 240)) {
-      res.status(400).json({ message: 'Enter valid campaign details, target, reward, stock, and at least one shop.' });
+      res.status(400).json({ message: 'Enter valid campaign details, the fixed 1,000 NGA Coin reward, target, and at least one shop. Issue stock separately.' });
       return;
     }
     try {
@@ -7207,9 +7328,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     } catch (error) {
       console.error('[NearGrow Ads] Owner partner proof review failed:', error);
       const providerMessage = error instanceof SupabaseRequestError ? error.providerMessage : '';
-      res.status(providerMessage.includes('No campaign stock is available') ? 409 : 503).json({
-        message: providerMessage.includes('No campaign stock is available')
-          ? 'No stock is available for this campaign. Issue stock before approving the proof.'
+      res.status(/stock|already been reviewed/i.test(providerMessage) ? 409 : 503).json({
+        message: /unreserved|reserved|stock/i.test(providerMessage)
+          ? 'A reserved WildCard is unavailable. Verify stock and pending proof reservations before retrying.'
           : 'The proof could not be reviewed.',
       });
     }
@@ -7259,9 +7380,9 @@ async function createApplication(serverless = false): Promise<{ app: express.Exp
     const reviewNote = typeof req.body?.reviewNote === 'string' ? req.body.reviewNote.trim() : '';
     const stockQuantity = Number(req.body?.stockQuantity ?? 0);
     if (!/^[0-9a-f-]{36}$/i.test(requestId) || !['approved', 'rejected'].includes(decision) ||
-      reviewNote.length > 500 || !Number.isInteger(stockQuantity) ||
-      stockQuantity < 0 || stockQuantity > 1000000) {
-      res.status(400).json({ message: 'Enter a valid request decision, note, and stock quantity.' });
+      reviewNote.length < 3 || reviewNote.length > 500 || !Number.isInteger(stockQuantity) ||
+      stockQuantity < 0 || stockQuantity > 100) {
+      res.status(400).json({ message: 'Enter a valid request decision, a 3-500 character review note, and a stock quantity no greater than 100.' });
       return;
     }
     try {

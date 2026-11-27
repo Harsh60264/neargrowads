@@ -13,7 +13,7 @@ export interface PartnerWorkspaceActivityData {
   }>;
   stockHistory: Array<{
     id: string;
-    assignment_id: string;
+    assignment_id: string | null;
     movement_type: string;
     quantity: number;
     notes: string;
@@ -21,7 +21,7 @@ export interface PartnerWorkspaceActivityData {
   }>;
   requests: Array<{
     id: string;
-    assignment_id: string;
+    assignment_id: string | null;
     request_type: string;
     details: string;
     status: string;
@@ -78,14 +78,18 @@ export function buildPartnerWorkspaceActivity(data: PartnerWorkspaceActivityData
       id: `stock:${movement.id}`,
       createdAt: movement.created_at,
       type: movement.movement_type.replaceAll('_', ' '),
-      details: `${campaignByAssignmentId.get(movement.assignment_id) || 'Campaign'} · ${movement.quantity > 0 ? '+' : ''}${formatNumber(movement.quantity)} WildCards${movement.notes ? ` · ${movement.notes}` : ''}`,
+      details: `${movement.assignment_id
+        ? campaignByAssignmentId.get(movement.assignment_id) || 'Campaign'
+        : 'Partner-wide inventory'} · ${movement.quantity > 0 ? '+' : ''}${formatNumber(movement.quantity)} WildCards${movement.notes ? ` · ${movement.notes}` : ''}`,
       status: 'recorded',
     })),
     ...data.requests.map((request) => ({
       id: `request:${request.id}`,
       createdAt: request.created_at,
       type: request.request_type.replaceAll('_', ' '),
-      details: `${campaignByAssignmentId.get(request.assignment_id) || 'Campaign'} · ${request.details}`,
+      details: `${request.assignment_id
+        ? campaignByAssignmentId.get(request.assignment_id) || 'Campaign'
+        : 'Partner-wide inventory'} · ${request.details}`,
       status: request.status,
     })),
     ...data.damageReports.map((report) => ({

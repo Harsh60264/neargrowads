@@ -37,6 +37,11 @@ interface DeliveryTeamPartner {
   last_login_at: string | null;
   available_coins: number;
   remaining_stock: number;
+  reserved_stock: number;
+  total_received_stock: number;
+  delivered_stock: number;
+  damaged_stock: number;
+  returned_stock: number;
   pending_requests: number;
   last_activity: string | null;
   assignment_id: string | null;
@@ -69,13 +74,18 @@ interface DeliveryTeamPartnerDetail {
   stockSummary: {
     available: number;
     issued: number;
+    restocked: number;
+    totalReceived: number;
     distributed: number;
+    delivered: number;
+    reserved: number;
     damaged: number;
     returned: number;
+    progressPercent: number;
   };
   stockHistory: Array<{
     id: string;
-    assignment_id: string;
+    assignment_id: string | null;
     movement_type: string;
     quantity: number;
     notes: string;
@@ -125,6 +135,15 @@ interface DeliveryTeamQueues {
     campaignName: string;
     requestType: string;
     details: string;
+    createdAt: string;
+  }>;
+  restockRequests: Array<{
+    id: string;
+    partnerName: string;
+    quantity: number | null;
+    status: 'pending' | 'approved';
+    details: string;
+    ownerResponse: string;
     createdAt: string;
   }>;
   damageReports: Array<{
@@ -360,7 +379,8 @@ export function AdminDeliveryTeam({
   const [coinAmount, setCoinAmount] = useState('');
   const [coinReason, setCoinReason] = useState('');
   const [stockAssignmentId, setStockAssignmentId] = useState('');
-  const [stockMovement, setStockMovement] = useState<'issued' | 'returned' | 'adjusted'>('issued');
+  const [stockMovement, setStockMovement] = useState<'issued' | 'restocked' | 'returned' | 'adjusted' | 'damaged'>('issued');
+  const [stockDirection, setStockDirection] = useState<'increase' | 'decrease'>('increase');
   const [stockQuantity, setStockQuantity] = useState('');
   const [stockReason, setStockReason] = useState('');
   const [proofNotes, setProofNotes] = useState<Record<string, string>>({});
@@ -375,7 +395,7 @@ export function AdminDeliveryTeam({
     startDate: '',
     endDate: '',
     dailyTarget: '',
-    coinsPerProof: '',
+    coinsPerProof: '1000',
     initialStock: '0',
     sites: [{ name: '', address: '' }],
   });
@@ -441,7 +461,7 @@ export function AdminDeliveryTeam({
   }, [refresh, refreshRef]);
 
   useEffect(() => {
-    if (tab !== 'campaigns' || !canCreate) return;
+    if (tab !== 'campaigns') return;
     let active = true;
     const params = new URLSearchParams({
       search: campaignPartnerSearch,
@@ -457,22 +477,18 @@ export function AdminDeliveryTeam({
         if (active) setError(requestError instanceof Error ? requestError.message : 'Active delivery partners could not be loaded.');
       });
     return () => { active = false; };
-  }, [campaignPartnerSearch, canCreate, tab]);
+  }, [campaignPartnerSearch, tab]);
 
   useEffect(() => {
     setPage(1);
   }, [search, statusFilter]);
-
-  useEffect(() => {
-    if (!selectedPartner) return;
-    setStockAssignmentId(selectedPartner.assignments[0]?.id || '');
-  }, [selectedPartner]);
 
   const openPartner = useCallback(async (partner: DeliveryTeamPartner) => {
     setError('');
     setNotice('');
     setCoinAmount('');
     setCoinReason('');
+    setStockAssignmentId('');
     setStockQuantity('');
     setStockReason('');
     try {
@@ -568,22 +584,36 @@ export function AdminDeliveryTeam({
 
   const manageStock = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedPartner || !stockAssignmentId) {
-      setError('Choose an active campaign assignment before recording stock.');
+    if (!selectedPartner) {
+      setError('Select a delivery partner before recording stock.');
       return;
     }
     const inputQuantity = Number(stockQuantity);
     if (!Number.isSafeInteger(inputQuantity) || inputQuantity === 0 ||
       Math.abs(inputQuantity) > 1_000_000 ||
-      (stockMovement !== 'adjusted' && inputQuantity < 1) || !stockReason.trim()) {
+      (['issued', 'restocked'].includes(stockMovement) && inputQuantity > 100) ||
+      inputQuantity < 1 || !stockReason.trim()) {
       setError('Enter a valid whole-card quantity and a reason.');
       return;
     }
-    const quantity = stockMovement === 'returned' ? -inputQuantity : inputQuantity;
-    if (!window.confirm(`Record ${stockMovement} of ${formatNumber(Math.abs(quantity))} physical WildCards for this campaign?${stockMovement === 'adjusted' ? `\nBalance change: ${quantity > 0 ? '+' : ''}${formatNumber(quantity)}` : ''}\nReason: ${stockReason.trim()}`)) return;
+    const quantity = ['returned', 'damaged'].includes(stockMovement) ||
+      (stockMovement === 'adjusted' && stockDirection === 'decrease')
+      ? -inputQuantity
+      : inputQuantity;
+    if (quantity < 0 && Math.abs(quantity) > selectedPartner.stockSummary.available) {
+      setError('A decrease cannot exceed the partner’s unreserved available stock.');
+      return;
+    }
+    const nextBalance = selectedPartner.stockSummary.available + quantity;
+    const movementLabel = stockMovement === 'adjusted'
+      ? `${stockDirection} stock adjustment`
+      : stockMovement === 'issued' ? 'issue new stock'
+        : stockMovement === 'restocked' ? 'restock cards'
+          : stockMovement === 'returned' ? 'record returned cards' : 'record damaged or lost cards';
+    if (!window.confirm(`Confirm ${movementLabel} of ${formatNumber(Math.abs(quantity))} WildCards?\n\nAvailable now: ${formatNumber(selectedPartner.stockSummary.available)}\nAvailable after this transaction: ${formatNumber(nextBalance)}\n${stockAssignmentId ? 'Linked campaign assignment: selected' : 'Campaign assignment: none'}\nReason: ${stockReason.trim()}`)) return;
     const fingerprint = JSON.stringify({
       partnerProfileId: selectedPartner.partner.id,
-      assignmentId: stockAssignmentId,
+      assignmentId: stockAssignmentId || null,
       movementType: stockMovement,
       quantity,
       notes: stockReason.trim(),
@@ -593,7 +623,7 @@ export function AdminDeliveryTeam({
     }
     const saved = await runAction('/api/admin/delivery-team/stock', {
       partnerProfileId: selectedPartner.partner.id,
-      assignmentId: stockAssignmentId,
+      assignmentId: stockAssignmentId || null,
       movementType: stockMovement,
       quantity,
       notes: stockReason.trim(),
@@ -604,7 +634,7 @@ export function AdminDeliveryTeam({
       setStockQuantity('');
       setStockReason('');
     }
-  }, [runAction, selectedPartner, stockAssignmentId, stockMovement, stockQuantity, stockReason]);
+  }, [runAction, selectedPartner, stockAssignmentId, stockMovement, stockQuantity, stockReason, stockDirection]);
 
   const reviewProof = useCallback(async (proofId: string, decision: 'approved' | 'rejected' | 'needs_correction') => {
     const note = proofNotes[proofId]?.trim() || '';
@@ -643,6 +673,20 @@ export function AdminDeliveryTeam({
     }, `${type === 'withdrawal' && decision === 'settled' ? 'Withdrawal payout recorded' : 'Request reviewed'}.`);
   }, [confirmedSettlements, requestNotes, runAction, withdrawalReference]);
 
+  const handoverRestock = useCallback(async (requestId: string) => {
+    const reviewNote = requestNotes[requestId]?.trim() || '';
+    if (reviewNote.length < 3 || reviewNote.length > 500) {
+      setError('Enter a handover confirmation note between 3 and 500 characters.');
+      return;
+    }
+    if (!window.confirm('Confirm that the approved physical WildCard quantity has been handed over to the partner?')) return;
+    await runAction(
+      `/api/admin/delivery-team/restock-requests/${encodeURIComponent(requestId)}/handover`,
+      { reviewNote },
+      'Physical WildCard handover confirmed and stock recorded.',
+    );
+  }, [requestNotes, runAction]);
+
   const createCampaign = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const sites = campaignForm.sites.map((site) => ({
@@ -653,10 +697,10 @@ export function AdminDeliveryTeam({
     const dailyTarget = Number(campaignForm.dailyTarget);
     const coinsPerProof = Number(campaignForm.coinsPerProof);
     if (!campaignForm.partnerProfileId || sites.some((site) => !site.name || !site.address) ||
-      !Number.isSafeInteger(initialStock) || initialStock < 0 ||
+      initialStock !== 0 ||
       !Number.isSafeInteger(dailyTarget) || dailyTarget < 1 ||
-      !Number.isSafeInteger(coinsPerProof) || coinsPerProof < 1) {
-      setError('Complete the campaign, assigned partner, reward, target, stock and every shop location.');
+      coinsPerProof !== 1000) {
+      setError('Complete the campaign, partner, fixed 1,000 NGA Coin reward, target and every shop location. Issue physical stock separately.');
       return;
     }
     if (!window.confirm(`Create and assign "${campaignForm.name.trim()}" to the selected partner? No other partners will be assigned automatically.`)) return;
@@ -678,7 +722,7 @@ export function AdminDeliveryTeam({
         description: '',
         area: '',
         dailyTarget: '',
-        coinsPerProof: '',
+        coinsPerProof: '1000',
         initialStock: '0',
         sites: [{ name: '', address: '' }],
       }));
@@ -872,25 +916,48 @@ export function AdminDeliveryTeam({
               <div className="dt-quick-section-heading"><h4 id="dt-stock-title"><PackageCheck size={16} /> Physical WildCard stock</h4></div>
               <div className="dt-stock-summary">
                 <span>Available stock</span><strong>{formatNumber(selectedPartner.stockSummary.available)}</strong>
-                <small>Issued {formatNumber(selectedPartner.stockSummary.issued)} · Distributed {formatNumber(selectedPartner.stockSummary.distributed)}</small>
+                <small>Received {formatNumber(selectedPartner.stockSummary.totalReceived)} · Reserved {formatNumber(selectedPartner.stockSummary.reserved)}</small>
               </div>
-              {canEdit && selectedPartner.assignments.length > 0 ? <form className="dt-stock-form" onSubmit={(event) => void manageStock(event)}>
-                <label className="dt-field"><span>Campaign assignment</span>
-                  <select required value={stockAssignmentId} onChange={(event) => setStockAssignmentId(event.target.value)}>
-                    <option value="">Select campaign</option>
+              <div className="dt-stock-metrics">
+                <span>Delivered<strong>{formatNumber(selectedPartner.stockSummary.delivered)}</strong></span>
+                <span>Damaged / lost<strong>{formatNumber(selectedPartner.stockSummary.damaged)}</strong></span>
+                <span>Returned<strong>{formatNumber(selectedPartner.stockSummary.returned)}</strong></span>
+              </div>
+              <div className="dt-stock-progress" role="progressbar" aria-label="Partner WildCard delivery progress"
+                aria-valuenow={selectedPartner.stockSummary.progressPercent} aria-valuemin={0} aria-valuemax={100}>
+                <span style={{ width: `${selectedPartner.stockSummary.progressPercent}%` }} />
+              </div>
+              {canEdit ? <form className="dt-stock-form" onSubmit={(event) => void manageStock(event)}>
+                <label className="dt-field"><span>Campaign assignment (optional)</span>
+                  <select value={stockAssignmentId} onChange={(event) => setStockAssignmentId(event.target.value)}>
+                    <option value="">Partner-wide stock</option>
                     {selectedPartner.assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.campaign_name} · {assignment.campaign_status}</option>)}
                   </select>
                 </label>
                 <div className="dt-two-fields">
-                  <label className="dt-field"><span>Movement</span><select value={stockMovement} onChange={(event) => setStockMovement(event.target.value as typeof stockMovement)}><option value="issued">Issue stock</option><option value="returned">Record return</option><option value="adjusted">Adjust stock</option></select></label>
-                  <label className="dt-field"><span>Quantity</span><input type="number" required min={stockMovement === 'adjusted' ? '-1000000' : '1'} max="1000000" step="1" value={stockQuantity} onChange={(event) => setStockQuantity(event.target.value)} /></label>
+                  <label className="dt-field"><span>Stock action</span><select value={stockMovement} onChange={(event) => setStockMovement(event.target.value as typeof stockMovement)}>
+                    <option value="issued">Issue new stock</option><option value="restocked">Restock cards</option>
+                    <option value="adjusted">Increase or decrease stock</option><option value="returned">Record returned cards</option>
+                    <option value="damaged">Mark damaged or lost</option>
+                  </select></label>
+                  <label className="dt-field"><span>Quantity {['issued', 'restocked'].includes(stockMovement) ? '(max 100)' : ''}</span>
+                    <input type="number" required min="1" max={['issued', 'restocked'].includes(stockMovement) ? '100' : '1000000'}
+                      step="1" value={stockQuantity} onChange={(event) => setStockQuantity(event.target.value)} />
+                  </label>
+                </div>
+                {stockMovement === 'adjusted' && <label className="dt-field"><span>Adjustment direction</span>
+                  <select value={stockDirection} onChange={(event) => setStockDirection(event.target.value as typeof stockDirection)}>
+                    <option value="increase">Increase stock</option><option value="decrease">Decrease stock</option>
+                  </select>
+                </label>}
+                <div className="dt-stock-quick-quantities" aria-label="Quick stock quantity">
+                  {[10, 25, 50, 100].map((amount) => <button key={amount} type="button" disabled={actionBusy}
+                    onClick={() => setStockQuantity(String(amount))}>{amount}</button>)}
                 </div>
                 <label className="dt-field"><span>Reason (required)</span><input required minLength={3} maxLength={500} value={stockReason} onChange={(event) => setStockReason(event.target.value)} /></label>
-                <p className="dt-stock-safety">Returns reduce partner-held stock. Negative stock balances are rejected.</p>
-                <button className="dt-button dt-button--primary dt-stock-submit" type="submit" disabled={actionBusy || !stockAssignmentId}><Boxes size={14} /> Record stock movement</button>
-              </form> : canEdit
-                ? <p className="dt-empty dt-stock-empty">No campaign assignment is available for this partner.</p>
-                : <p className="dt-view-only"><ShieldCheck size={15} /> Your role has view-only access to stock management.</p>}
+                <p className="dt-stock-safety">Issue and restock transactions are capped at 100 cards. Decreases cannot consume cards reserved for pending proofs.</p>
+                <button className="dt-button dt-button--primary dt-stock-submit" type="submit" disabled={actionBusy}><Boxes size={14} /> Record stock transaction</button>
+              </form> : <p className="dt-view-only"><ShieldCheck size={15} /> Your role has view-only access to stock management.</p>}
             </section>
 
             <details className="dt-history-details">
@@ -902,7 +969,7 @@ export function AdminDeliveryTeam({
             <details className="dt-history-details">
               <summary>Stock transaction history <ChevronRight size={14} /></summary>
               {selectedPartner.stockHistory.length
-                ? <div className="dt-history-list">{selectedPartner.stockHistory.map((entry) => <article key={entry.id}><div><strong>{entry.movement_type.replace('_', ' ')} · {entry.campaign_name || 'Campaign'}</strong><span>{entry.notes} · {formatDate(entry.created_at)}</span>{entry.previous_balance !== null && entry.previous_balance !== undefined && <small>Stock {entry.previous_balance} → {entry.resulting_balance}</small>}</div><b className={entry.quantity < 0 ? 'is-negative' : ''}>{entry.quantity > 0 ? '+' : ''}{formatNumber(entry.quantity)}</b></article>)}</div>
+                ? <div className="dt-history-list">{selectedPartner.stockHistory.map((entry) => <article key={entry.id}><div><strong>{entry.movement_type.replace('_', ' ')} · {entry.campaign_name || 'Partner-wide inventory'}</strong><span>{entry.notes} · {formatDate(entry.created_at)}</span>{entry.previous_balance !== null && entry.previous_balance !== undefined && <small>Stock {entry.previous_balance} → {entry.resulting_balance}</small>}</div><b className={entry.quantity < 0 ? 'is-negative' : ''}>{entry.quantity > 0 ? '+' : ''}{formatNumber(entry.quantity)}</b></article>)}</div>
                 : <p className="dt-empty">No stock transactions recorded.</p>}
             </details>
           </> : <div className="dt-quick-empty">
@@ -950,25 +1017,45 @@ export function AdminDeliveryTeam({
             </div>
           </article>) : <p className="dt-empty">No proofs are awaiting review.</p>}
         </div>
+        <div className="dt-queue-section"><h4>WildCard restock requests <span>{queues.restockRequests.length}</span></h4>
+          {queues.restockRequests.length ? queues.restockRequests.map((item) => <article className="dt-request-row" key={item.id}>
+            <div><strong>{item.partnerName} · {item.quantity === null ? 'Quantity required' : `${formatNumber(item.quantity)} cards requested`}</strong>
+              <p>{item.details}</p><time>{formatDate(item.createdAt)}</time>
+              {item.ownerResponse && <p>Owner response: {item.ownerResponse}</p>}
+              <span className={`dt-status dt-status--${item.status}`}>{item.status}</span>
+              <label className="dt-field"><span>{item.status === 'approved' ? 'Physical handover confirmation' : 'Review reason'}</span>
+                <input required minLength={3} maxLength={500} value={requestNotes[item.id] || ''}
+                  onChange={(event) => setRequestNotes((current) => ({ ...current, [item.id]: event.target.value }))} />
+              </label>
+            </div>
+            {canEdit && <div className="dt-actions">
+              {item.status === 'pending' ? <>
+                <button type="button" className="dt-button dt-button--primary" disabled={actionBusy} onClick={() => {
+                  let quantity = item.quantity;
+                  if (quantity === null) {
+                    const input = window.prompt('Enter the approved restock quantity (1-100 cards).');
+                    if (input === null) return;
+                    quantity = Number(input);
+                  }
+                  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) {
+                    setError('Restock approval quantity must be a whole number between 1 and 100.');
+                    return;
+                  }
+                  void reviewRequest('campaign', item.id, 'approved', { stockQuantity: quantity });
+                }}>Approve request</button>
+                <button type="button" className="dt-button dt-button--danger" disabled={actionBusy}
+                  onClick={() => void reviewRequest('campaign', item.id, 'rejected')}>Reject</button>
+              </> : <button type="button" className="dt-button dt-button--primary" disabled={actionBusy}
+                onClick={() => void handoverRestock(item.id)}>Confirm Handover</button>}
+            </div>}
+          </article>) : <p className="dt-empty">No restock requests are awaiting approval or handover.</p>}
+        </div>
         <div className="dt-queue-section"><h4>Campaign requests <span>{queues.campaignRequests.length}</span></h4>
           {queues.campaignRequests.length ? queues.campaignRequests.map((item) => <article className="dt-request-row" key={item.id}>
             <div><strong>{item.partnerName} · {item.campaignName}</strong><p>{item.requestType.replaceAll('_', ' ')} — {item.details}</p><time>{formatDate(item.createdAt)}</time>
               <label className="dt-field"><span>Review reason</span><input required minLength={3} maxLength={500} value={requestNotes[item.id] || ''} onChange={(event) => setRequestNotes((current) => ({ ...current, [item.id]: event.target.value }))} /></label>
             </div>
-            {canEdit && <div className="dt-actions"><button type="button" className="dt-button dt-button--primary" disabled={actionBusy} onClick={() => {
-              if (item.requestType !== 'additional_stock') {
-                void reviewRequest('campaign', item.id, 'approved');
-                return;
-              }
-              const stockInput = window.prompt('Enter the exact number of physical WildCards to issue for this approved request.');
-              if (stockInput === null) return;
-              const quantity = Number(stockInput);
-              if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1_000_000) {
-                if (!Number.isNaN(quantity)) setError('Enter a whole-card quantity between 1 and 1,000,000.');
-                return;
-              }
-              void reviewRequest('campaign', item.id, 'approved', { stockQuantity: quantity });
-            }} title={item.requestType === 'additional_stock' ? 'Approve and issue the exact stock quantity.' : 'Approve this campaign request.'}>{item.requestType === 'additional_stock' ? 'Approve & issue' : 'Approve'}</button><button type="button" className="dt-button dt-button--danger" disabled={actionBusy} onClick={() => void reviewRequest('campaign', item.id, 'rejected')}>Reject</button></div>}
+            {canEdit && <div className="dt-actions"><button type="button" className="dt-button dt-button--primary" disabled={actionBusy} onClick={() => void reviewRequest('campaign', item.id, 'approved')}>Approve</button><button type="button" className="dt-button dt-button--danger" disabled={actionBusy} onClick={() => void reviewRequest('campaign', item.id, 'rejected')}>Reject</button></div>}
           </article>) : <p className="dt-empty">No campaign requests are awaiting review.</p>}
         </div>
         <div className="dt-queue-section"><h4>Damage reports <span>{queues.damageReports.length}</span></h4>
@@ -998,11 +1085,29 @@ export function AdminDeliveryTeam({
         <div className="dt-campaign-list">{campaigns.map((campaign) => <article className="dt-campaign-card" key={campaign.id}>
           <div className="dt-campaign-card-top"><span className="dt-campaign-icon"><BriefcaseBusiness size={17} /></span><span className={`dt-status dt-status--${campaign.status}`}>{campaign.status}</span></div>
           <h4>{campaign.name}</h4><p>{campaign.area}</p>
-          <dl><div><dt>Daily target</dt><dd>{formatNumber(campaign.daily_target)}</dd></div><div><dt>Reward per proof</dt><dd>{formatNumber(campaign.coins_per_proof)} NGA</dd></div><div><dt>Assigned partners</dt><dd>{formatNumber(campaign.assigned_partners)}</dd></div><div><dt>Campaign period</dt><dd>{campaign.start_date} – {campaign.end_date}</dd></div></dl>
+          <dl><div><dt>Daily target</dt><dd>{formatNumber(campaign.daily_target)}</dd></div><div><dt>Reward per proof</dt><dd>1,000 NGA</dd></div><div><dt>Assigned partners</dt><dd>{formatNumber(campaign.assigned_partners)}</dd></div><div><dt>Campaign period</dt><dd>{campaign.start_date} – {campaign.end_date}</dd></div></dl>
           {canEdit && campaign.status !== 'completed' && <button type="button" className="dt-button dt-button--quiet" disabled={actionBusy} onClick={() => void runAction(`/api/admin/delivery-team/campaigns/${encodeURIComponent(campaign.id)}/status`, { status: campaign.status === 'active' ? 'paused' : 'active' }, `Campaign ${campaign.status === 'active' ? 'paused' : 'resumed'}.`)}>{campaign.status === 'active' ? 'Pause campaign' : 'Resume campaign'}</button>}
           {canEdit && campaign.status !== 'completed' && <button type="button" className="dt-button dt-button--quiet" disabled={actionBusy} onClick={() => void runAction(`/api/admin/delivery-team/campaigns/${encodeURIComponent(campaign.id)}/status`, { status: 'completed' }, 'Campaign marked complete.')}>Complete</button>}
         </article>)}
         {!campaigns.length && <p className="dt-empty">No WildCard campaigns have been created.</p>}</div>
+        <div className="dt-partner-inventory">
+          <div className="dt-panel-heading"><div><h4>Partner stock visibility</h4><p>Current available and reserved stock across active partners.</p></div></div>
+          <div className="dt-table-wrap">
+            <table className="dt-table">
+              <thead><tr><th>Partner</th><th>Total received</th><th>Available</th><th>Reserved</th><th>Delivered</th><th>Damaged / returned</th></tr></thead>
+              <tbody>{campaignPartners.map((partner) => <tr key={partner.id}>
+                <td><button type="button" className="dt-partner-select" onClick={() => void openPartner(partner)}>{partner.full_name}</button></td>
+                <td>{formatNumber(partner.total_received_stock)}</td>
+                <td><strong>{formatNumber(partner.remaining_stock)}</strong></td>
+                <td>{formatNumber(partner.reserved_stock)}</td>
+                <td>{formatNumber(partner.delivered_stock)}</td>
+                <td>{formatNumber(partner.damaged_stock + partner.returned_stock)}</td>
+              </tr>)}
+              {!campaignPartners.length && <tr><td colSpan={6}><p className="dt-empty">No active delivery partners are available.</p></td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
       {canCreate && <section className="dt-panel">
         <div className="dt-panel-heading"><div><h3>Create & assign campaign</h3><p>Creates one campaign and explicitly assigns one existing partner.</p></div></div>
@@ -1013,8 +1118,8 @@ export function AdminDeliveryTeam({
           <label className="dt-field"><span>Description</span><textarea rows={2} maxLength={1000} value={campaignForm.description} onChange={(event) => setCampaignForm((current) => ({ ...current, description: event.target.value }))} /></label>
           <label className="dt-field"><span>Assigned area</span><input required minLength={2} maxLength={160} value={campaignForm.area} onChange={(event) => setCampaignForm((current) => ({ ...current, area: event.target.value }))} /></label>
           <div className="dt-two-fields"><label className="dt-field"><span>Start date</span><input type="date" required value={campaignForm.startDate} onChange={(event) => setCampaignForm((current) => ({ ...current, startDate: event.target.value }))} /></label><label className="dt-field"><span>End date</span><input type="date" required value={campaignForm.endDate} onChange={(event) => setCampaignForm((current) => ({ ...current, endDate: event.target.value }))} /></label></div>
-          <div className="dt-two-fields"><label className="dt-field"><span>Daily delivery target</span><input type="number" min="1" max="1000" required value={campaignForm.dailyTarget} onChange={(event) => setCampaignForm((current) => ({ ...current, dailyTarget: event.target.value }))} /></label><label className="dt-field"><span>NGA Coins per approved proof</span><input type="number" min="1" max="1000000" required value={campaignForm.coinsPerProof} onChange={(event) => setCampaignForm((current) => ({ ...current, coinsPerProof: event.target.value }))} /></label></div>
-          <label className="dt-field"><span>Initial physical stock</span><input type="number" min="0" max="1000000" required value={campaignForm.initialStock} onChange={(event) => setCampaignForm((current) => ({ ...current, initialStock: event.target.value }))} /></label>
+          <div className="dt-two-fields"><label className="dt-field"><span>Daily delivery target</span><input type="number" min="1" max="1000" required value={campaignForm.dailyTarget} onChange={(event) => setCampaignForm((current) => ({ ...current, dailyTarget: event.target.value }))} /></label><label className="dt-field"><span>Reward per approved delivery</span><input type="number" min="1000" max="1000" required readOnly value="1000" /></label></div>
+          <p className="dt-stock-safety">Physical stock is managed separately and can be issued without an active campaign.</p>
           <div className="dt-field"><span>Shop locations</span>{campaignForm.sites.map((site, index) => <div className="dt-site-fields" key={index}><input required minLength={2} maxLength={120} aria-label={`Shop ${index + 1} name`} placeholder="Shop name" value={site.name} onChange={(event) => setCampaignForm((current) => ({ ...current, sites: current.sites.map((entry, entryIndex) => entryIndex === index ? { ...entry, name: event.target.value } : entry) }))} /><input required minLength={2} maxLength={240} aria-label={`Shop ${index + 1} address`} placeholder="Shop address" value={site.address} onChange={(event) => setCampaignForm((current) => ({ ...current, sites: current.sites.map((entry, entryIndex) => entryIndex === index ? { ...entry, address: event.target.value } : entry) }))} />{campaignForm.sites.length > 1 && <button type="button" className="dt-icon-button" aria-label={`Remove shop ${index + 1}`} onClick={() => setCampaignForm((current) => ({ ...current, sites: current.sites.filter((_, entryIndex) => entryIndex !== index) }))}><X size={15} /></button>}</div>)}
             <button type="button" className="dt-link-button" disabled={campaignForm.sites.length >= 100} onClick={() => setCampaignForm((current) => ({ ...current, sites: [...current.sites, { name: '', address: '' }] }))}>Add shop location</button>
           </div>
